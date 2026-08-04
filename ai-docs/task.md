@@ -2,7 +2,7 @@
 
 > 状态：V1 初始拆分  
 > 更新日期：2026-08-05  
-> 当前仓库状态：DESK-01 验收通过（2026-08-05）并已提交，转 `DONE`；BE-01 窄范围复审已通过且历史问题全部关闭，待提交后关闭；后续桌面任务以现有 `electron/` workspace 为基线
+> 当前仓库状态：DESK-01 验收通过（2026-08-05）并已提交，转 `DONE`；BE-01 窄范围复审已通过、历史问题全部关闭，精确文件集已提交并合并入 `master`（`origin/master` `03419c1`），转 `DONE`；后续桌面任务以现有 `electron/` workspace 为基线
 
 ## 1. 状态与执行规则
 
@@ -46,7 +46,7 @@ M0 文档基线
 | DOC-01 | 建立 ai-docs 架构基线与任务拆分 | Architecture | - | DONE | 首席架构师 |
 | GOV-01 | 建立根级检查命令与 CI 质量门禁 | Cross | FE-01, BE-01 | TODO | - |
 | DESK-01 | electron-vite 桌面骨架基线（替代原 electron-egg V5）并建立工程目录 | Desktop | DOC-01 | DONE | 桌面平台工程师 |
-| BE-01 | 初始化 FastAPI/uv 工程 | Backend | DOC-01 | IN_REVIEW | Python 后端基础设施工程师 Agent |
+| BE-01 | 初始化 FastAPI/uv 工程 | Backend | DOC-01 | DONE | Python 后端基础设施工程师 Agent |
 | FE-01 | 初始化 Vue3/TS 前端工程与基础布局 | Frontend | DESK-01 | TODO | - |
 | DESK-02 | sidecar 动态端口、启停和健康检查 | Desktop | DESK-01, BE-01 | TODO | - |
 | DESK-03 | 安全 preload、运行时桥接与 safeStorage | Desktop | DESK-01 | TODO | - |
@@ -113,12 +113,13 @@ M0 文档基线
 - 评审重点：只引入桌面骨架；electron-vite 只负责构建，Electron Main/Preload 不作为业务后端。
 - 审查：窄范围复审当前 P0=0、P1=1、P2=1（镜像策略按用户指示未复核）、P3=0。Node.js 22.12+ 基线已落实；`will-navigate` 实现的 12 个安全用例均通过，但缺少持久化测试文件和 `test` 脚本，现有 lint/typecheck/build 无法阻止安全策略回归。完整报告见 `docs/electron/代码审查.md`。P1 关闭前不得转 `DONE`，FE-01、DESK-03 仍不得按依赖开工。
 
-#### BE-01 初始化 FastAPI/uv 工程
+#### BE-01 初始化 FastAPI/uv 工程 — DONE
 
 - 独立任务说明：`ai-docs/tasks/BE-01.md`。
 - 交付物：`pyproject.toml`、`uv.lock`、应用入口、测试骨架、Ruff/mypy/pytest 配置。
 - 验收：开发命令启动单 worker，最小测试和质量检查通过；依赖锁定。
-- 审查：2026-08-04 首轮结论 `Approved`；2026-08-05 窄范围复审确认 P2-01、P2-02、P3-01 均已关闭，当前未关闭问题 P0/P1/P2/P3 均为 0。冻结安装、Ruff、mypy、pytest 和真实启动探活均复验通过，详见 `docs/backend/代码审查.md`。9 个后端文件及对应任务/审查文档仍未提交，按 DoD 保持 `IN_REVIEW`，提交经复审的精确文件集后方可改为 `DONE`。
+- 审查：2026-08-04 首轮结论 `Approved`；2026-08-05 窄范围复审确认 P2-01、P2-02、P3-01 均已关闭，当前未关闭问题 P0/P1/P2/P3 均为 0。冻结安装、Ruff、mypy、pytest 和真实启动探活均复验通过，详见 `docs/backend/代码审查.md`。
+- 提交与合并：9 个 backend/** 文件及本任务执行记录已提交至 `chore/BE-01-fastapi-baseline`（commit `bf19d75`），fast-forward 合并入 `master` 并推送至 `origin/master`（`03419c1`）；`chore/BE-01-fastapi-baseline` 已被 `master` 完全包含，未额外开 GitHub PR。
 
 #### FE-01 初始化前端工程
 
@@ -358,7 +359,7 @@ DESK-01 已按 electron-vite 实现，不重做。后续顺序：
 | Task | Author | Reviewer | 状态 | P0/P1 | 结论/链接 |
 |---|---|---|---|---|---|
 | DESK-01 | 桌面平台工程师 Agent | 首席架构师/技术负责人 | APPROVED（验收通过） | 0/0 | 窄范围复审：导航实现通过 12 用例，但缺少持久化安全回归测试；镜像 P2 按用户指示未复核；2026-08-05 验收通过，转 DONE；`docs/electron/代码审查.md` |
-| BE-01 | Python 后端基础设施工程师 Agent | 首席架构师/技术负责人 | APPROVED（复审通过，待提交） | 0/0 | `Approved`；历史 2 P2、1 P3 均已关闭；当前未关闭问题为 0；`docs/backend/代码审查.md` |
+| BE-01 | Python 后端基础设施工程师 Agent | 首席架构师/技术负责人 | APPROVED（已合并入 master） | 0/0 | `Approved`；历史 2 P2、1 P3 均已关闭；当前未关闭问题为 0；已提交并合并（`bf19d75` -> `master` `03419c1`）；`docs/backend/代码审查.md` |
 
 审查者不得与作者为同一 Agent。若团队工具限制无法满足，必须由首席架构师执行最终复审。
 
@@ -367,4 +368,4 @@ DESK-01 已按 electron-vite 实现，不重做。后续顺序：
 | Task | 文件 | 主责角色 | 当前状态 |
 |---|---|---|---|
 | DESK-01 | `ai-docs/tasks/DESK-01.md` | 桌面平台工程师 Agent | DONE |
-| BE-01 | `ai-docs/tasks/BE-01.md` | Python 后端基础设施工程师 Agent | IN_REVIEW |
+| BE-01 | `ai-docs/tasks/BE-01.md` | Python 后端基础设施工程师 Agent | DONE |
