@@ -163,7 +163,7 @@ Start date: 2026-08-04
 
 Upstream tag/commit: electron-vite 5.0.0（electron-vite/electron-vite）；electron 39.8.10（electron/electron，固定精确版本，关闭 R-05 漂移风险）；electron-builder 26.15.3；Vue 3.5.40。**说明：按任务方最新决策，桌面骨架使用 electron-vite（已替换 electron-egg V5），本任务未引入任何 electron-egg 相关内容。**
 
-Branch/Commit: master（尚未提交；待审查通过后由审查方/集成负责人执行提交，建议分支 chore/DESK-01-electron-baseline）
+Branch/Commit: master `bcde662`（`feat(desk): electron-vite 桌面骨架基线、安全加固与可复现锁文件 [DESK-01]`）；关联提交 `1c3eae7`（docs 批次：ai-docs 基线/方案设计/审查记录）；BE-01 提交 `bf19d75` 不属本任务
 
 Changed files:
 - 新增：根 package.json（npm workspaces）、根 .npmrc（Electron 二进制镜像）、根 .gitignore、根 package-lock.json（npm ci 复现）
