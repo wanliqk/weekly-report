@@ -1,0 +1,24 @@
+{
+  "name": "weekly-report",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Weekly Report: Electron shell + Vue renderer + FastAPI sidecar (root workspace)",
+  "workspaces": [
+    "electron"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace weekly-report-electron",
+    "start": "npm run start --workspace weekly-report-electron",
+    "lint": "npm run lint --workspace weekly-report-electron",
+    "format": "npm run format --workspace weekly-report-electron",
+    "typecheck": "npm run typecheck --workspace weekly-report-electron",
+    "test": "npm run test --workspace weekly-report-electron",
+    "build": "npm run build --workspace weekly-report-electron",
+    "build:unpack": "npm run build:unpack --workspace weekly-report-electron",
+    "build:win": "npm run build:win --workspace weekly-report-electron"
+  },
+  "engines": {
+    "node": ">=22.12.0",
+    "npm": ">=10"
+  }
+}

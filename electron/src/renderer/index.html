@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Weekly Report</title>
+    <!-- 严格 CSP（架构 §5）：生产构建只加载本地资源，connect-src 仅 'self'。
+         开发态所需的 ws://localhost:* / http://localhost:*（HMR）由
+         electron.vite.config.ts 的 cspPlugin 在 dev server 时替换注入，
+         不会进入生产构建产物。
+         DESK-02 接入 FastAPI sidecar 回环 API 时，再按需扩展 connect-src。 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+  </head>
+
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

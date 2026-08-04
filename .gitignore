@@ -1,0 +1,45 @@
+# ---- Node / npm ----
+node_modules/
+out/
+dist/
+release/
+*.tsbuildinfo
+.eslintcache
+*.log
+
+# ---- 运行期数据（开发态，仅本地） ----
+.local-data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---- 密钥与本地配置 ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ---- Python 产物（backend 由 BE-01 负责，此处为根级兜底） ----
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- OS / 编辑器 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
