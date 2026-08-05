@@ -46,11 +46,11 @@
 - 根目录是 npm workspace，包管理器基准为 npm 10，`electron/` 是工作区成员。
 - Electron 39、electron-vite 5、Vue 3、TypeScript、Vue Router、Pinia、Element Plus、Axios 和 Vitest 已配置。
 - Electron 已实现单实例、安全窗口选项、sidecar 生命周期管理（动态端口、随机 `runtime_secret`、健康检查、退出清理）；preload 暴露受限的 `runtimeBridge.{sidecar,api,token}`，Token 仅由 Main 通过 `safeStorage` 加密持久化，无明文回退。
-- renderer 在 sidecar 未就绪时展示 `StartupView`；就绪后恢复并校验安全 Token，按初始化/登录/角色状态进入对应路由；已接入初始化、登录、应用布局和 admin 用户管理页面，日报/周报等业务页面仍待后续阶段。
+- renderer 在 sidecar 未就绪时展示 `StartupView`；就绪后恢复并校验安全 Token，按初始化/登录/角色状态进入对应路由；已接入初始化、登录、应用布局、admin 用户管理、模板管理和日报工作台/动态表单页面。
 - FastAPI/uv/Python 3.12 项目已建立，绑定配置只允许 `127.0.0.1`，Uvicorn 固定单 worker；`RuntimeSecretMiddleware`、统一异常处理、达标 `/health` 均已实现。
 - SQLAlchemy 异步 Engine/Session、SQLite PRAGMA、8 张业务表 ORM、Alembic 初始迁移、迁移前备份+轮转均已实现（阶段 3）。
 - 阶段 4 后端已实现首次初始化、24h JWT、运行时用户状态与 `token_version` 双校验、登录/当前用户/改密/退出，以及 admin 用户查询/创建/更新/重置；创建用户会原子建立设置与默认模板，末位有效管理员受条件更新保护。
-- 阶段 5 已开始；模板发布、设置和日报仍处于实现中，周报、导出、手动备份和发布产物（PyInstaller/安装包）尚未实现。
+- 阶段 5 模板发布、个人设置/能力 API、日报快照与状态机及对应 Vue 页面已完成实现、自测、质量门禁和主 Agent 自审，当前统一为 `REVIEW`；周报、导出、设置/能力占位 UI、手动备份和发布产物（PyInstaller/安装包）尚未实现。
 - `build/sidecar/` 当前只是发布产物占位目录。
 
 “依赖已列入清单”不等于对应业务已完成；“技术方案已描述”也不等于已经落地。
@@ -58,8 +58,8 @@
 ## 5. 当前阶段与下一步
 
 - 已完成阶段：工程基线（`3a9fdbc`）、Desktop Bootstrap（`7386cae`）、数据基础与 API Foundation（`8480515`）、认证与用户管理（`1a50e75`）。
-- 当前阶段：阶段 5 模板、设置与日报闭环，进行中——`TEMPLATE-01`、`SETTING-01` 为 `IN_PROGRESS`。
-- 下一步：按模板/设置 → 日报后端 → 模板/日报前端 → QA-05 的依赖顺序推进。
+- 当前阶段：阶段 5 模板、设置与日报闭环，七项任务均为 `REVIEW`。
+- 下一步：阶段 5 本地实现提交已按用户明确指令创建；由独立 Reviewer 复核并关闭问题后再更新为 `DONE`，不提前进入阶段 6，也不推送远端。
 - 阶段 5 完成前，不得把周报、导出或发布能力标为已完成。
 
 具体任务编号、依赖和状态以 `ai-docs/task.md` 为准；完成事实以 `ai-docs/progress.md` 为准。

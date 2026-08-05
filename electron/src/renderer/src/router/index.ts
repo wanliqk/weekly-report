@@ -3,9 +3,13 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import AppLayout from '@renderer/layouts/AppLayout.vue'
 import { useAuthStore } from '@renderer/stores/auth'
 import { useSidecarStore } from '@renderer/stores/sidecar'
+import DailyCreateView from '@renderer/views/DailyCreateView.vue'
+import DailyDetailView from '@renderer/views/DailyDetailView.vue'
+import DailyListView from '@renderer/views/DailyListView.vue'
 import HomeView from '@renderer/views/HomeView.vue'
 import LoginView from '@renderer/views/LoginView.vue'
 import SetupView from '@renderer/views/SetupView.vue'
+import TemplatesView from '@renderer/views/TemplatesView.vue'
 import UsersView from '@renderer/views/UsersView.vue'
 
 declare module 'vue-router' {
@@ -28,7 +32,10 @@ export const router = createRouter({
       component: AppLayout,
       meta: { requiresAuth: true },
       children: [
-        { path: 'daily', name: 'daily', component: HomeView },
+        { path: 'daily', name: 'daily', component: DailyListView },
+        { path: 'daily/new', name: 'daily-create', component: DailyCreateView },
+        { path: 'daily/:id', name: 'daily-detail', component: DailyDetailView },
+        { path: 'templates', name: 'templates', component: TemplatesView },
         {
           path: 'admin/users',
           name: 'users',

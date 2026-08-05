@@ -24,9 +24,9 @@ weekly-report/
 
 ### 1.1 当前工程状态（2026-08-05）
 
-- `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局和用户管理页面；日报、周报等后续业务页面尚未实现。
-- `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证和用户管理的 API/Service/Repository 实现。
-- 阶段 4 实现与质量门禁已完成，等待独立 Reviewer；模板、日报、周报、导出等后续业务 API 尚未实现。
+- `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局、用户管理、模板管理和日报工作台/动态表单页面；周报、导出及设置页面尚未实现。
+- `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证、用户管理、模板、设置和日报的 API/Service/Repository 实现。
+- 阶段 4 已完成并通过独立审查；阶段 5 已完成实现和主 Agent 自审，等待独立 Reviewer；周报、导出等后续业务 API 尚未实现。
 - `build/sidecar/` 仍为占位，尚未生成 PyInstaller 产物。
 
 ## 2. 目标业务与平台模块
@@ -59,12 +59,18 @@ weekly-report/
 | M02 Runtime Bridge | 部分完成 | preload 已暴露受限 `runtimeBridge.{sidecar,api,token}`；Token 由 Main `safeStorage` 加密持久化且不可用时不明文回退；缺下载保存白名单（阶段 6 `DESK-04`） |
 | M03 Persistence | 部分完成 | 已有异步 Engine/Session、PRAGMA（WAL/FK/busy_timeout/synchronous）、8 张表 ORM Model、Alembic 初始迁移、迁移前备份+轮转+路径边界校验；Repository 层已有首个落地（`user`/`user_settings`/`template`，随 `AUTH-01`）；缺其余模块 Repository 与手动整库备份 API（`BACKUP-01`，阶段 8） |
 | M04 API Foundation | 部分完成 | 已有应用工厂、精确 CORS/Host、请求 ID、runtime secret、JWT/当前用户/admin 依赖、达标 `/health`、统一响应与异常；其余具体业务错误码随对应模块实现 |
-| M05 Auth | REVIEW | 初始化、24h JWT、持久化签名密钥、`token_version`、登录、当前用户、改密和退出均已实现并通过门禁，待独立 Reviewer |
-| M06 User Admin | REVIEW | 用户分页查询、创建、角色/状态修改、重置密码和末位有效管理员保护已实现并通过门禁，待独立 Reviewer |
-| M07—M11 业务后端 | 未实现 | 尚无模板发布、日报、周报、设置、能力或导出接口 |
-| M12 Frontend Shell | REVIEW | 已有鉴权 Store/Router、API client、40102 处理、应用布局、登录/初始化流程与安全 Token 桥接，待独立 Reviewer |
-| M13—M15 业务前端 | 未实现 | 尚无日报、模板、周报等对应页面与交互 |
-| M16 User Admin UI | REVIEW | admin 用户管理页面已实现账号元数据列表、创建、编辑和重置密码，待独立 Reviewer |
+| M05 Auth | DONE | 初始化、24h JWT、持久化签名密钥、`token_version`、登录、当前用户、改密和退出均已实现、通过门禁和独立审查 |
+| M06 User Admin | DONE | 用户分页查询、创建、角色/状态修改、重置密码和末位有效管理员保护已实现、通过门禁和独立审查 |
+| M07 Template | REVIEW | 六类字段规则、稳定键、核心字段、不可变版本发布和历史摘要已实现并通过主 Agent 自审，待独立 Reviewer |
+| M08 Daily Report | REVIEW | 所有权过滤、创建/快照、稳定查询、草稿保存、提交/归档、自动归档和乐观锁已实现并通过主 Agent 自审，待独立 Reviewer |
+| M09 Weekly Report | 未实现 | 周范围、生成、编辑、来源与重生成均待阶段 7 |
+| M10 Settings/Capabilities | REVIEW | 自动归档设置、固定 Asia/Shanghai 和 `wecom_sync:false` API 已实现并通过主 Agent 自审，待独立 Reviewer |
+| M11 Export | 未实现 | 导出任务、动态列、xlsx 生成与清理均待阶段 6 |
+| M12 Frontend Shell | DONE | 鉴权 Store/Router、API client、40102 处理、应用布局、登录/初始化流程与安全 Token 桥接已实现、通过门禁和独立审查 |
+| M13 Daily UI | REVIEW | 日报列表/筛选/创建、动态表单、草稿、提交/归档确认与冲突反馈已实现并通过主 Agent 自审，待独立 Reviewer |
+| M14 Template UI | REVIEW | 模板字段编辑/排序/启停、类型组件和版本历史已实现并通过主 Agent 自审，待独立 Reviewer |
+| M15 Weekly UI | 未实现 | 周报页面与交互待阶段 7 |
+| M16 Admin/Settings UI | 部分完成 | 用户管理已完成并通过独立审查；个人设置、企业微信占位和手动备份入口待阶段 8 `FE-07` |
 | M17 Packaging/Release | 占位 | 有 electron-builder 配置和 sidecar 目录占位；无 PyInstaller/安装升级验证闭环 |
 
 ## 3. 后端模块内部契约

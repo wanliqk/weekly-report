@@ -7,11 +7,11 @@
 ## 1. 总体状态
 
 - 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理。
-- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）。
+- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）。
 - 当前所在阶段：阶段 5 模板、设置与日报闭环（用户已明确指令开始）。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
 - 阶段 4 实现状态：六项任务均已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
-- 阶段 5 实现状态：已开始；`TEMPLATE-01`、`SETTING-01` 为 `IN_PROGRESS`，其余任务保持 `TODO`。
+- 阶段 5 实现状态：七项任务均已完成实现、自测、质量门禁和主 Agent 自审，统一为 `REVIEW`；本地实现提交按用户最新明确指令创建，但不提前标记 `DONE`，也不进入阶段 6。
 - 当前阻塞：无业务/技术决策阻塞。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 
@@ -92,6 +92,21 @@
 - Router 已接入 setup/login/app layout/admin users，并按 sidecar、初始化、登录和 admin 角色守卫；用户管理页支持列表、创建、角色/状态编辑与密码重置，对敏感变更展示确认。
 - renderer 未使用 `localStorage` 或 `sessionStorage`，未在日志中记录 Token、密码、签名密钥或 runtime secret。
 
+### 模板、设置与日报后端（阶段 5，TEMPLATE-01 / SETTING-01 / DAILY-01 / DAILY-02）
+
+- 模板 API 已实现当前版本、不可变发布和历史摘要；Service 强制六类字段规则、核心字段不可删除且至少启用一个、既有 `field_key` 稳定、新字段由服务端生成 ULID，并以条件更新和唯一约束处理并发版本冲突。
+- 个人设置 API 已实现 `auto_archive_on_submit` 读写，时区固定为 `Asia/Shanghai`；能力 API 固定返回 `wecom_sync:false`，未定义或调用任何企业微信同步接口。
+- 日报 API 已实现按日期创建、详情、日期/状态分页查询、草稿保存、提交和归档。Repository 的详情、列表和条件更新均带 `owner_id`；同一用户同日唯一冲突返回 `40901` 与已有日报 ID。
+- 创建日报时在同一数据库事务读取当前模板版本并写入完整快照；历史、未来和闰日均允许。后续保存/提交始终按快照校验，不读取当前模板解释旧日报。
+- 状态机固定为 `draft → submitted → archived`：草稿保存、提交和归档使用 `status + version + owner_id` 条件更新；版本冲突为 `40904`，非法状态为 `40902`。自动归档在提交同一条条件更新中原子写入提交/归档状态和时间。
+- 字段校验拒绝未知/停用字段、错误类型、无效/重复选项、布尔冒充数字及 `NaN/Infinity`；提交时额外检查必填字段，统一返回 `42201` 字段错误。
+
+### 模板与日报界面（阶段 5，FE-03 / FE-04）
+
+- `/templates` 已实现字段新增、删除、排序、启停、必填、六类类型/选项配置、核心字段保护、不可变版本发布和历史摘要展示；既有稳定键只由后端返回并原样提交。
+- `/daily`、`/daily/new`、`/daily/:id` 已实现日期/状态筛选、稳定分页、空态、Asia/Shanghai 默认日期、重复日期跳转、模板快照动态表单、草稿保存、提交/归档确认和只读状态展示。
+- 前端收到 `42201` 会把错误映射回字段；收到 `40904` 会保留当前输入并明确提示版本冲突。时间显示固定使用 `Asia/Shanghai`，未提前混入阶段 8 的设置/企业微信占位 UI。
+
 ### 已记录的阶段验证
 
 工程基线（阶段 1）交付记录（历史）：`npm ci`、lint、typecheck、`npm test`（1 项前端测试）、`npm run build`、`uv sync --frozen`、`uv run ruff/mypy/pytest`（3 项后端测试）均已通过。
@@ -119,14 +134,25 @@
 - `npm run test:integration --workspace electron`：真实后端进程 **2 项通过**，连续启动使用不同动态端口且退出后无孤儿进程。
 - `npm run build`：main/preload/renderer 生产构建通过；仅有 `@vueuse/core` 的第三方 PURE 注释位置提示，不影响产物。
 - `git diff --check`：通过；敏感模式扫描未发现 local/sessionStorage、Token/密码/密钥日志或构建变量泄露。
-- 主 Agent 按 `dev-workflow` 完成安全、Python、TypeScript/Vue 自审，审查中发现并修复：用户名去空白后的最小长度校验、已登录用户根路由绕过应用布局、确认框取消导致未处理 Promise。当前无未解决 P0/P1；独立 Reviewer 仍待补齐。
+- 主 Agent 按 `dev-workflow` 完成安全、Python、TypeScript/Vue 自审，审查中发现并修复：用户名去空白后的最小长度校验、已登录用户根路由绕过应用布局、确认框取消导致未处理 Promise。独立 Reviewer 已完成审查，阶段 4 无未解决 P0/P1。
+
+阶段 5 模板、设置与日报闭环当前工作树实际执行并通过：
+
+- `uv run --directory backend ruff check .`、`ruff format --check .`：0 error，81 个文件格式合规。
+- `uv run --directory backend mypy`（strict，81 个源文件）：0 错误。
+- `uv run --directory backend pytest`：**117 项测试全部通过**，覆盖模板不可变版本/稳定键/核心字段、设置、同日并发、历史/未来/闰日、快照、必填/类型/有限数值、状态非法、手工/自动归档、乐观锁和所有权隔离。
+- `npm run lint`、`npm run typecheck`：通过。
+- `npm test`：**14 个文件 54 项测试全部通过**，新增模板字段规则和日报动态表单纯函数测试。
+- `npm run test:integration --workspace electron`：真实后端进程 **2 项通过**，阶段 5 未破坏动态端口和退出清理链路。
+- `npm run build`：main/preload/renderer 生产构建通过；仅有 `@vueuse/core` 第三方 PURE 注释位置提示，renderer 主 JS 约 2.85 MB，继续由 ISS-007 跟踪。
+- `git diff --check`：通过。主 Agent 按 `dev-workflow` 完成安全、并发、Python、TypeScript/Vue 自审，修复非有限数值、固定时区显示及跨阶段 UI 混入问题；当前无未解决 P0/P1，待独立 Reviewer。
 
 ## 3. 尚未实现
 
 以下均为设计目标，当前不得标记为完成：
 
 - 开发/生产 sidecar 路径解析中，生产分支的 PyInstaller `onedir` 产物本身（`PKG-01`，阶段 9）——`build/sidecar/` 仍是空占位目录。
-- 模板发布、设置、日报、导出和周报对应的 Repository/Service/API 与前端页面尚未实现；阶段 4 用户管理已经实现，不得据此把后续业务标记为完成。
+- 导出、周报对应的 Repository/Service/API 与前端页面尚未实现；个人设置/企业微信占位/手动备份 UI 属于阶段 8 `FE-07`，尚未实现。
 - Playwright E2E、PyInstaller 和 Windows 安装/升级验证。
 - Windows Job Object 级别的孤儿进程彻底防护（ISS-010，非阻塞）。
 - admin 手动整库备份 API（`BACKUP-01`，阶段 8）——DB-03 的自动迁移前备份机制与之相关但不是同一功能，手动备份走独立的短期下载文件流程。
@@ -159,4 +185,11 @@
 8. ✅ 后端 94 项、前端 49 项、真实 sidecar 集成 2 项及生产构建全部通过；主 Agent 自审无未解决 P0/P1。
 9. ✅ 独立 Reviewer 审查完成，无未解决 P0/P1；阶段 4 已关闭。
 
-阶段 5 已开始：先实现 `TEMPLATE-01` 和 `SETTING-01`，随后按依赖推进 `DAILY-01`、`DAILY-02`、`FE-03`、`FE-04` 与 `QA-05`。
+阶段 5 七项任务已完成实现、自测、质量门禁和主 Agent 自审，统一为 `REVIEW`：
+
+1. ✅ 模板六类字段规则、核心字段、稳定键、不可变发布和历史摘要已实现。
+2. ✅ 自动归档设置、固定 Asia/Shanghai 和 `wecom_sync:false` 能力 API 已实现。
+3. ✅ 日报唯一创建、快照、稳定查询、所有权过滤、草稿/提交/归档状态机和乐观锁已实现。
+4. ✅ 模板编辑、动态字段、日报列表/创建/详情、确认与冲突反馈已实现。
+5. ✅ 后端 117 项、前端 54 项、真实 sidecar 集成 2 项及生产构建全部通过；主 Agent 自审无未解决 P0/P1。
+6. ⏳ `feat(daily): 完成模板与日报状态闭环` 本地实现提交按用户明确指令创建；仍待独立 Reviewer 审查，通过并关闭问题后才能标记 `DONE` 并进入阶段 6。
