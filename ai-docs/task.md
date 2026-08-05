@@ -47,7 +47,7 @@ M0 文档基线
 | GOV-01 | 建立根级检查命令与 CI 质量门禁 | Cross | FE-01, BE-01 | TODO | - |
 | DESK-01 | electron-vite 桌面骨架基线（替代原 electron-egg V5）并建立工程目录 | Desktop | DOC-01 | DONE | 桌面平台工程师 |
 | BE-01 | 初始化 FastAPI/uv 工程 | Backend | DOC-01 | DONE | Python 后端基础设施工程师 Agent |
-| FE-01 | 初始化 Vue3/TS 前端工程与基础布局 | Frontend | DESK-01 | IN_PROGRESS | Vue 前端工程师 Agent |
+| FE-01 | 初始化 Vue3/TS 前端工程与基础布局 | Frontend | DESK-01 | IN_REVIEW | Vue 前端工程师 Agent |
 | DESK-02 | sidecar 动态端口、启停和健康检查 | Desktop | DESK-01, BE-01 | TODO | - |
 | DESK-03 | 安全 preload、运行时桥接与 safeStorage | Desktop | DESK-01 | TODO | - |
 | BE-02 | 配置、日志、请求 ID、统一响应与异常 | Backend | BE-01 | TODO | - |
@@ -126,7 +126,15 @@ M0 文档基线
 - 范围：接管现有 `electron/src/renderer` 占位页，不重新脚手架、不创建根 `frontend/`；在 `electron/package.json` 中补充 Vue Router、Pinia、Element Plus、Axios、Vitest 等依赖。
 - 交付物：`electron/src/renderer/src/{api,components,layouts,router,stores,types,views}`、基础布局、路由、测试配置；必要的 alias 统一维护在 `electron/electron.vite.config.ts`。
 - 验收：从仓库根执行 npm workspace 命令；严格类型检查、单测和 `npm run build` 通过；renderer 构建进入 `electron/out/renderer`；保持现有 CSP、禁止 Node API，生产配置不包含业务假数据或敏感环境变量。
-- 执行记录：2026-08-05 领取；分支 `feat/FE-01-frontend-shell`；架构核对：依赖 DESK-01 已 DONE、BE-01 已 DONE；未触及 Main/Preload/sidecar，未改动 CSP 与沙箱边界；无业务假数据与敏感环境变量。完成时补充 Owner/Branch/Changed files/Verification 记录。
+- 执行记录：2026-08-05 领取；分支 `feat/FE-01-frontend-shell`；架构核对：依赖 DESK-01 已 DONE、BE-01 已 DONE；未触及 Main/Preload/sidecar，未改动 CSP 与沙箱边界；无业务假数据与敏感环境变量。
+- 完成记录：
+  - Owner: Vue 前端工程师 Agent
+  - Branch/Commit: `feat/FE-01-frontend-shell`（待 Review 合并，最终 commit 见合并记录）
+  - Changed files: `electron/package.json`（新增 vue-router@^4.6.4、pinia@^3.0.4、element-plus@^2.14.3、axios@^1.19.0、vitest@^4.1.10 与 test:renderer 脚本）、根 `package-lock.json`；`electron/src/renderer/src/` 新增 `api/{client,errors,feedback,index}.ts`、`components/GlobalLoading.vue`、`layouts/DefaultLayout.vue`、`router/{routes,index}.ts`、`stores/ui.ts`、`types/{api,bridge,router.d}.ts`、`views/{HomeView,NotFoundView}.vue`、`api/__tests__/errors.test.ts`、`router/__tests__/routes.test.ts`；改造 `App.vue`、`main.ts`；新增 `electron/vitest.config.ts`
+  - Verification: 根目录 `npm run lint`（0 errors，仅存量 CRLF 警告）、`npm run typecheck`、`npm run test`（node:test 7 项 + Vitest 10 项全部通过）、`npm run build` 通过；renderer 产物进入 `electron/out/renderer`，产物内无 `VITE_`/`RENDERER_VITE_`/runtime_secret/127.0.0.1，生产 CSP 保持 `connect-src 'self'`
+  - Reviewer: 待分配
+  - Review result: -
+  - Risks/Follow-ups: 路由 meta.auth 权限预留完成，守卫在 FE-AUTH-01 实现；api client 的 baseURL/请求头依赖 DESK-03 preload 桥接（当前为空对象时仅防御性读取）；Element Plus 全量引入导致 renderer bundle 约 2.6MB，如需优化由后续任务评估按需引入
 
 #### DESK-02 sidecar 生命周期
 
