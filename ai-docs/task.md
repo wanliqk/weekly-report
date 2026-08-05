@@ -2,7 +2,7 @@
 
 > 状态基准：2026-08-05
 > 范围依据：`requirements.md`、`architecture.md`、`modules.md`、`database.md`、`api.md`、`coding-rule.md`
-> 当前实现基线：工程骨架提交 `3a9fdbc`；Desktop Bootstrap 尚未开始
+> 当前实现基线：工程骨架提交 `3a9fdbc`；阶段 2 Desktop Bootstrap 已实现，待创建阶段提交
 
 ## 1. 状态与协作约定
 
@@ -79,10 +79,10 @@ uv sync --directory backend --frozen
 
 | ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
 |---|---|---|---|---|---|
-| DESK-02 | Agent A | sidecar 生命周期与动态端口 | 阶段 1 | TODO | Main 选择回环端口、生成随机 runtime secret、解析开发/生产 sidecar 路径、单实例只启动一个进程、退出清理；密钥不进入构建变量、持久化或日志 |
-| BE-02 | Agent B | sidecar 启动参数与完整健康契约 | 阶段 1 | TODO | 严格校验 host/port/data/log/runtime 配置；`/health` 返回版本并设置 `Cache-Control: no-store` |
-| DESK-03 | Agent A | 安全 Runtime Bridge 与启动状态 UI | DESK-02、BE-02 | TODO | preload 只向 API 客户端暴露内存态 API 基址/runtime header 等必要能力；业务窗口仅在健康成功后显示；失败页可重试并定位脱敏日志 |
-| QA-02 | Agent C | Desktop Bootstrap 集成测试与审查 | DESK-02、BE-02、DESK-03 | TODO | 覆盖动态端口、超时、异常退出、重复实例、重载清理、生产路径；无孤儿 sidecar |
+| DESK-02 | Agent A | sidecar 生命周期与动态端口 | 阶段 1 | DONE | Main 选择回环端口、生成随机 runtime secret、解析开发/生产 sidecar 路径、单实例只启动一个进程、退出清理；密钥不进入构建变量、持久化或日志 |
+| BE-02 | Agent B | sidecar 启动参数与完整健康契约 | 阶段 1 | DONE | 严格校验 host/port/data/log/runtime 配置；`/health` 返回版本并设置 `Cache-Control: no-store` |
+| DESK-03 | Agent A | 安全 Runtime Bridge 与启动状态 UI | DESK-02、BE-02 | DONE | preload 只向 API 客户端暴露内存态 API 基址/runtime header 等必要能力；业务窗口仅在健康成功后显示；失败页可重试并定位脱敏日志 |
+| QA-02 | Agent C | Desktop Bootstrap 集成测试与审查 | DESK-02、BE-02、DESK-03 | DONE | 覆盖动态端口、超时、异常退出、重复实例、重载清理、生产路径；无孤儿 sidecar |
 
 阶段 2 专项验证：Electron 集成测试、`npm run dev` 人工冒烟、退出后进程检查、构建产物敏感信息扫描。阶段提交建议：`feat(desktop): 完成本地 sidecar 启动链路`。
 
@@ -171,16 +171,13 @@ uv sync --directory backend --frozen
 
 ## 4. 当前可领取任务
 
-当前唯一实现阶段为阶段 2。推荐并行顺序：
+阶段 2（`DESK-02`/`BE-02`/`DESK-03`/`QA-02`）已实现并通过质量门禁，待独立 Reviewer 审查和阶段提交后进入阶段 3。阶段 3 `DB-01`（SQLAlchemy 异步 Engine/Session 与 SQLite PRAGMA）为下一可领取任务。
 
-1. Agent A 领取 `DESK-02`，先定义可测试的进程管理边界。
-2. Agent B 领取 `BE-02`，实现启动参数与完整健康契约。
-3. 两者契约稳定后，Agent A 完成 `DESK-03`，Agent C 执行 `QA-02`。
-
-阶段 3 及以后任务不得提前写入当前阶段提交。
+阶段 3 及以后任务不得提前写入阶段 2 提交。
 
 ## 5. 实际验证记录
 
 | 阶段 | Commit | 验证结果 | Reviewer | 遗留风险 |
 |---|---|---|---|---|
 | 阶段 1 工程基线 | `3a9fdbc` | `npm ci`、lint、typecheck、Vitest、build、Ruff、mypy、pytest、`uv sync --frozen` 已由阶段交付记录为通过 | 未单独记录 | Element Plus 当前全量引入；sidecar 生命周期与完整健康契约待阶段 2 |
+| 阶段 2 Desktop Bootstrap | 待创建 | `npm ci`（636 包）、`npm run lint`（0 error/0 warning）、`npm run typecheck`（`tsc`+`vue-tsc` 0 错误）、`npm test`（9 文件 36 项通过）、`npm run build`、`npm run test:integration --workspace electron`（真实子进程，2 项通过）、`uv sync --frozen`、`uv run ruff check .`、`uv run mypy`（strict，20 文件）、`uv run pytest -q`（17 项通过）、`git diff --check` 均已实际执行并通过；手动冒烟（`npm run dev` 真实运行 + `CloseMainWindow()` 模拟正常退出）确认单一 sidecar 进程、健康检查真实通过、退出后无孤儿进程；构建产物已扫描确认无 runtime secret 泄露 | 待独立 Reviewer | ISS-010（Electron 被外部强杀时孤儿进程防护仍不完整，需 Windows Job Object）；PyInstaller 生产二进制尚未产出，生产路径分支未被真实二进制验证过（阶段 9 `PKG-01`） |

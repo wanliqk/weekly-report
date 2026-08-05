@@ -2,9 +2,11 @@
 import { computed } from 'vue'
 
 import { formatServiceState } from '@renderer/utils/status-message'
+import { useSidecarStore } from '@renderer/stores/sidecar'
 
+const sidecarStore = useSidecarStore()
 const platformName = computed(() => window.desktop.platform)
-const serviceMessage = formatServiceState('pending')
+const serviceMessage = computed(() => formatServiceState(sidecarStore.serviceState))
 </script>
 
 <template>

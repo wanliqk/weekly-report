@@ -33,13 +33,14 @@ Electron Main
 
 ### 1.1 当前实现快照（2026-08-05）
 
-当前仅完成第一阶段工程基线，不能按上图视为完整运行：
+已完成阶段 1 工程基线和阶段 2 Desktop Bootstrap（代码与测试完成，待创建阶段提交），仍不能按上图视为完整运行——业务层（认证、Service/Repository、数据库）尚未开始：
 
-- 根目录已建立 npm workspace；开发命令用 `concurrently` 分别启动 `uv run --directory backend python -m app` 和 electron-vite，当前不是由 Electron Main 拉起开发 sidecar。
-- Electron 已实现单实例、窗口安全选项、禁止新窗口和跨地址导航；preload 目前只暴露 `platform`，尚未实现运行时 API 配置、`safeStorage` Token 能力、文件保存或 sidecar 生命周期。
-- FastAPI 已建立应用工厂、精确 CORS/Trusted Host、请求 ID 中间件与 `GET /health`；健康响应当前仅含 `data.status`，没有版本字段。
-- `X-Runtime-Secret` 校验、统一异常映射、认证、业务 Service/Repository、SQLAlchemy Engine/Session、ORM Model 和 Alembic migration 均未实现。
-- `build/sidecar/` 当前只有占位说明；PyInstaller sidecar、`extraResources` 可用性和安装包流程尚未完成。
+- 根目录已建立 npm workspace；`npm run dev` 现在只启动 electron-vite，Electron Main 在 `whenReady()` 中自行拉起并管理 FastAPI sidecar（开发模式直接 spawn `backend/.venv/Scripts/python.exe -m app`，不经过 `uv run`）。
+- Electron 已实现单实例、窗口安全选项、禁止新窗口和跨地址导航；已新增 `electron/src/main/sidecar/` 子进程管理模块（动态端口获取、runtime secret 生成、健康检查轮询、Windows 下 `taskkill /pid /t /f` 进程树终止）和 `electron/src/main/ipc/register-runtime-bridge.ts`（4 个受信任 frame 校验的 IPC channel）。
+- Preload 新增 `window.runtimeBridge.{sidecar,api}` 命名空间方法（获取/订阅 sidecar 状态、重试、获取 API 基址与 runtime secret），未暴露通用 `ipcRenderer`；`safeStorage` Token 能力和文件保存对话框仍未实现（分别属于阶段 4 `FE-01`、阶段 6 `DESK-04`）。
+- FastAPI 已建立应用工厂、精确 CORS/Trusted Host、请求 ID 中间件、`RuntimeSecretMiddleware`（除 `/health`/`/docs`/`/openapi.json` 外强制校验 `X-Runtime-Secret`）与达到目标契约的 `GET /health`（含 `version` 字段和 `Cache-Control: no-store`）。
+- 统一异常映射（422 归一化）、认证（JWT）、业务 Service/Repository、SQLAlchemy Engine/Session、ORM Model 和 Alembic migration 均未实现。
+- `build/sidecar/` 当前只有占位说明；PyInstaller sidecar、`extraResources` 可用性和安装包流程仍未完成（阶段 9 `PKG-01`）。生产环境的可执行文件路径解析逻辑已就绪（见 §8 命名约定），文件不存在时会走类型化失败态而非崩溃。
 
 后续实现必须逐阶段把真实进度更新到 `progress.md`；本节只用于防止将目标架构误读为现状。
 
@@ -148,13 +149,14 @@ Electron Main
 
 ## 8. 发布架构
 
-以下是目标发布流程。当前只有 electron-vite 构建基线和 electron-builder 配置占位，尚未形成可发布 sidecar/安装包闭环。
+以下是目标发布流程。当前 electron-vite 构建基线、electron-builder 配置和 Electron 侧 sidecar 生命周期管理（阶段 2）已完成；PyInstaller 产物本身和安装包闭环仍是占位（阶段 9 `PKG-01`/`PKG-02`）。
 
-- 开发后端由 `uv run` 启动；生产后端用 PyInstaller `onedir` 打包为 sidecar。
+- 开发模式下 Electron Main 直接 spawn `backend/.venv/Scripts/python.exe -m app`（不经过 `uv run`，避免其包装进程在 Windows 下导致 Node 持有错误 pid、清理不掉真正的解释器进程）；生产后端用 PyInstaller `onedir` 打包为 sidecar。
 - 生产包不得依赖目标机器已有 Python、uv、Node.js 或全局环境变量。
 - 根 npm workspace 通过 `npm ci` 安装；`npm run build` 调用 electron-vite，将 main、preload、renderer 统一输出到 `electron/out/`。
 - `electron-builder` 使用 `electron/electron-builder.yml` 打包 `electron/out/`；PyInstaller sidecar、Alembic 迁移和许可证通过 `extraResources` 放入 `process.resourcesPath` 下的固定子目录。
 - PyInstaller 可执行文件及其 `onedir` 依赖不得放入 ASAR；生产启动只能从 `process.resourcesPath` 解析，不得依赖源码目录、`cwd` 或开发机绝对路径。
+- **命名约定（阶段 2 已定义，阶段 9 `PKG-01` 必须遵循）**：生产 sidecar 可执行文件必须命名为 `weekly-report-backend.exe`，并放在 `process.resourcesPath/sidecar/weekly-report-backend.exe`（对应 `electron-builder.yml` 的 `extraResources: {from: ../build/sidecar, to: sidecar}`）。该常量定义在 `electron/src/main/sidecar/constants.ts` 的 `PROD_SIDECAR_EXECUTABLE_NAME`；`electron/src/main/sidecar/paths.ts` 已实现该路径的解析与"文件不存在则返回类型化失败"逻辑，可在 `build/sidecar/` 仍为空目录时通过单元测试验证，但尚未被真实生产二进制触发过。
 - 每次发布必须验证干净机安装、首次初始化、从上一版升级、数据保留和卸载不误删用户数据。
 
 ## 9. 架构决策记录

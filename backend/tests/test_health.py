@@ -14,9 +14,19 @@ def test_health_uses_the_common_response_shape() -> None:
     assert response.json() == {
         "code": 0,
         "msg": "success",
-        "data": {"status": "ok"},
+        "data": {"status": "ok", "version": application.version},
     }
+    assert response.headers["Cache-Control"] == "no-store"
     assert len(response.headers["X-Request-Id"]) == 32
+
+
+def test_health_is_exempt_from_runtime_secret() -> None:
+    application = create_app(Settings(environment="test"))
+
+    with TestClient(application) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
 
 
 def test_health_preserves_a_safe_caller_request_id() -> None:

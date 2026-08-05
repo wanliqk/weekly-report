@@ -1,4 +1,6 @@
-export type ServiceState = 'pending' | 'ready' | 'failed'
+import type { ServiceState } from '../../../shared/contracts'
+
+export type { ServiceState }
 
 const messages: Record<ServiceState, string> = {
   pending: '等待桌面进程接入',

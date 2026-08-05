@@ -10,8 +10,8 @@
 
 截至 2026-08-05：
 
-- 仅实现 `GET /health`，返回统一成功结构和 `X-Request-Id`；当前 `data` 只有 `{"status":"ok"}`，尚无 `version`。
-- 已配置精确 Trusted Host/CORS 基线，但尚未实现 `X-Runtime-Secret` 校验、统一错误响应转换或 `Cache-Control: no-store`。
+- `GET /health` 已达目标契约：返回统一成功结构、`X-Request-Id`、`data.status`、`data.version` 和 `Cache-Control: no-store`，且豁免 `X-Runtime-Secret` 校验。
+- 已配置精确 Trusted Host/CORS 基线，并已实现 `X-Runtime-Secret` 校验中间件（除 `/health`、`/docs`、`/openapi.json` 外的所有请求均需携带）；统一错误响应转换（FastAPI/Pydantic 422 归一化）仍未实现。
 - `/api/v1` 下的 bootstrap、认证、用户、模板、日报、导出、周报、设置和能力接口均未实现。
 
 本文后续示例均为目标契约；实现任务不得为了匹配“已存在”的假象跳过测试或状态更新。
@@ -63,6 +63,7 @@
 | 40001 | 400 | 参数或业务规则校验失败 |
 | 40101 | 401 | 用户名或密码错误 |
 | 40102 | 401 | Token 无效、过期或版本失效 |
+| 40103 | 401 | 运行期密钥（`X-Runtime-Secret`）缺失或无效 |
 | 40301 | 403 | 角色权限不足 |
 | 40302 | 403 | 仅用于明确可暴露的所有权冲突；普通越权用 404 |
 | 40401 | 404 | 资源不存在或不可见 |
@@ -107,7 +108,7 @@ JWT 声明至少包含 `sub`、`role`、`ver`、`iat`、`exp`、`jti`。每次�
 }
 ```
 
-`version` 目标取后端项目版本，不返回路径、主机名、进程参数、密钥、数据库或依赖信息。当前实现缺少 `version`，应在 Desktop Bootstrap 阶段补齐契约和测试。
+`version` 取后端项目版本（`FastAPI(version=...)` 单一来源），不返回路径、主机名、进程参数、密钥、数据库或依赖信息。此契约已在阶段2 Desktop Bootstrap 落地并有对应测试（`backend/tests/test_health.py`、`test_sidecar_bootstrap.py`）。
 
 ### 4.1 手动整库备份
 

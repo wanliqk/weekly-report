@@ -4,7 +4,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.health import router as health_router
 from app.core.config import Settings, get_settings
-from app.core.middleware import RequestIdMiddleware
+from app.core.middleware import RequestIdMiddleware, RuntimeSecretMiddleware
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -20,6 +20,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "testserver"],
     )
+    # Registered before CORSMiddleware so CORS (added after, thus outer in the
+    # stack) can still answer preflight OPTIONS requests without ever reaching
+    # this check — browsers never send X-Runtime-Secret on a preflight.
+    application.add_middleware(
+        RuntimeSecretMiddleware,
+        expected_secret=app_settings.runtime_secret,
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.cors_origins,
@@ -30,6 +37,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.add_middleware(RequestIdMiddleware)
     application.include_router(health_router)
     return application
-
-
-app = create_app()

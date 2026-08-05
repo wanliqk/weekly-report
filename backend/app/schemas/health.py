@@ -5,3 +5,4 @@ from pydantic import BaseModel
 
 class HealthData(BaseModel):
     status: Literal["ok"]
+    version: str

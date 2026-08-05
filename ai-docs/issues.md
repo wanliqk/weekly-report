@@ -8,15 +8,16 @@
 
 | ID | 级别 | 状态 | 问题/风险 | 当前影响 | 处理条件/归属 |
 |---|---|---|---|---|---|
-| ISS-001 | P1 | OPEN | Electron 尚未托管 FastAPI sidecar | 当前 `npm run dev` 由 `concurrently` 独立启动两端；生产启动链路不存在 | 阶段 2 `DESK-02`：动态端口、进程启停、开发/生产路径和退出清理完成 |
-| ISS-002 | P0 | OPEN | runtime secret 尚未生成和校验 | 回环端口不是身份边界；在此之前不得开放业务 API | 阶段 2 `DESK-02`/`BE-02`/`DESK-03`：Main 每次启动随机生成，经最小 preload 交给 renderer API 客户端且仅内存持有，除 `/health` 外强制校验 |
-| ISS-003 | P1 | OPEN | `/health` 未达到冻结契约 | 当前只返回 `data.status`；缺少版本字段及明确 `Cache-Control: no-store` | 阶段 2 `BE-02`：按 `api.md` 补齐响应与测试，再由 Electron 依契约轮询 |
-| ISS-004 | P1 | OPEN | 业务窗口不等待后端健康成功 | 后端启动失败时仍会展示工程首页，没有可诊断错误流程 | 阶段 2 `DESK-03`：健康成功后展示业务窗口，失败页提供重试和脱敏日志入口 |
+| ISS-001 | P1 | MITIGATED | Electron 尚未托管 FastAPI sidecar | 阶段 2 已实现 `SidecarManager`：动态端口、单例拉起、开发/生产路径解析、退出清理，代码与测试均完成；待阶段 2 独立 Conventional Commit 后转 `RESOLVED` | 阶段 2 `DESK-02`（已实现，待提交） |
+| ISS-002 | P0 | MITIGATED | runtime secret 尚未生成和校验 | 阶段 2 已实现：Main 每次启动经 `crypto.randomBytes(32)` 随机生成，仅经环境变量传给子进程、仅内存持有；后端 `RuntimeSecretMiddleware` 对除 `/health`/`/docs`/`/openapi.json` 外的请求强制校验；已扫描构建产物确认密钥不进入 Vite 变量。待阶段 2 提交后转 `RESOLVED`，且业务 API 本身仍要等阶段 4 JWT 落地才算真正开放 | 阶段 2 `DESK-02`/`BE-02`/`DESK-03`（已实现，待提交） |
+| ISS-003 | P1 | MITIGATED | `/health` 未达到冻结契约 | 阶段 2 已补齐 `version` 字段与 `Cache-Control: no-store`，并有对应测试；待阶段 2 提交后转 `RESOLVED` | 阶段 2 `BE-02`（已实现，待提交） |
+| ISS-004 | P1 | MITIGATED | 业务窗口不等待后端健康成功 | 阶段 2 已实现：`App.vue` 在 sidecar 未 `ready` 时渲染 `StartupView`（pending/failed 态，failed 态可重试并展示脱敏日志），不再直接展示业务首页；待阶段 2 提交后转 `RESOLVED` | 阶段 2 `DESK-03`（已实现，待提交） |
 | ISS-005 | P1 | OPEN | 数据库与迁移基础尚未实现 | 当前没有 Engine/Session、ORM、Alembic revision、PRAGMA 或迁移前备份，任何数据均不可持久化 | 阶段 3 `DB-01`..`DB-03` 完成并通过新库/失败/备份测试 |
 | ISS-006 | P0 | OPEN | 认证、所有权与业务 API 尚未实现 | 当前没有 JWT、runtime 双校验、用户隔离；不得把占位模块暴露为可用功能 | 阶段 4 起按依赖逐步实现；每个 Repository 查询强制 owner 条件 |
 | ISS-007 | P2 | OPEN | Element Plus 当前全量引入 | renderer 生产包偏大，阶段基线曾观测主 JS 约 2.6 MB；会影响启动和构建告警 | 前端页面组件稳定后改为按需引入，并以构建体积对比验证；不得为此提前混入阶段 2 提交 |
 | ISS-008 | P1 | OPEN | PyInstaller sidecar 和 Windows 安装链路仍为占位 | `build/sidecar` 只有说明文件，安装包不能交付可运行后端 | 阶段 9 `PKG-01`/`PKG-02`：onedir、extraResources、无 Python 干净机验证 |
 | ISS-009 | P2 | RESOLVED | AI 上下文文档需要形成独立阶段提交 | 12 份上下文文档、启动路由和维护规则已建立并完成交叉复核 | 随本次独立文档阶段提交交付；后续每个实现阶段持续维护 |
+| ISS-010 | P2 | OPEN | sidecar 孤儿进程防护未覆盖"Electron 被外部强杀"场景 | `terminateProcessTree` 已用 `taskkill /pid <pid> /t /f` 覆盖正常退出、崩溃（`uncaughtException`）、`SIGINT`/`SIGTERM`、`before-quit` 场景（手动冒烟已验证无孤儿）；但若 Electron 主进程本身被任务管理器"结束进程"或外部 `TerminateProcess` 强杀，注册的退出钩子不会执行，`process.on('exit')` 的同步兜底也依赖该事件本身被触发，理论上仍可能残留 sidecar 进程 | 需要 Windows Job Object（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`）才能彻底杜绝，Node 原生 `child_process` 不提供该能力；作为后续可选加固项，不阻塞阶段 2 验收 |
 
 ## 2. 非阻塞产品/发布风险
 

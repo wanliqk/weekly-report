@@ -12,16 +12,12 @@
   },
   "packageManager": "npm@10.9.2",
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail --names backend,electron \"npm:dev:backend\" \"npm:dev:electron\"",
+    "dev": "npm run dev --workspace electron",
     "dev:backend": "uv run --directory backend python -m app",
-    "dev:electron": "npm run dev --workspace electron",
     "lint": "npm run lint --workspace electron",
     "typecheck": "npm run typecheck --workspace electron",
     "test": "npm run test --workspace electron",
     "build": "npm run build --workspace electron",
     "build:win": "npm run build:win --workspace electron"
-  },
-  "devDependencies": {
-    "concurrently": "9.2.0"
   }
 }
