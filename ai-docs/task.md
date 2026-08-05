@@ -2,7 +2,7 @@
 
 > 状态基准：2026-08-05
 > 范围依据：`requirements.md`、`architecture.md`、`modules.md`、`database.md`、`api.md`、`coding-rule.md`
-> 当前实现基线：工程骨架提交 `3a9fdbc`；阶段 2 Desktop Bootstrap 已实现，待创建阶段提交
+> 当前实现基线：工程骨架提交 `3a9fdbc`；阶段 2 Desktop Bootstrap 提交 `7386cae`；阶段 3 数据基础与 API Foundation 已实现，待创建阶段提交
 
 ## 1. 状态与协作约定
 
@@ -90,11 +90,11 @@ uv sync --directory backend --frozen
 
 | ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
 |---|---|---|---|---|---|
-| DB-01 | Agent B | SQLAlchemy 异步 Engine/Session 与 SQLite PRAGMA | 阶段 2 | TODO | WAL、外键、busy timeout、synchronous 配置；只允许单后端进程访问 |
-| DB-02 | Agent B | ORM 与 Alembic 初始迁移 | DB-01 | TODO | `database.md` 全部表、约束、索引、ULID 规则；不得用 `create_all` 替代迁移 |
-| DB-03 | Agent B | 迁移前备份、轮转与安全文件清理 | DB-01、DB-02 | TODO | checkpoint、备份成功后迁移、保留 10 份、路径边界校验、失败停止启动 |
-| API-01 | Agent B | 统一异常与 API 响应基础 | DB-01 | TODO | Pydantic 错误、业务错误、内部错误及 50301 均遵循 `api.md`，响应带请求 ID |
-| QA-03 | Agent C | 数据与 API 基础测试/审查 | DB-01..DB-03、API-01 | TODO | 新库迁移、升级/失败、PRAGMA、约束、备份、异常脱敏测试通过 |
+| DB-01 | Agent B | SQLAlchemy 异步 Engine/Session 与 SQLite PRAGMA | 阶段 2 | DONE | WAL、外键、busy timeout、synchronous 配置；只允许单后端进程访问 |
+| DB-02 | Agent B | ORM 与 Alembic 初始迁移 | DB-01 | DONE | `database.md` 全部表、约束、索引、ULID 规则；不得用 `create_all` 替代迁移 |
+| DB-03 | Agent B | 迁移前备份、轮转与安全文件清理 | DB-01、DB-02 | DONE | checkpoint、备份成功后迁移、保留 10 份、路径边界校验、失败停止启动 |
+| API-01 | Agent B | 统一异常与 API 响应基础 | DB-01 | DONE | Pydantic 错误、业务错误、内部错误及 50301 均遵循 `api.md`，响应带请求 ID |
+| QA-03 | Agent C | 数据与 API 基础测试/审查 | DB-01..DB-03、API-01 | DONE | 新库迁移、升级/失败、PRAGMA、约束、备份、异常脱敏测试通过 |
 
 阶段提交建议：`feat(database): 建立持久化与迁移基础`。
 
@@ -171,13 +171,14 @@ uv sync --directory backend --frozen
 
 ## 4. 当前可领取任务
 
-阶段 2（`DESK-02`/`BE-02`/`DESK-03`/`QA-02`）已实现并通过质量门禁，待独立 Reviewer 审查和阶段提交后进入阶段 3。阶段 3 `DB-01`（SQLAlchemy 异步 Engine/Session 与 SQLite PRAGMA）为下一可领取任务。
+阶段 3（`DB-01`/`DB-02`/`DB-03`/`API-01`/`QA-03`）已实现并通过质量门禁，待独立 Reviewer 审查和阶段提交后进入阶段 4。阶段 4 `AUTH-01`（首次管理员初始化与默认关联数据）为下一可领取任务。
 
-阶段 3 及以后任务不得提前写入阶段 2 提交。
+阶段 4 及以后任务不得提前写入阶段 3 提交。
 
 ## 5. 实际验证记录
 
 | 阶段 | Commit | 验证结果 | Reviewer | 遗留风险 |
 |---|---|---|---|---|
 | 阶段 1 工程基线 | `3a9fdbc` | `npm ci`、lint、typecheck、Vitest、build、Ruff、mypy、pytest、`uv sync --frozen` 已由阶段交付记录为通过 | 未单独记录 | Element Plus 当前全量引入；sidecar 生命周期与完整健康契约待阶段 2 |
-| 阶段 2 Desktop Bootstrap | 待创建 | `npm ci`（636 包）、`npm run lint`（0 error/0 warning）、`npm run typecheck`（`tsc`+`vue-tsc` 0 错误）、`npm test`（9 文件 36 项通过）、`npm run build`、`npm run test:integration --workspace electron`（真实子进程，2 项通过）、`uv sync --frozen`、`uv run ruff check .`、`uv run mypy`（strict，20 文件）、`uv run pytest -q`（17 项通过）、`git diff --check` 均已实际执行并通过；手动冒烟（`npm run dev` 真实运行 + `CloseMainWindow()` 模拟正常退出）确认单一 sidecar 进程、健康检查真实通过、退出后无孤儿进程；构建产物已扫描确认无 runtime secret 泄露 | 待独立 Reviewer | ISS-010（Electron 被外部强杀时孤儿进程防护仍不完整，需 Windows Job Object）；PyInstaller 生产二进制尚未产出，生产路径分支未被真实二进制验证过（阶段 9 `PKG-01`） |
+| 阶段 2 Desktop Bootstrap | `7386cae` | `npm ci`（636 包）、`npm run lint`（0 error/0 warning）、`npm run typecheck`（`tsc`+`vue-tsc` 0 错误）、`npm test`（9 文件 36 项通过）、`npm run build`、`npm run test:integration --workspace electron`（真实子进程，2 项通过）、`uv sync --frozen`、`uv run ruff check .`、`uv run mypy`（strict，20 文件）、`uv run pytest -q`（17 项通过）、`git diff --check` 均已实际执行并通过；手动冒烟（`npm run dev` 真实运行 + `CloseMainWindow()` 模拟正常退出）确认单一 sidecar 进程、健康检查真实通过、退出后无孤儿进程；构建产物已扫描确认无 runtime secret 泄露 | 未单独记录 | ISS-010（Electron 被外部强杀时孤儿进程防护仍不完整，需 Windows Job Object）；PyInstaller 生产二进制尚未产出，生产路径分支未被真实二进制验证过（阶段 9 `PKG-01`） |
+| 阶段 3 数据基础与 API Foundation | 待创建 | `npm run lint`、`npm run typecheck`（前端不受影响，已复核）；`uv sync --directory backend --frozen`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`（strict，40 个源文件，含 `alembic/`）、`uv run pytest -q`（45 项通过：新增 ULID、DB engine/PRAGMA、错误处理器、Alembic 迁移、备份轮转、ORM 约束共 28 项）均已实际执行并通过；手动冒烟（`uv run python -m app` 真实启动）确认迁移自动执行、8 张业务表 + `alembic_version` 正确创建、`/health` 可访问 | 待独立 Reviewer | 无 Repository/Service 层（按阶段边界属于阶段 4 起逐步实现）；`所有权过滤`/`乐观锁` 本阶段只在 ORM 层面验证模式可行，实际业务强制仍需阶段 4/5 的 Repository/Service 落地 |

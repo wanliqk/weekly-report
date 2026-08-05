@@ -6,6 +6,7 @@ import uvicorn
 
 from app.core.config import get_settings
 from app.core.paths import ensure_runtime_directories
+from app.db.migrate import run_startup_migrations
 from app.main import create_app
 
 
@@ -32,6 +33,7 @@ class _AnnouncingServer(uvicorn.Server):
 def main() -> None:
     settings = get_settings()
     ensure_runtime_directories(settings)
+    run_startup_migrations(settings)
     application = create_app(settings)
     config = uvicorn.Config(
         application,

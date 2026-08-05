@@ -47,8 +47,9 @@ indent-style = "space"
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["app", "tests"]
+files = ["app", "tests", "alembic"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -33,13 +33,13 @@ Electron Main
 
 ### 1.1 当前实现快照（2026-08-05）
 
-已完成阶段 1 工程基线和阶段 2 Desktop Bootstrap（代码与测试完成，待创建阶段提交），仍不能按上图视为完整运行——业务层（认证、Service/Repository、数据库）尚未开始：
+已完成阶段 1 工程基线（提交 `3a9fdbc`）、阶段 2 Desktop Bootstrap（提交 `7386cae`）和阶段 3 数据基础与 API Foundation（代码与测试完成，待创建阶段提交），仍不能按上图视为完整运行——认证、Repository/Service 业务层尚未开始：
 
 - 根目录已建立 npm workspace；`npm run dev` 现在只启动 electron-vite，Electron Main 在 `whenReady()` 中自行拉起并管理 FastAPI sidecar（开发模式直接 spawn `backend/.venv/Scripts/python.exe -m app`，不经过 `uv run`）。
-- Electron 已实现单实例、窗口安全选项、禁止新窗口和跨地址导航；已新增 `electron/src/main/sidecar/` 子进程管理模块（动态端口获取、runtime secret 生成、健康检查轮询、Windows 下 `taskkill /pid /t /f` 进程树终止）和 `electron/src/main/ipc/register-runtime-bridge.ts`（4 个受信任 frame 校验的 IPC channel）。
-- Preload 新增 `window.runtimeBridge.{sidecar,api}` 命名空间方法（获取/订阅 sidecar 状态、重试、获取 API 基址与 runtime secret），未暴露通用 `ipcRenderer`；`safeStorage` Token 能力和文件保存对话框仍未实现（分别属于阶段 4 `FE-01`、阶段 6 `DESK-04`）。
-- FastAPI 已建立应用工厂、精确 CORS/Trusted Host、请求 ID 中间件、`RuntimeSecretMiddleware`（除 `/health`/`/docs`/`/openapi.json` 外强制校验 `X-Runtime-Secret`）与达到目标契约的 `GET /health`（含 `version` 字段和 `Cache-Control: no-store`）。
-- 统一异常映射（422 归一化）、认证（JWT）、业务 Service/Repository、SQLAlchemy Engine/Session、ORM Model 和 Alembic migration 均未实现。
+- Electron 已实现单实例、窗口安全选项、禁止新窗口和跨地址导航；已有 `electron/src/main/sidecar/` 子进程管理模块（动态端口获取、runtime secret 生成、健康检查轮询、Windows 下 `taskkill /pid /t /f` 进程树终止）和 `electron/src/main/ipc/register-runtime-bridge.ts`（4 个受信任 frame 校验的 IPC channel）。
+- Preload 已有 `window.runtimeBridge.{sidecar,api}` 命名空间方法（获取/订阅 sidecar 状态、重试、获取 API 基址与 runtime secret），未暴露通用 `ipcRenderer`；`safeStorage` Token 能力和文件保存对话框仍未实现（分别属于阶段 4 `FE-01`、阶段 6 `DESK-04`）。
+- FastAPI 已建立应用工厂、精确 CORS/Trusted Host、请求 ID 中间件、`RuntimeSecretMiddleware`（除 `/health`/`/docs`/`/openapi.json` 外强制校验 `X-Runtime-Secret`）、达到目标契约的 `GET /health`（含 `version` 字段和 `Cache-Control: no-store`），以及统一异常处理基础（`AppError`/Pydantic 422 归一化/`OperationalError`→50301/兜底 500，均不泄露堆栈）。
+- SQLAlchemy 异步 Engine/Session、SQLite PRAGMA（WAL/外键/busy_timeout/synchronous）、8 张业务表 ORM Model、Alembic 初始迁移、启动时迁移前备份与轮转（保留 10 份、路径边界校验）均已实现（阶段 3）。**认证（JWT）、业务 Service/Repository 仍未实现**——`app/repositories/`、`app/services/` 仍是空壳，数据表存在但没有任何业务 API 能读写它们。
 - `build/sidecar/` 当前只有占位说明；PyInstaller sidecar、`extraResources` 可用性和安装包流程仍未完成（阶段 9 `PKG-01`）。生产环境的可执行文件路径解析逻辑已就绪（见 §8 命名约定），文件不存在时会走类型化失败态而非崩溃。
 
 后续实现必须逐阶段把真实进度更新到 `progress.md`；本节只用于防止将目标架构误读为现状。

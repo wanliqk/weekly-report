@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 MIN_RUNTIME_SECRET_LENGTH = 32
+DATABASE_FILE_NAME = "weekly-report.db"
 
 
 class Settings(BaseSettings):
@@ -23,16 +24,21 @@ class Settings(BaseSettings):
     port: int = Field(default=0, ge=0, le=65535)
     data_dir: Path = PROJECT_ROOT / ".local-data"
     log_dir: Path = PROJECT_ROOT / ".local-data" / "logs"
+    backup_dir: Path = PROJECT_ROOT / ".local-data" / "backups"
     runtime_secret: str | None = None
     cors_origins: list[str] = [
         "http://127.0.0.1:5173",
         "http://localhost:5173",
     ]
 
-    @field_validator("data_dir", "log_dir", mode="after")
+    @field_validator("data_dir", "log_dir", "backup_dir", mode="after")
     @classmethod
     def _resolve_absolute_path(cls, value: Path) -> Path:
         return value.resolve()
+
+    @property
+    def database_path(self) -> Path:
+        return self.data_dir / DATABASE_FILE_NAME
 
     @model_validator(mode="after")
     def _require_runtime_secret_outside_tests(self) -> Self:

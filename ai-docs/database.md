@@ -6,9 +6,10 @@
 
 ## 0. 当前实现状态
 
-- 当前 `backend/pyproject.toml` 已声明 SQLAlchemy、aiosqlite 和 Alembic 依赖，但工作树中尚无 Engine/Session、ORM Model、Alembic 配置或 migration。
-- 当前不存在由本方案创建并受迁移管理的业务数据库；下列表、约束、索引、事务与备份规则全部是后续实现契约，不是已验证的 schema。
-- 首个数据基础阶段必须先实现连接/会话、SQLite PRAGMA、初始 migration 和新库升级测试；禁止用 `metadata.create_all()` 伪装迁移完成。
+- 阶段 3（`DB-01`/`DB-02`/`DB-03`）已实现：异步 Engine/Session（`backend/app/db/engine.py`、`session.py`）、PRAGMA（`foreign_keys`/`journal_mode=WAL`/`synchronous=NORMAL`/`busy_timeout`）、8 张业务表的 SQLAlchemy Model（`backend/app/models/`）、Alembic 初始迁移（`backend/alembic/versions/3f6f955b87bb_initial_schema.py`）、启动时迁移前备份/轮转（`backend/app/db/migrate.py`）均已落地，代码与测试为准，未使用 `create_all()` 代替迁移。
+- 下列表、约束、索引、事务与备份**规则**仍是权威契约来源；实现细节（如具体文件路径）以代码为准，本节只记录"哪些已经真实存在"，不重复描述设计意图。
+- Repository、Service 层（`backend/app/repositories/`、`app/services/`）尚未实现，仍是空壳；本文件描述的"所有权过滤查询""乐观锁条件更新"等业务访问模式，目前只在 `backend/tests/test_model_constraints.py` 中以 ORM 直接操作的方式验证了可行性，尚无业务代码强制执行——阶段 4 起的 Repository/Service 落地时必须遵循本文件规则，不得引入新的访问模式。
+- 迁移与备份基础设施验证方式：`backend/tests/test_migrations.py`（空库 upgrade/降级/幂等）、`backend/tests/test_migrate_backup.py`（备份触发条件、轮转、路径边界、失败停止启动）、`backend/tests/test_db_engine.py`（PRAGMA 实际连接值）。
 - 实现后以 migration、Model、自动化测试和 `progress.md` 共同证明状态；若代码与本文冲突，先修正文档或请求确认。
 
 ## 1. 全局约定
