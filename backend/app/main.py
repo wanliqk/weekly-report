@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.health import router as health_router
+from app.api.v1.system import router as system_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.middleware import RequestIdMiddleware, RuntimeSecretMiddleware
@@ -53,4 +54,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.add_middleware(RequestIdMiddleware)
     application.include_router(health_router)
+    application.include_router(system_router)
     return application

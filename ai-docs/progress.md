@@ -6,10 +6,11 @@
 
 ## 1. 总体状态
 
-- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation（代码与测试已完成，待创建阶段提交）。
-- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）。
-- 当前应进入阶段：阶段 4 认证与用户管理（阶段 3 提交后）。
-- 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现并通过质量门禁，尚未创建阶段提交。
+- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation。
+- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）。
+- 当前所在阶段：阶段 4 认证与用户管理（用户已明确指令开始）。
+- 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
+- 阶段 4 实现状态：`AUTH-01`（首次管理员初始化与默认关联数据）已实现并通过质量门禁，尚未创建阶段提交；`AUTH-02`/`USER-01`/`FE-01`/`FE-02`/`QA-04` 尚未开始。
 - 当前阻塞：无业务/技术决策阻塞。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 
@@ -63,6 +64,16 @@
   - 兜底 `Exception` → `code=50001`、`HTTP 500`，`logger.exception` 记录（含 request id），响应体不含堆栈或异常消息。
 - 已验证：注册这些处理器后 `TestClient` 默认的“重新抛出未处理异常”行为不会触发（异常在 Starlette `ExceptionMiddleware` 层被正确截获），且外层 `RequestIdMiddleware` 仍能给这些错误响应加上 `X-Request-Id`。
 
+### 首次管理员初始化（阶段 4 新增，AUTH-01）
+
+- `backend/app/core/clock.py`：`Clock = Callable[[], datetime]` 类型别名 + `utc_now()` 默认实现，供 Service 以关键字参数注入固定时间，测试可替换（coding-rule.md 4.3 要求的模式，供后续 Service 复用）。
+- `backend/app/core/security.py`：`hash_password`/`verify_password`，基于 `argon2-cffi` 的 `PasswordHasher`（Argon2id 默认参数）；`verify_password` 捕获 `VerifyMismatchError`/`InvalidHash` 返回 `False`，不向上抛出。
+- `backend/app/repositories/user.py::UserRepository`：`any_exists()`（`SELECT COUNT(*)`）供 `bootstrap-status` 使用；`create_if_no_users_exist()` 是本任务的关键并发安全点——用单条 `INSERT ... SELECT ... WHERE NOT EXISTS (SELECT id FROM users)` 把“判空”和“写入”折进同一条 SQLite 语句，利用 SQLite 单写者锁把两个并发调用天然串行化，第二个调用命中 `WHERE NOT EXISTS` 为假从而插入 0 行，返回 `False` 让 Service 抛 `AlreadyInitializedError`；不依赖任何新表或应用层锁。已用两个真实并发 `asyncio.gather` 调用验证（`test_concurrent_bootstrap_attempts_only_ever_create_one_admin`，额外手动重复执行 5 次未出现 flaky）。
+- `backend/app/repositories/user_settings.py`、`backend/app/repositories/template.py`：薄封装（`add`/`add_template`/`add_version`），职责仅为 `session.add()` + `flush()`，不含业务判断。
+- `backend/app/services/bootstrap.py::BootstrapService`：`is_initialized()`；`bootstrap_admin()` 在同一 `AsyncSession`（同一事务）内完成 `users`（原子守卫插入）→ 重新 `session.get()` 刷新以取回 `token_version`/`is_active`/`created_at` 等由 SQLite `DEFAULT` 填充的列 → `user_settings` → `report_templates`（`current_version_no=1`）→ `template_versions`（`version_no=1`，两个核心字段 `today_work`/`tomorrow_plan`，均 `required=true`/`enabled=true`，`field_key` 各自独立 ULID）→ 最终统一 `commit()`；失败路径抛 `AlreadyInitializedError`（`code=40001`，未在 `api.md` 新增专用错误码，复用已登记的通用业务规则校验码）。
+- `backend/app/services/user.py::normalize_username`：`strip().casefold()`，是 `uq_users_username_normalized` 唯一约束背后的规范化规则，供 `AUTH-01` 和未来 `USER-01` 共用同一实现，避免两处判重逻辑漂移。
+- `backend/app/schemas/system.py` + `backend/app/api/v1/system.py`：`GET /api/v1/system/bootstrap-status`（匿名，仍需 `X-Runtime-Secret`）、`POST /api/v1/system/bootstrap-admin`（同上）。请求校验：`username` 3–64 字符、`password` 8–128 字符、`display_name` 1–100 字符；密码最小长度 8 位是本任务新增的输入校验基线（上游文档未给出具体数值，已记录到 `decisions.md`）。响应只返回账号元数据（`id`/`username`/`display_name`/`role`/`is_active`/`created_at`），不回传密码或哈希。已注册进 `backend/app/main.py`。
+
 ### 已记录的阶段验证
 
 工程基线（阶段 1）交付记录（历史）：`npm ci`、lint、typecheck、`npm test`（1 项前端测试）、`npm run build`、`uv sync --frozen`、`uv run ruff/mypy/pytest`（3 项后端测试）均已通过。
@@ -79,15 +90,25 @@
 - 手动冒烟：`uv run --directory backend python -m app` 真实启动，观察到日志 `Running upgrade  -> 3f6f955b87bb, initial schema`，随后 `/health` 可访问；用 `sqlite3`/Python 直接检查 `.local-data/weekly-report.db`，确认 8 张业务表 + `alembic_version` 均已正确创建。
 - `git status --short`：除预期新增/修改文件外无遗留改动。
 
+阶段 4 `AUTH-01` 本次交付实际执行并通过：
+
+- `npm run lint`、`npm run typecheck`：前端未受影响（本任务为后端专属，无 Electron/Vue 改动），复核通过。
+- `uv run --directory backend ruff check .`、`ruff format --check .`：0 error。
+- `uv run --directory backend mypy`（strict，53 个源文件）：0 错误。
+- `uv run --directory backend pytest`：**63 项测试全部通过**（阶段 3 遗留 45 项 + 本任务新增 18 项：Argon2id 哈希/校验 5、Clock 1、Bootstrap Service 6（含并发竞争 1 项）、Bootstrap API 6）；并发竞争测试额外单独重复执行 5 次，稳定通过、未观察到 flaky。
+- 手动冒烟：`uv run python -m app` 真实子进程启动于独立 scratch 数据目录，确认迁移自动执行、`/api/v1/system/bootstrap-status` 路由已注册且在未配置 `runtime_secret` 时仍正确返回 `40103`（新路由未意外绕过既有中间件）。
+- `git status --short`：除预期新增/修改文件外无遗留改动。
+
 ## 3. 尚未实现
 
 以下均为设计目标，当前不得标记为完成：
 
 - 开发/生产 sidecar 路径解析中，生产分支的 PyInstaller `onedir` 产物本身（`PKG-01`，阶段 9）——`build/sidecar/` 仍是空占位目录。
-- safeStorage Token 生命周期（阶段 2 只搭了 preload 命名空间骨架，未接入具体 Token 存取）。
-- Repository、Service 层完全未实现（`app/repositories/`、`app/services/` 仍是空壳）；本阶段的"所有权过滤""乐观锁"只在 ORM/SQL 层面验证了模式可行，尚未有业务代码强制执行。
-- JWT 鉴权、Argon2 密码哈希的实际使用、所有权隔离的 API 层落地。
-- 首次管理员、登录、用户管理、模板、设置、日报、导出和周报全部业务能力。
+- safeStorage Token 生命周期（阶段 2 只搭了 preload 命名空间骨架，未接入具体 Token 存取；阶段 4 `FE-01`）。
+- Repository、Service 层：`AUTH-01` 已交付第一批真实实现（`user`/`user_settings`/`template` repository，`bootstrap`/`user` service），但仅覆盖首次初始化路径；登录、鉴权依赖、用户管理、模板发布、日报、周报、导出对应的 Repository/Service 仍未实现。
+- JWT 鉴权、`token_version` 校验、登录/退出/改密 API（`AUTH-02`）——目前唯一能写 `users` 表的入口是 `bootstrap-admin`，且只能创建首个 admin。
+- 管理员用户管理（`USER-01`）、模板、设置、日报、导出和周报全部业务能力。
+- 前端首次初始化/登录页面与 Token 桥接（`FE-01`）、用户管理界面（`FE-02`）。
 - Playwright E2E、PyInstaller 和 Windows 安装/升级验证。
 - Windows Job Object 级别的孤儿进程彻底防护（ISS-010，非阻塞）。
 - admin 手动整库备份 API（`BACKUP-01`，阶段 8）——DB-03 的自动迁移前备份机制与之相关但不是同一功能，手动备份走独立的短期下载文件流程。
@@ -100,12 +121,20 @@
 
 ## 5. 下一检查点
 
-阶段 3 已满足以下目标，待创建独立 Conventional Commit 后进入阶段 4：
+阶段 3 已满足以下目标，独立提交 `8480515` 已创建：
 
 1. ✅ `uv run alembic upgrade head` 在空库上成功执行，`alembic_version` 指向唯一 head（自动化测试验证）。
 2. ✅ `PRAGMA foreign_keys`、`journal_mode`、`busy_timeout`、`synchronous` 的实际连接值有自动化验证。
 3. ✅ 唯一约束、CHECK、所有权过滤（ORM 层）、乐观锁（ORM 层）、事务回滚、数据库繁忙映射、迁移失败停止启动均有测试。
 4. ✅ migration、Model 字段命名与 `database.md` 一致（8 张表、约束、索引均逐项对照实现）。
-5. ✅ 阶段 3 质量门禁通过；独立 Reviewer 审查与 Conventional Commit 待用户确认后执行。
+5. ✅ 阶段 3 质量门禁通过并创建独立提交；独立 Reviewer 审查仍待补齐（非阻塞）。
 
-阶段 4（认证与用户管理）启动前提醒：`AUTH-01` 需要 Repository/Service 分层的第一个真实落地案例，应作为后续 Agent 建立分层范式的参考点，而不是简单在 Router 里直接操作 Model。
+阶段 4（认证与用户管理）已开始，`AUTH-01`（首次管理员初始化与默认关联数据）已实现并通过质量门禁：
+
+1. ✅ 空库原子创建 admin + `user_settings` + `report_templates` + `template_versions`（同一事务，自动化测试验证）。
+2. ✅ 重复初始化安全失败，含真实并发场景（`asyncio.gather` 双重调用，仅一个成功，自动化测试验证，额外重复执行 5 次无 flaky）。
+3. ✅ 密码使用 Argon2id 哈希，不落明文、不回传哈希。
+4. ✅ 默认模板核心字段（今日工作内容/明日工作计划）与 `database.md` 3.4 节 JSON 结构一致。
+5. ✅ 质量门禁（ruff/mypy/pytest/lint/typecheck）通过；待创建阶段提交，独立 Reviewer 审查仍待补齐（非阻塞）。
+
+`AUTH-01` 建立的 Repository/Service 分层范式（Repository 只做数据访问，跨表事务编排在 Service，业务异常子类化 `AppError`）供 `AUTH-02`（JWT/登录/token_version）及后续任务复用，而不是简单在 Router 里直接操作 Model。

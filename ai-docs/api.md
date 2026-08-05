@@ -13,7 +13,8 @@
 - `GET /health` 已达目标契约：返回统一成功结构、`X-Request-Id`、`data.status`、`data.version` 和 `Cache-Control: no-store`，且豁免 `X-Runtime-Secret` 校验。
 - 已配置精确 Trusted Host/CORS 基线，并已实现 `X-Runtime-Secret` 校验中间件（除 `/health`、`/docs`、`/openapi.json` 外的所有请求均需携带）。
 - 统一异常响应基础已实现（`backend/app/core/errors.py`）：`RequestValidationError`（Pydantic 422）归一化为 `code=40001`/`HTTP 400`；`AppError` 基类供后续业务异常子类化；`OperationalError` 映射为 `50301`；未捕获异常映射为 `50001`，均不泄露堆栈或驱动原始报错文本。**注意**：这只是异常处理基础设施，第 3 节列出的具体业务错误码（如 `40901`/`40902` 等）仍随各自业务任务（`DAILY-*`/`WEEKLY-*` 等）实现，本节状态更新不代表业务接口已存在。
-- `/api/v1` 下的 bootstrap、认证、用户、模板、日报、导出、周报、设置和能力接口均未实现——数据层（8 张表的 SQLAlchemy Model、Alembic 迁移）已在阶段 3 落地，但 Repository/Service/Router 均未实现，接口不可调用。
+- `GET /api/v1/system/bootstrap-status`、`POST /api/v1/system/bootstrap-admin` 已在阶段 4 `AUTH-01` 实现并有自动化测试（`backend/tests/test_system_bootstrap_api.py`、`test_bootstrap_service.py`）：仍需 `X-Runtime-Secret`；空库返回 `initialized:false`；创建成功后返回账号元数据（不含密码/哈希）并原子建立默认模板；重复调用返回 `40001`（含并发场景）。
+- 认证（登录/`auth/*`）、用户管理、模板、日报、导出、周报、设置和能力接口均未实现——Repository/Service 层已有 `AUTH-01` 的首个落地案例（`backend/app/repositories/`、`backend/app/services/`），但仅覆盖首次初始化路径，其余 Router 均未实现，接口不可调用。
 
 本文后续示例均为目标契约；实现任务不得为了匹配“已存在”的假象跳过测试或状态更新。
 

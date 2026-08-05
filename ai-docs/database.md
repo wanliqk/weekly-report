@@ -8,7 +8,7 @@
 
 - 阶段 3（`DB-01`/`DB-02`/`DB-03`）已实现：异步 Engine/Session（`backend/app/db/engine.py`、`session.py`）、PRAGMA（`foreign_keys`/`journal_mode=WAL`/`synchronous=NORMAL`/`busy_timeout`）、8 张业务表的 SQLAlchemy Model（`backend/app/models/`）、Alembic 初始迁移（`backend/alembic/versions/3f6f955b87bb_initial_schema.py`）、启动时迁移前备份/轮转（`backend/app/db/migrate.py`）均已落地，代码与测试为准，未使用 `create_all()` 代替迁移。
 - 下列表、约束、索引、事务与备份**规则**仍是权威契约来源；实现细节（如具体文件路径）以代码为准，本节只记录"哪些已经真实存在"，不重复描述设计意图。
-- Repository、Service 层（`backend/app/repositories/`、`app/services/`）尚未实现，仍是空壳；本文件描述的"所有权过滤查询""乐观锁条件更新"等业务访问模式，目前只在 `backend/tests/test_model_constraints.py` 中以 ORM 直接操作的方式验证了可行性，尚无业务代码强制执行——阶段 4 起的 Repository/Service 落地时必须遵循本文件规则，不得引入新的访问模式。
+- Repository、Service 层（`backend/app/repositories/`、`app/services/`）的首个真实落地是阶段 4 `AUTH-01`（`user.py`/`user_settings.py`/`template.py` repository，`bootstrap.py`/`user.py` service），覆盖首次初始化这一条路径；本文件描述的"所有权过滤查询""乐观锁条件更新"等业务访问模式，其余路径仍只在 `backend/tests/test_model_constraints.py` 中以 ORM 直接操作的方式验证了可行性，尚无业务代码强制执行——后续 Repository/Service 落地时必须遵循本文件规则，不得引入新的访问模式。
 - 迁移与备份基础设施验证方式：`backend/tests/test_migrations.py`（空库 upgrade/降级/幂等）、`backend/tests/test_migrate_backup.py`（备份触发条件、轮转、路径边界、失败停止启动）、`backend/tests/test_db_engine.py`（PRAGMA 实际连接值）。
 - 实现后以 migration、Model、自动化测试和 `progress.md` 共同证明状态；若代码与本文冲突，先修正文档或请求确认。
 
@@ -212,6 +212,8 @@ users 1──N export_jobs
 | 周报生成 | 周唯一性、读取来源、写周报/快照/来源关系 |
 | 周报重生成 | 乐观锁、替换两份内容、来源快照和关系 |
 | 修改/重置密码 | 更新哈希、密码时间、递增 token_version |
+
+**首次初始化的并发安全**：“判断 `users` 是否为空”与“写入首个 admin”若拆成两条语句（先 `SELECT COUNT`，再 `INSERT`），两个并发请求可能都读到空表后各自写入，产生两个 admin。`AUTH-01`（`backend/app/repositories/user.py::create_if_no_users_exist`）改用单条 `INSERT INTO users (...) SELECT ... WHERE NOT EXISTS (SELECT id FROM users)`：SQLite 同一时刻只允许一个连接持有写锁执行这条语句，后到的调用要么阻塞到 `busy_timeout`、要么在拿到锁时重新求值 `NOT EXISTS`（此时已为假），从而插入 0 行——不需要新表或应用层锁即可保证互斥。后续任何“先查是否已存在、再写入单例/去重记录”的场景应复用同一模式，而不是引入独立的锁表。
 
 ## 5. 迁移与备份规范
 

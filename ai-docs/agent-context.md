@@ -45,22 +45,22 @@
 
 - 根目录是 npm workspace，包管理器基准为 npm 10，`electron/` 是工作区成员。
 - Electron 39、electron-vite 5、Vue 3、TypeScript、Vue Router、Pinia、Element Plus、Axios 和 Vitest 已配置。
-- Electron 已具备单实例窗口基线；窗口启用 `contextIsolation` 与 sandbox，禁用 `nodeIntegration`，并拒绝任意新窗口及非当前页面导航。
-- preload 当前只暴露只读的运行平台信息。
-- renderer 当前只有工程状态首页和一项状态文案单元测试，业务页面尚未接入。
-- FastAPI/uv/Python 3.12 项目已建立，绑定配置只允许 `127.0.0.1`，Uvicorn 固定单 worker，端口默认可设为动态端口 `0`。
-- 后端目前只有 `/health`、统一成功响应模型、请求 ID 中间件、受限 CORS/Host 配置及对应测试。
-- SQLAlchemy、Alembic、认证、业务模型、Repository、Service、业务 API、sidecar 进程管理和发布产物尚不能从当前代码证明已实现。
+- Electron 已实现单实例、安全窗口选项、sidecar 生命周期管理（动态端口、随机 `runtime_secret`、健康检查、退出清理）；preload 暴露 `runtimeBridge.{sidecar,api}` 命名空间，`safeStorage` Token 存取尚未接入（阶段 4 `FE-01`）。
+- renderer 在 sidecar 未就绪时展示 `StartupView`；业务页面（登录、日报、周报等）尚未接入。
+- FastAPI/uv/Python 3.12 项目已建立，绑定配置只允许 `127.0.0.1`，Uvicorn 固定单 worker；`RuntimeSecretMiddleware`、统一异常处理、达标 `/health` 均已实现。
+- SQLAlchemy 异步 Engine/Session、SQLite PRAGMA、8 张业务表 ORM、Alembic 初始迁移、迁移前备份+轮转均已实现（阶段 3）。
+- Repository/Service 层已有首个真实落地：`AUTH-01`（首次管理员初始化，`POST /api/v1/system/bootstrap-admin`、`GET /api/v1/system/bootstrap-status`），原子创建 admin + 默认设置 + 默认模板 + 首个模板版本，重复初始化（含并发）安全拒绝。
+- 登录、JWT、`token_version`、用户管理、模板发布、日报、周报、导出、手动备份和发布产物（PyInstaller/安装包）尚不能从当前代码证明已实现。
 - `build/sidecar/` 当前只是发布产物占位目录。
 
 “依赖已列入清单”不等于对应业务已完成；“技术方案已描述”也不等于已经落地。
 
 ## 5. 当前阶段与下一步
 
-- 已完成阶段：工程基线。
-- 尚未开始阶段：Desktop Bootstrap。
-- 下一阶段目标：Electron 管理 FastAPI sidecar 生命周期，完成动态端口、随机 `runtime_secret`、健康检查、开发/生产启动差异、数据/日志目录、安全 preload 契约和退出清理。
-- Desktop Bootstrap 完成前，不得把数据库、认证、日报、周报或导出能力标为已完成。
+- 已完成阶段：工程基线（`3a9fdbc`）、Desktop Bootstrap（`7386cae`）、数据基础与 API Foundation（`8480515`）。
+- 当前阶段：阶段 4 认证与用户管理，进行中——`AUTH-01` 已实现并通过质量门禁，待创建阶段提交。
+- 下一任务：`AUTH-02`（JWT、Argon2id 校验、`token_version` 与鉴权依赖），随后 `USER-01`、`FE-01`、`FE-02`、`QA-04`。
+- 阶段 4 完成前，不得把模板、日报、周报或导出能力标为已完成。
 
 具体任务编号、依赖和状态以 `ai-docs/task.md` 为准；完成事实以 `ai-docs/progress.md` 为准。
 

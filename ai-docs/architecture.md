@@ -33,7 +33,7 @@ Electron Main
 
 ### 1.1 当前实现快照（2026-08-05）
 
-已完成阶段 1 工程基线（提交 `3a9fdbc`）、阶段 2 Desktop Bootstrap（提交 `7386cae`）和阶段 3 数据基础与 API Foundation（代码与测试完成，待创建阶段提交），仍不能按上图视为完整运行——认证、Repository/Service 业务层尚未开始：
+已完成阶段 1 工程基线（提交 `3a9fdbc`）、阶段 2 Desktop Bootstrap（提交 `7386cae`）和阶段 3 数据基础与 API Foundation（提交 `8480515`），阶段 4 认证与用户管理已开始，仍不能按上图视为完整运行：
 
 - 根目录已建立 npm workspace；`npm run dev` 现在只启动 electron-vite，Electron Main 在 `whenReady()` 中自行拉起并管理 FastAPI sidecar（开发模式直接 spawn `backend/.venv/Scripts/python.exe -m app`，不经过 `uv run`）。
 - Electron 已实现单实例、窗口安全选项、禁止新窗口和跨地址导航；已有 `electron/src/main/sidecar/` 子进程管理模块（动态端口获取、runtime secret 生成、健康检查轮询、Windows 下 `taskkill /pid /t /f` 进程树终止）和 `electron/src/main/ipc/register-runtime-bridge.ts`（4 个受信任 frame 校验的 IPC channel）。

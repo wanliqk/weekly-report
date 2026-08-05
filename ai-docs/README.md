@@ -54,4 +54,4 @@
 
 ## 5. 当前阶段
 
-截至 2026-08-05，当前工作树可证明工程基线已经建立；Desktop Bootstrap 尚未开始。具体事实与下一步以 `progress.md` 和 `task.md` 为准。
+截至 2026-08-05，当前工作树可证明工程基线、Desktop Bootstrap、数据基础与 API Foundation 均已完成并提交；阶段 4 认证与用户管理进行中（`AUTH-01` 已实现，待创建阶段提交）。具体事实与下一步以 `progress.md` 和 `task.md` 为准。

@@ -12,8 +12,8 @@
 | ISS-002 | P0 | RESOLVED | runtime secret 尚未生成和校验 | 阶段 2 已实现并随 `7386cae` 交付：Main 每次启动经 `crypto.randomBytes(32)` 随机生成，仅经环境变量传给子进程、仅内存持有；后端 `RuntimeSecretMiddleware` 对除 `/health`/`/docs`/`/openapi.json` 外的请求强制校验；已扫描构建产物确认密钥不进入 Vite 变量。业务 API 本身仍要等阶段 4 JWT 落地才算真正开放（见 ISS-006） | 阶段 2 `DESK-02`/`BE-02`/`DESK-03`（已交付） |
 | ISS-003 | P1 | RESOLVED | `/health` 未达到冻结契约 | 阶段 2 已补齐 `version` 字段与 `Cache-Control: no-store`，并有对应测试，已随 `7386cae` 交付 | 阶段 2 `BE-02`（已交付） |
 | ISS-004 | P1 | RESOLVED | 业务窗口不等待后端健康成功 | 阶段 2 已实现并随 `7386cae` 交付：`App.vue` 在 sidecar 未 `ready` 时渲染 `StartupView`（pending/failed 态，failed 态可重试并展示脱敏日志），不再直接展示业务首页 | 阶段 2 `DESK-03`（已交付） |
-| ISS-005 | P1 | MITIGATED | 数据库与迁移基础尚未实现 | 阶段 3 已实现 Engine/Session、8 张表 ORM、Alembic 初始迁移、PRAGMA、迁移前备份+轮转，代码与测试均完成（45 项后端测试通过）；待阶段 3 独立 Conventional Commit 后转 `RESOLVED` | 阶段 3 `DB-01`..`DB-03`（已实现，待提交） |
-| ISS-006 | P0 | OPEN | 认证、所有权与业务 API 尚未实现 | 当前没有 JWT、runtime 双校验、用户隔离；Repository/Service 层仍是空壳；不得把占位模块暴露为可用功能 | 阶段 4 起按依赖逐步实现；每个 Repository 查询强制 owner 条件 |
+| ISS-005 | P1 | MITIGATED | 数据库与迁移基础尚未实现 | 阶段 3 已实现 Engine/Session、8 张表 ORM、Alembic 初始迁移、PRAGMA、迁移前备份+轮转，代码与测试均完成（45 项后端测试通过），并已创建独立提交 `8480515`；独立 Reviewer 审查完成前保持 `MITIGATED`，不升级为 `RESOLVED` | 阶段 3 `DB-01`..`DB-03`（已提交，待独立 Reviewer 审查） |
+| ISS-006 | P0 | OPEN | 认证、所有权与业务 API 尚未实现 | `AUTH-01` 已实现首次管理员初始化（Repository/Service 首个真实落地），但仍无 JWT、登录、`token_version` 校验或所有权隔离；除 bootstrap 外的 Repository/Service 仍是空壳；不得把占位模块暴露为可用功能 | 阶段 4 `AUTH-02` 起按依赖逐步实现；每个业务 Repository 查询强制 owner 条件 |
 | ISS-007 | P2 | OPEN | Element Plus 当前全量引入 | renderer 生产包偏大，阶段基线曾观测主 JS 约 2.6 MB；会影响启动和构建告警 | 前端页面组件稳定后改为按需引入，并以构建体积对比验证；不得为此提前混入阶段 2 提交 |
 | ISS-008 | P1 | OPEN | PyInstaller sidecar 和 Windows 安装链路仍为占位 | `build/sidecar` 只有说明文件，安装包不能交付可运行后端 | 阶段 9 `PKG-01`/`PKG-02`：onedir、extraResources、无 Python 干净机验证 |
 | ISS-009 | P2 | RESOLVED | AI 上下文文档需要形成独立阶段提交 | 12 份上下文文档、启动路由和维护规则已建立并完成交叉复核 | 随本次独立文档阶段提交交付；后续每个实现阶段持续维护 |
@@ -27,7 +27,7 @@
 | RISK-002 | P2 | MITIGATED | 周报确认重生成会覆盖人工编辑且 V1 无恢复 | UI 必须醒目确认；API 必须要求显式 `confirm_overwrite` 和乐观锁 | 用户要求历史比较/恢复时设计版本表并进入 P2 |
 | RISK-003 | P2 | OPEN | PyInstaller 体积和杀软误报 | 采用 onedir、许可证清单和干净机验证；发布时评估签名 | 首个 sidecar 包产出后测量体积、启动耗时和杀软结果 |
 | RISK-004 | P2 | MITIGATED | admin 手动备份包含所有用户数据 | 仅 admin、创建者下载、随机短期 ID、15 分钟过期、UI 敏感提示 | 若备份需要细分用户范围或外部存储，先更新契约与安全设计 |
-| RISK-005 | P2 | OPEN | 当前测试仍只覆盖基础设施，未覆盖业务逻辑 | 现有前端 36 项（sidecar 生命周期/UI）+ 后端 45 项（健康契约/runtime secret/数据库/迁移/异常处理）测试，均属工程/基础设施层，尚无认证、日报、周报等业务逻辑测试 | 各阶段由 Agent C 按 `task.md` 添加契约、权限、并发、集成和 E2E 覆盖 |
+| RISK-005 | P2 | OPEN | 当前测试大部分仍是基础设施覆盖，业务逻辑覆盖刚起步 | 现有前端 36 项（sidecar 生命周期/UI）+ 后端 63 项（健康契约/runtime secret/数据库/迁移/异常处理 45 项 + `AUTH-01` 首次初始化业务逻辑 18 项，含并发竞争）；登录、日报、周报等其余业务逻辑仍无测试 | 各阶段按 `task.md` 添加契约、权限、并发、集成和 E2E 覆盖 |
 
 ## 3. 当前阻塞项
 
