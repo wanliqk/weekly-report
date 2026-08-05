@@ -54,4 +54,4 @@
 
 ## 5. 当前阶段
 
-截至 2026-08-05，当前工作树可证明工程基线、Desktop Bootstrap、数据基础与 API Foundation 均已完成并提交；阶段 4 认证与用户管理的六项任务均已完成实现、自测、主 Agent 审查与质量门禁，并按用户明确指令创建本地实现提交。任务仍统一处于 `REVIEW`，等待独立 Reviewer。具体事实与下一步以 `progress.md` 和 `task.md` 为准。
+截至 2026-08-05，工程基线、Desktop Bootstrap、数据基础与 API Foundation、认证与用户管理均已完成并提交；阶段 4 独立审查完成，六项任务统一为 `DONE`。阶段 5 模板、设置与日报闭环已开始，`TEMPLATE-01`、`SETTING-01` 为 `IN_PROGRESS`。具体事实与下一步以 `progress.md` 和 `task.md` 为准。
