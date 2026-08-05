@@ -3,6 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 
 import {
   IPC_CHANNELS,
+  type ExportSaveResult,
   type RuntimeApiConfig,
   type SecureTokenSnapshot,
   type SidecarStatusSnapshot
@@ -33,6 +34,10 @@ const runtimeBridge = Object.freeze({
     set: (token: string): Promise<SecureTokenSnapshot> =>
       ipcRenderer.invoke(IPC_CHANNELS.TOKEN_SET, token),
     clear: (): Promise<SecureTokenSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.TOKEN_CLEAR)
+  }),
+  exportFile: Object.freeze({
+    save: (suggestedName: string, data: Uint8Array): Promise<ExportSaveResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXPORT_SAVE_FILE, { suggestedName, data })
   })
 })
 

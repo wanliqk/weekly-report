@@ -1,4 +1,5 @@
 import type {
+  ExportSaveResult,
   RuntimeApiConfig,
   SecureTokenSnapshot,
   SidecarStatusSnapshot
@@ -22,6 +23,9 @@ declare global {
         readonly get: () => Promise<SecureTokenSnapshot>
         readonly set: (token: string) => Promise<SecureTokenSnapshot>
         readonly clear: () => Promise<SecureTokenSnapshot>
+      }
+      readonly exportFile: {
+        readonly save: (suggestedName: string, data: Uint8Array) => Promise<ExportSaveResult>
       }
     }
   }

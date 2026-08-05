@@ -5,12 +5,15 @@ import { useRouter } from 'vue-router'
 
 import { userMessage } from '@renderer/api/client'
 import { listDailyReports } from '@renderer/api/daily-reports'
+import { createDailyReportExport, downloadDailyReportExportFile } from '@renderer/api/exports'
 import type {
   DailyReportListItemData,
   DailyReportQuery,
   DailyStatus
 } from '@renderer/types/daily-report'
+import type { ExportCreateRequest } from '@renderer/types/export'
 import { dailyStatusLabel, formatShanghaiTime } from '@renderer/utils/daily-form'
+import { invalidExportReportIds } from '@renderer/utils/export'
 
 const router = useRouter()
 const loading = ref(false)
@@ -20,6 +23,8 @@ const status = ref<DailyStatus | undefined>()
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+const selectedIds = ref<string[]>([])
+const exporting = ref(false)
 
 onMounted(() => load())
 
@@ -62,6 +67,64 @@ function statusTagType(value: DailyStatus): 'warning' | 'success' | 'info' {
   }
   return types[value]
 }
+
+function describeReportId(id: string): string {
+  return items.value.find((item) => item.id === id)?.work_date ?? id
+}
+
+async function exportSelected(): Promise<void> {
+  if (selectedIds.value.length === 0) {
+    return
+  }
+  await runExport({ report_ids: [...selectedIds.value] })
+}
+
+async function exportByCurrentFilter(): Promise<void> {
+  await runExport({
+    filter: {
+      status: 'archived',
+      ...(dateRange.value ? { date_from: dateRange.value[0], date_to: dateRange.value[1] } : {})
+    }
+  })
+}
+
+async function runExport(request: ExportCreateRequest): Promise<void> {
+  exporting.value = true
+  try {
+    const job = await createDailyReportExport(request)
+    if (job.status === 'failed') {
+      ElMessage.error('导出生成失败，请稍后重试')
+      return
+    }
+    if (job.record_count === 0) {
+      ElMessage.warning('所选或筛选范围内没有可导出的归档日报')
+      return
+    }
+    const file = await downloadDailyReportExportFile(job.id)
+    const outcome = await window.runtimeBridge.exportFile.save(
+      file.fileName,
+      new Uint8Array(file.data)
+    )
+    if (outcome.status === 'saved') {
+      ElMessage.success('导出文件已保存')
+    } else if (outcome.status === 'canceled') {
+      ElMessage.info('已取消保存')
+    } else {
+      ElMessage.error('保存导出文件失败，请检查目标位置后重试')
+    }
+  } catch (error) {
+    const invalidIds = invalidExportReportIds(error)
+    if (invalidIds && invalidIds.length > 0) {
+      ElMessage.error(
+        `以下日报不可导出（需为本人已归档日报）：${invalidIds.map(describeReportId).join('、')}`
+      )
+    } else {
+      ElMessage.error(userMessage(error))
+    }
+  } finally {
+    exporting.value = false
+  }
+}
 </script>
 
 <template>
@@ -94,12 +157,27 @@ function statusTagType(value: DailyStatus): 'warning' | 'success' | 'info' {
       <el-button @click="resetFilters">重置</el-button>
     </section>
 
+    <section class="export-toolbar">
+      <el-button :disabled="selectedIds.length === 0" :loading="exporting" @click="exportSelected">
+        导出所选（{{ selectedIds.length }}）
+      </el-button>
+      <el-button :loading="exporting" @click="exportByCurrentFilter">
+        导出当前筛选（仅归档）
+      </el-button>
+      <span class="export-hint">仅本人已归档日报可导出；未归档记录会被整体拒绝并提示</span>
+    </section>
+
     <section class="table-card">
       <el-table
         v-loading="loading"
         :data="items"
-        @row-click="(row) => router.push(`/daily/${row.id}`)"
+        row-key="id"
+        @row-click="(row, column) => column.type !== 'selection' && router.push(`/daily/${row.id}`)"
+        @selection-change="
+          (rows: DailyReportListItemData[]) => (selectedIds = rows.map((row) => row.id))
+        "
       >
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="work_date" label="工作日期" min-width="160">
           <template #default="scope">
             <strong class="report-date">{{ scope.row.work_date }}</strong>

@@ -4,10 +4,12 @@ import { ipcMain } from 'electron'
 import {
   IPC_CHANNELS,
   RUNTIME_SECRET_HEADER,
+  type ExportSaveResult,
   type RuntimeApiConfig,
   type SecureTokenSnapshot,
   type SidecarStatusSnapshot
 } from '../../shared/contracts'
+import type { ExportFileSaver } from '../export/file-saver'
 import type { SecureTokenStore } from '../security/secure-token-store'
 import type { SidecarManager } from '../sidecar/manager'
 
@@ -17,11 +19,16 @@ function assertTrustedSender(event: IpcMainInvokeEvent, window: BrowserWindow): 
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 /** Wires the sidecar manager to the small, purpose-named IPC surface the preload script exposes. Returns a disposer to call when the owning window is destroyed. */
 export function registerRuntimeBridge(
   manager: SidecarManager,
   window: BrowserWindow,
-  tokenStore: SecureTokenStore
+  tokenStore: SecureTokenStore,
+  exportFileSaver: ExportFileSaver
 ): () => void {
   ipcMain.handle(IPC_CHANNELS.SIDECAR_GET_STATUS, (event): SidecarStatusSnapshot => {
     assertTrustedSender(event, window)
@@ -68,6 +75,17 @@ export function registerRuntimeBridge(
     return tokenStore.clearToken()
   })
 
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_SAVE_FILE,
+    async (event, payload: unknown): Promise<ExportSaveResult> => {
+      assertTrustedSender(event, window)
+      if (!isRecord(payload)) {
+        throw new Error('rejected invalid export save payload')
+      }
+      return exportFileSaver.save(payload.suggestedName, payload.data)
+    }
+  )
+
   const forwardStateChange = (snapshot: SidecarStatusSnapshot): void => {
     if (window.isDestroyed()) {
       return
@@ -83,6 +101,7 @@ export function registerRuntimeBridge(
     ipcMain.removeHandler(IPC_CHANNELS.TOKEN_GET)
     ipcMain.removeHandler(IPC_CHANNELS.TOKEN_SET)
     ipcMain.removeHandler(IPC_CHANNELS.TOKEN_CLEAR)
+    ipcMain.removeHandler(IPC_CHANNELS.EXPORT_SAVE_FILE)
     manager.off('state-changed', forwardStateChange)
   }
 }

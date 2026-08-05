@@ -4,6 +4,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings
 from app.core.errors import AppError
 from app.db.session import get_db_session
 from app.models import User
@@ -15,6 +16,11 @@ _bearer = HTTPBearer(auto_error=False)
 def get_jwt_secret(request: Request) -> str:
     secret: str = request.app.state.jwt_secret
     return secret
+
+
+def get_app_settings(request: Request) -> Settings:
+    settings: Settings = request.app.state.settings
+    return settings
 
 
 async def get_current_user(

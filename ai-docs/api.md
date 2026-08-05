@@ -1,20 +1,22 @@
 # API 接口规范
 
-> 状态：目标 API 契约已基线化（V1；系统、认证与用户管理已实现，其余业务待实现）
-> 更新日期：2026-08-05
+> 状态：目标 API 契约已基线化（V1；系统、认证、用户管理、模板、日报、设置/能力、导出已实现，周报待实现）
+> 更新日期：2026-08-06
 > 基础路径：`/api/v1`
 
 ## 0. 契约状态与当前实现
 
 本文件定义 V1 目标接口。接口出现在表格中不代表路由已经存在；联调和验收必须以当前代码、自动化测试与 `progress.md` 为准。
 
-截至 2026-08-05：
+截至 2026-08-06：
 
 - `GET /health` 已达目标契约：返回统一成功结构、`X-Request-Id`、`data.status`、`data.version` 和 `Cache-Control: no-store`，且豁免 `X-Runtime-Secret` 校验。
-- 已配置精确 Trusted Host/CORS 基线，并已实现 `X-Runtime-Secret` 校验中间件（除 `/health`、`/docs`、`/openapi.json` 外的所有请求均需携带）。
-- 统一异常响应基础已实现（`backend/app/core/errors.py`）：`RequestValidationError`（Pydantic 422）归一化为 `code=40001`/`HTTP 400`；`AppError` 基类供后续业务异常子类化；`OperationalError` 映射为 `50301`；未捕获异常映射为 `50001`，均不泄露堆栈或驱动原始报错文本。**注意**：这只是异常处理基础设施，第 3 节列出的具体业务错误码（如 `40901`/`40902` 等）仍随各自业务任务（`DAILY-*`/`WEEKLY-*` 等）实现，本节状态更新不代表业务接口已存在。
-- `GET /api/v1/system/bootstrap-status`、`POST /api/v1/system/bootstrap-admin` 已在阶段 4 `AUTH-01` 实现并有自动化测试（`backend/tests/test_system_bootstrap_api.py`、`test_bootstrap_service.py`）：仍需 `X-Runtime-Secret`；空库返回 `initialized:false`；创建成功后返回账号元数据（不含密码/哈希）并原子建立默认模板；重复调用返回 `40001`（含并发场景）。
-- `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`PUT /api/v1/auth/password`、`POST /api/v1/auth/logout` 及五个 `/api/v1/users` 管理接口已在阶段 4 实现；除匿名入口外均同时校验 runtime secret、JWT、用户启用状态和 `token_version`，admin 接口还校验角色。模板、日报、导出、周报、设置和能力接口仍未实现。
+- 已配置精确 Trusted Host/CORS 基线（含 `expose_headers=["Content-Disposition"]`，供导出文件下载在 renderer 端读取服务端文件名），并已实现 `X-Runtime-Secret` 校验中间件（除 `/health`、`/docs`、`/openapi.json` 外的所有请求均需携带）。
+- 统一异常响应基础已实现（`backend/app/core/errors.py`）：`RequestValidationError`（Pydantic 422）归一化为 `code=40001`/`HTTP 400`；`AppError` 基类供后续业务异常子类化；`OperationalError` 映射为 `50301`；未捕获异常映射为 `50001`，均不泄露堆栈或驱动原始报错文本。
+- `GET /api/v1/system/bootstrap-status`、`POST /api/v1/system/bootstrap-admin` 已在阶段 4 `AUTH-01` 实现并有自动化测试：仍需 `X-Runtime-Secret`；空库返回 `initialized:false`；创建成功后返回账号元数据（不含密码/哈希）并原子建立默认模板；重复调用返回 `40001`（含并发场景）。
+- `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`PUT /api/v1/auth/password`、`POST /api/v1/auth/logout` 及五个 `/api/v1/users` 管理接口已在阶段 4 实现；除匿名入口外均同时校验 runtime secret、JWT、用户启用状态和 `token_version`，admin 接口还校验角色。
+- 第 6 节三个模板接口、第 7 节六个日报接口、第 10 节三个设置/能力接口均已在阶段 5 实现（细节见各节末尾说明）。
+- 第 8 节三个导出接口已在阶段 6 `EXPORT-01`/`EXPORT-02` 实现（细节见该节末尾说明）。周报（第 9 节）和手动整库备份（第 4.1 节）仍未实现。
 
 本文后续示例均为目标契约；实现任务不得为了匹配“已存在”的假象跳过测试或状态更新。
 
@@ -216,6 +218,8 @@ JWT 声明至少包含 `sub`、`role`、`ver`、`iat`、`exp`、`jti`。每次�
 ```
 
 服务端始终再次施加 `owner=current_user` 和 `status=archived`。成功文件响应设置安全文件名和标准 xlsx MIME 类型，不暴露内部路径。
+
+上述三个导出接口已实现。`report_ids` 与 `filter` 由 Pydantic 校验二选一；显式 ID 中任何一个非本人或非归档记录都会使整个请求被拒绝并在 `data.invalid_report_ids` 中列出，不做部分导出。创建为同步请求内完成校验、生成、落盘和状态落库（终态为 `succeeded`/`failed`，不引入后台任务队列）。导出文件 24 小时后过期，`GET .../file` 会在返回前做懒过期判断（过期即转 `expired` 并删除文件，与所有权、状态是否 `succeeded` 一样，未通过均统一返回 40401，不暴露具体原因）；应用启动时另有一次清理扫描。跨模板版本的动态列按 `field_key` 稳定合并，历史新增字段追加在后，重复表头文本加 `field_key` 后缀消歧；自由文本字段值以 `=` 开头会被转义为纯文本，避免生成可执行的 Excel 公式。
 
 ## 9. 周报
 

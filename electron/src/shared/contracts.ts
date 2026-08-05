@@ -20,6 +20,12 @@ export interface SecureTokenSnapshot {
   reason: 'secure-storage-unavailable' | null
 }
 
+export type ExportSaveStatus = 'saved' | 'canceled' | 'failed'
+
+export interface ExportSaveResult {
+  status: ExportSaveStatus
+}
+
 export const RUNTIME_SECRET_HEADER = 'X-Runtime-Secret'
 
 /** Env var used to hand the runtime secret to the sidecar process. Must match `WEEKLY_REPORT_RUNTIME_SECRET` read by `backend/app/core/config.py`. */
@@ -32,5 +38,6 @@ export const IPC_CHANNELS = {
   API_GET_CONFIG: 'api:get-config',
   TOKEN_GET: 'token:get',
   TOKEN_SET: 'token:set',
-  TOKEN_CLEAR: 'token:clear'
+  TOKEN_CLEAR: 'token:clear',
+  EXPORT_SAVE_FILE: 'export:save-file'
 } as const

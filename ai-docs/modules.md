@@ -1,7 +1,7 @@
 # 模块说明
 
 > 状态：目标模块基线（V1；实现状态单独列示）
-> 更新日期：2026-08-05
+> 更新日期：2026-08-06
 
 本文件说明目标模块边界。模块被列出不表示对应代码已经存在或完成；实际进度以当前工作树、`progress.md` 和 `task.md` 为准。
 
@@ -22,11 +22,11 @@ weekly-report/
 └─ package.json                # npm workspace 根入口
 ```
 
-### 1.1 当前工程状态（2026-08-05）
+### 1.1 当前工程状态（2026-08-06）
 
-- `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局、用户管理、模板管理和日报工作台/动态表单页面；周报、导出及设置页面尚未实现。
-- `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证、用户管理、模板、设置和日报的 API/Service/Repository 实现。
-- 阶段 4、阶段 5 均已完成并通过独立审查；阶段 6 已从导出任务和动态列规划开始，周报等后续业务 API 尚未实现。
+- `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局、用户管理、模板管理、日报工作台/动态表单页面和导出保存对话框白名单；周报及设置页面尚未实现。
+- `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证、用户管理、模板、设置、日报和导出的 API/Service/Repository 实现。
+- 阶段 4、阶段 5、阶段 6 均已完成并通过独立审查（阶段 6 含专项安全审查）；周报等后续业务 API 尚未实现。
 - `build/sidecar/` 仍为占位，尚未生成 PyInstaller 产物。
 
 ## 2. 目标业务与平台模块
@@ -51,12 +51,12 @@ weekly-report/
 | M16 | Admin/Settings UI | 用户管理、个人设置、企业微信占位 | M06、M10、M12 | 展示他人业务数据入口 |
 | M17 | Packaging/Release | electron-vite `out/`、PyInstaller sidecar、electron-builder `extraResources`、安装包、升级与许可证 | M01、全部构建产物 | 将数据写安装目录；将 sidecar 放入 ASAR |
 
-### 2.1 当前实现矩阵（2026-08-05）
+### 2.1 当前实现矩阵（2026-08-06）
 
 | 模块 | 状态 | 当前事实 / 下一缺口 |
 |---|---|---|
-| M01 Desktop Bootstrap | 部分完成 | 已有单实例、安全窗口、sidecar 启停、动态端口、健康等待、退出清理（`taskkill /t /f`）；缺保存对话框白名单（阶段 6 `DESK-04`）和生产运行期目录的实际落地验证（依赖阶段 9 `PKG-01` 产出真实二进制） |
-| M02 Runtime Bridge | 部分完成 | preload 已暴露受限 `runtimeBridge.{sidecar,api,token}`；Token 由 Main `safeStorage` 加密持久化且不可用时不明文回退；缺下载保存白名单（阶段 6 `DESK-04`） |
+| M01 Desktop Bootstrap | 部分完成 | 已有单实例、安全窗口、sidecar 启停、动态端口、健康等待、退出清理（`taskkill /t /f`）、保存对话框白名单（`ExportFileSaver`，阶段 6 `DESK-04`）；缺生产运行期目录的实际落地验证（依赖阶段 9 `PKG-01` 产出真实二进制） |
+| M02 Runtime Bridge | 部分完成 | preload 已暴露受限 `runtimeBridge.{sidecar,api,token,exportFile}`；Token 由 Main `safeStorage` 加密持久化且不可用时不明文回退；导出下载保存白名单已实现（阶段 6 `DESK-04`），写入路径始终取自系统对话框返回值 |
 | M03 Persistence | 部分完成 | 已有异步 Engine/Session、PRAGMA（WAL/FK/busy_timeout/synchronous）、8 张表 ORM Model、Alembic 初始迁移、迁移前备份+轮转+路径边界校验；Repository 层已有首个落地（`user`/`user_settings`/`template`，随 `AUTH-01`）；缺其余模块 Repository 与手动整库备份 API（`BACKUP-01`，阶段 8） |
 | M04 API Foundation | 部分完成 | 已有应用工厂、精确 CORS/Host、请求 ID、runtime secret、JWT/当前用户/admin 依赖、达标 `/health`、统一响应与异常；其余具体业务错误码随对应模块实现 |
 | M05 Auth | DONE | 初始化、24h JWT、持久化签名密钥、`token_version`、登录、当前用户、改密和退出均已实现、通过门禁和独立审查 |
@@ -65,9 +65,9 @@ weekly-report/
 | M08 Daily Report | DONE | 所有权过滤、创建/快照、稳定查询、草稿保存、提交/归档、自动归档和乐观锁已实现并通过独立审查 |
 | M09 Weekly Report | 未实现 | 周范围、生成、编辑、来源与重生成均待阶段 7 |
 | M10 Settings/Capabilities | DONE | 自动归档设置、固定 Asia/Shanghai 和 `wecom_sync:false` API 已实现并通过独立审查 |
-| M11 Export | IN_PROGRESS | 阶段 6 已开始，当前推进导出条件、归档所有权校验与动态列规划；xlsx、清理及桌面保存待后续任务 |
-| M12 Frontend Shell | DONE | 鉴权 Store/Router、API client、40102 处理、应用布局、登录/初始化流程与安全 Token 桥接已实现、通过门禁和独立审查 |
-| M13 Daily UI | DONE | 日报列表/筛选/创建、动态表单、草稿、提交/归档确认与冲突反馈已实现并通过独立审查 |
+| M11 Export | DONE | 导出条件互斥/归档所有权校验、跨模板动态列合并消歧、xlsx 线程卸载生成、24h 懒过期与启动清理、路径边界校验均已实现并通过独立审查（含专项安全审查，修复公式注入） |
+| M12 Frontend Shell | DONE | 鉴权 Store/Router、API client（含二进制下载与 CORS 错误体解码）、40102 处理、应用布局、登录/初始化流程与安全 Token 桥接已实现、通过门禁和独立审查 |
+| M13 Daily UI | DONE | 日报列表/筛选/创建、动态表单、草稿、提交/归档确认、冲突反馈及勾选/筛选导出交互已实现并通过独立审查 |
 | M14 Template UI | DONE | 模板字段编辑/排序/启停、类型组件和版本历史已实现并通过独立审查 |
 | M15 Weekly UI | 未实现 | 周报页面与交互待阶段 7 |
 | M16 Admin/Settings UI | 部分完成 | 用户管理已完成并通过独立审查；个人设置、企业微信占位和手动备份入口待阶段 8 `FE-07` |

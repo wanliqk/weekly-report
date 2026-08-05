@@ -12,3 +12,15 @@ Clock = Callable[[], datetime]
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def as_naive_utc(value: datetime) -> datetime:
+    """Strips tzinfo so a `Clock` value can compare against a SQLite column.
+
+    SQLite round-trips `DateTime()` columns as naive (the numeric UTC
+    wall-clock value survives; only `tzinfo` is lost), while every `Clock`
+    returns UTC-aware values. Comparing them directly raises `TypeError`, so
+    business logic that compares a freshly read column against `clock()`
+    must go through this first.
+    """
+    return value.replace(tzinfo=None) if value.tzinfo is not None else value

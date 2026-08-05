@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { join } from 'path'
 
-import { app, BrowserWindow, safeStorage } from 'electron'
+import { app, BrowserWindow, dialog, safeStorage } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
+import { ExportFileSaver } from './export/file-saver'
 import { registerRuntimeBridge } from './ipc/register-runtime-bridge'
 import { SecureTokenStore } from './security/secure-token-store'
 import { createRuntimeDeps } from './sidecar/create-runtime-deps'
@@ -57,10 +58,23 @@ function createWindow(): void {
     encryptString: (plainText) => safeStorage.encryptString(plainText),
     decryptString: (encrypted) => safeStorage.decryptString(encrypted)
   })
+  const exportFileSaver = new ExportFileSaver({
+    showSaveDialog: async (suggestedName) => {
+      if (!mainWindow) {
+        return { canceled: true }
+      }
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: suggestedName,
+        filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }]
+      })
+      return { canceled: result.canceled, filePath: result.filePath }
+    }
+  })
   unregisterRuntimeBridge = registerRuntimeBridge(
     getSidecarManager(sidecarDeps),
     mainWindow,
-    tokenStore
+    tokenStore,
+    exportFileSaver
   )
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

@@ -9,6 +9,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from app.api.health import router as health_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.daily_reports import router as daily_reports_router
+from app.api.v1.exports import router as exports_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.system import router as system_router
 from app.api.v1.templates import router as templates_router
@@ -66,6 +67,11 @@ def create_app(settings: Settings | None = None, *, jwt_secret: str | None = Non
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Request-Id", "X-Runtime-Secret"],
+        # Content-Disposition isn't on the CORS response-header safelist, so
+        # without this the renderer's fetch of /daily-report-exports/{id}/file
+        # can never read the server-generated file name (confirmed live: the
+        # save dialog silently fell back to the generic default name).
+        expose_headers=["Content-Disposition"],
     )
     application.add_middleware(RequestIdMiddleware)
     application.include_router(health_router)
@@ -75,4 +81,5 @@ def create_app(settings: Settings | None = None, *, jwt_secret: str | None = Non
     application.include_router(templates_router)
     application.include_router(settings_router)
     application.include_router(daily_reports_router)
+    application.include_router(exports_router)
     return application

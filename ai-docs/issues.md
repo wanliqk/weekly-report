@@ -1,6 +1,6 @@
 # 问题、风险与阻塞记录
 
-> 更新日期：2026-08-05
+> 更新日期：2026-08-06
 > 严重度：P0 安全/数据损失；P1 核心功能/契约；P2 可维护性/体验；P3 建议
 > 状态：`OPEN`、`MITIGATED`、`RESOLVED`、`BLOCKED`
 
@@ -13,12 +13,14 @@
 | ISS-003 | P1 | RESOLVED | `/health` 未达到冻结契约 | 阶段 2 已补齐 `version` 字段与 `Cache-Control: no-store`，并有对应测试，已随 `7386cae` 交付 | 阶段 2 `BE-02`（已交付） |
 | ISS-004 | P1 | RESOLVED | 业务窗口不等待后端健康成功 | 阶段 2 已实现并随 `7386cae` 交付：`App.vue` 在 sidecar 未 `ready` 时渲染 `StartupView`（pending/failed 态，failed 态可重试并展示脱敏日志），不再直接展示业务首页 | 阶段 2 `DESK-03`（已交付） |
 | ISS-005 | P1 | MITIGATED | 数据库与迁移基础尚未实现 | 阶段 3 已实现 Engine/Session、8 张表 ORM、Alembic 初始迁移、PRAGMA、迁移前备份+轮转，代码与测试均完成（45 项后端测试通过），并已创建独立提交 `8480515`；独立 Reviewer 审查完成前保持 `MITIGATED`，不升级为 `RESOLVED` | 阶段 3 `DB-01`..`DB-03`（已提交，待独立 Reviewer 审查） |
-| ISS-006 | P0 | MITIGATED | 所有权与业务 API 尚未完整实现 | 阶段 4 认证和阶段 5 模板、设置、日报状态机及 owner 强制过滤均已提交并通过独立审查；日报所有权边界已经确认，周报、导出等后续业务 API 仍待各阶段完整实现 | 后续业务模块继续复用 owner 条件，全部核心业务完成后关闭 |
+| ISS-006 | P0 | MITIGATED | 所有权与业务 API 尚未完整实现 | 阶段 4 认证、阶段 5 模板/设置/日报状态机和阶段 6 导出的 owner 强制过滤均已提交并通过独立审查；日报和导出所有权边界已经确认，周报等后续业务 API 仍待完整实现 | 后续业务模块继续复用 owner 条件，全部核心业务完成后关闭 |
 | ISS-007 | P2 | OPEN | Element Plus 当前全量引入 | renderer 生产包偏大，阶段基线曾观测主 JS 约 2.6 MB；会影响启动和构建告警 | 前端页面组件稳定后改为按需引入，并以构建体积对比验证；不得为此提前混入阶段 2 提交 |
 | ISS-008 | P1 | OPEN | PyInstaller sidecar 和 Windows 安装链路仍为占位 | `build/sidecar` 只有说明文件，安装包不能交付可运行后端 | 阶段 9 `PKG-01`/`PKG-02`：onedir、extraResources、无 Python 干净机验证 |
 | ISS-009 | P2 | RESOLVED | AI 上下文文档需要形成独立阶段提交 | 12 份上下文文档、启动路由和维护规则已建立并完成交叉复核 | 随本次独立文档阶段提交交付；后续每个实现阶段持续维护 |
 | ISS-010 | P2 | OPEN | sidecar 孤儿进程防护未覆盖"Electron 被外部强杀"场景 | `terminateProcessTree` 已用 `taskkill /pid <pid> /t /f` 覆盖正常退出、崩溃（`uncaughtException`）、`SIGINT`/`SIGTERM`、`before-quit` 场景（手动冒烟已验证无孤儿）；但若 Electron 主进程本身被任务管理器"结束进程"或外部 `TerminateProcess` 强杀，注册的退出钩子不会执行，`process.on('exit')` 的同步兜底也依赖该事件本身被触发，理论上仍可能残留 sidecar 进程 | 需要 Windows Job Object（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`）才能彻底杜绝，Node 原生 `child_process` 不提供该能力；作为后续可选加固项，不阻塞阶段 2 验收 |
 | ISS-011 | P2 | RESOLVED | 阶段 5 初版日报详情曾混入阶段 8 `FE-07` 的企业微信占位入口 | 会破坏阶段提交边界，并让阶段 5 错误承载设置/能力占位 UI | 主 Agent 自审时已移除占位入口和 capability 页面调用；阶段 5 仅保留 `SETTING-01` 后端能力 API，UI 仍由阶段 8 实现 |
+| ISS-012 | P1 | RESOLVED | 导出 xlsx 存在 Excel 公式注入风险 | 独立安全专项审查发现：日报自由文本字段允许任意字符串，`build_export_workbook` 未做转义直接写入单元格；openpyxl 会把以 `=` 开头的字符串提升为可执行公式（CWE-1236），若含此类内容的导出文件被他人在 Excel 中打开可能触发。已在 `EXPORT-02` 内修复：只对 `=` 前缀加单引号转义（不处理 `+`/`-`/`@`，避免破坏中文报告常见的列表符号），并补充专项测试覆盖公式防护与列表符号不受影响两种场景 | 阶段 6 `EXPORT-02`（随本阶段实现提交交付） |
+| ISS-013 | P2 | OPEN | `test_access_token.py`/`test_auth_api.py` 的“篡改 Token”测试偶发误报通过 | 该测试翻转 JWT 签名末位字符来模拟篡改；本次 QA 全量跑批中曾出现该用例断言失败（篡改后的 Token 仍被判定为有效），单独重跑及后续多次全量重跑均未复现。怀疑是 base64url 编码在签名末尾分组存在冗余位，特定随机签名下翻转末位字符不改变解码后的字节值，属于测试本身构造方式的偶发边界，而非本次改动引入的回归（本次未改动 `access_token.py`/`jwt_secret.py`/`auth.py`） | 非阻塞；后续如需彻底消除可改为翻转签名中段字节或改用专门破坏签名的构造方式，不应仅翻转最后一个 base64 字符 |
 
 ## 2. 非阻塞产品/发布风险
 
@@ -28,7 +30,7 @@
 | RISK-002 | P2 | MITIGATED | 周报确认重生成会覆盖人工编辑且 V1 无恢复 | UI 必须醒目确认；API 必须要求显式 `confirm_overwrite` 和乐观锁 | 用户要求历史比较/恢复时设计版本表并进入 P2 |
 | RISK-003 | P2 | OPEN | PyInstaller 体积和杀软误报 | 采用 onedir、许可证清单和干净机验证；发布时评估签名 | 首个 sidecar 包产出后测量体积、启动耗时和杀软结果 |
 | RISK-004 | P2 | MITIGATED | admin 手动备份包含所有用户数据 | 仅 admin、创建者下载、随机短期 ID、15 分钟过期、UI 敏感提示 | 若备份需要细分用户范围或外部存储，先更新契约与安全设计 |
-| RISK-005 | P2 | MITIGATED | 业务自动化覆盖仍需随模块扩展 | 当前后端 117 项、前端 54 项、真实 sidecar 集成 2 项均通过；阶段 5 已新增模板、设置、日报快照/状态机、所有权、并发和动态表单纯函数覆盖。周报、导出及全链路 Playwright 仍待后续阶段 | 各阶段按 `task.md` 添加契约、权限、并发、集成和 E2E 覆盖 |
+| RISK-005 | P2 | MITIGATED | 业务自动化覆盖仍需随模块扩展 | 当前后端 140 项、前端 76 项、真实 sidecar 集成 2 项均通过；阶段 6 已新增导出条件校验、跨模板列合并、公式注入防护、过期清理和文件保存白名单覆盖。周报及全链路 Playwright 仍待后续阶段 | 各阶段按 `task.md` 添加契约、权限、并发、集成和 E2E 覆盖 |
 
 ## 3. 当前阻塞项
 

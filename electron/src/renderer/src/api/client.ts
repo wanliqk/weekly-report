@@ -50,6 +50,34 @@ export async function requestData<DataT>(request: AxiosRequestConfig): Promise<D
   }
 }
 
+export interface BinaryResponse {
+  data: ArrayBuffer
+  fileName: string | null
+}
+
+export async function requestBinary(request: AxiosRequestConfig): Promise<BinaryResponse> {
+  try {
+    const client = await getApiClient()
+    const response = await client.request<ArrayBuffer>({
+      ...request,
+      responseType: 'arraybuffer'
+    })
+    return {
+      data: response.data,
+      fileName: extractFileName(response.headers['content-disposition'])
+    }
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response && error.response.data instanceof ArrayBuffer) {
+      error.response.data = decodeArrayBufferErrorBody(error.response.data)
+    }
+    const apiError = normalizeApiError(error)
+    if (apiError.code === 40102) {
+      await authHooks.onTokenInvalid()
+    }
+    throw apiError
+  }
+}
+
 export function userMessage(error: unknown): string {
   if (error instanceof ApiError) {
     return error.message
@@ -104,6 +132,27 @@ function normalizeApiError(error: unknown): ApiError {
     return new ApiError(50001, '无法连接本地服务，请稍后重试', error.response?.status ?? null)
   }
   return new ApiError(50001, userMessage(error), null)
+}
+
+function extractFileName(headerValue: unknown): string | null {
+  if (typeof headerValue !== 'string') {
+    return null
+  }
+  const match = /filename="([^"]+)"/.exec(headerValue)
+  return match ? match[1] : null
+}
+
+// The backend always returns the unified `{code,msg,data}` envelope, even
+// for error responses on a binary download route — but with
+// `responseType: 'arraybuffer'` axios hands the error body back as raw
+// bytes instead of parsed JSON, so `normalizeApiError` would otherwise miss
+// the real business code (e.g. 40401) and fall back to a generic message.
+function decodeArrayBufferErrorBody(data: ArrayBuffer): unknown {
+  try {
+    return JSON.parse(new TextDecoder().decode(data))
+  } catch {
+    return data
+  }
 }
 
 function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {

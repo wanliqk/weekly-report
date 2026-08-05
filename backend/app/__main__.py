@@ -1,13 +1,17 @@
+import asyncio
 import json
 import socket
 import sys
 
 import uvicorn
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.paths import ensure_runtime_directories
+from app.db.engine import create_engine as create_db_engine
 from app.db.migrate import run_startup_migrations
+from app.db.session import create_session_factory
 from app.main import create_app
+from app.services.export import ExportService
 
 
 class _AnnouncingServer(uvicorn.Server):
@@ -30,10 +34,21 @@ class _AnnouncingServer(uvicorn.Server):
         sys.stdout.flush()
 
 
+async def _cleanup_expired_exports(settings: Settings) -> None:
+    engine = create_db_engine(settings)
+    try:
+        session_factory = create_session_factory(engine)
+        async with session_factory() as session:
+            await ExportService(session, settings).cleanup_expired()
+    finally:
+        await engine.dispose()
+
+
 def main() -> None:
     settings = get_settings()
     ensure_runtime_directories(settings)
     run_startup_migrations(settings)
+    asyncio.run(_cleanup_expired_exports(settings))
     application = create_app(settings)
     config = uvicorn.Config(
         application,

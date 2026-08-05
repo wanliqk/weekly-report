@@ -19,6 +19,7 @@ vi.mock('electron', () => ({
 }))
 
 import { IPC_CHANNELS, type SidecarStatusSnapshot } from '../../../shared/contracts'
+import type { ExportFileSaver } from '../../export/file-saver'
 import type { SidecarManager } from '../../sidecar/manager'
 import type { SecureTokenStore } from '../../security/secure-token-store'
 import { registerRuntimeBridge } from '../register-runtime-bridge'
@@ -39,11 +40,20 @@ class FakeTokenStore {
   clearToken = vi.fn().mockResolvedValue({ available: true, token: null, reason: null })
 }
 
-function register(manager: FakeManager, window: BrowserWindow): () => void {
+class FakeExportFileSaver {
+  save = vi.fn().mockResolvedValue({ status: 'saved' })
+}
+
+function register(
+  manager: FakeManager,
+  window: BrowserWindow,
+  exportFileSaver: FakeExportFileSaver = new FakeExportFileSaver()
+): () => void {
   return registerRuntimeBridge(
     manager as unknown as SidecarManager,
     window,
-    new FakeTokenStore() as unknown as SecureTokenStore
+    new FakeTokenStore() as unknown as SecureTokenStore,
+    exportFileSaver as unknown as ExportFileSaver
   )
 }
 
@@ -122,11 +132,58 @@ describe('registerRuntimeBridge', () => {
     registerRuntimeBridge(
       manager as unknown as SidecarManager,
       window,
-      tokenStore as unknown as SecureTokenStore
+      tokenStore as unknown as SecureTokenStore,
+      new FakeExportFileSaver() as unknown as ExportFileSaver
     )
 
     const handler = handlers.get(IPC_CHANNELS.TOKEN_SET)
     await expect(handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, 123)).rejects.toThrow()
     expect(tokenStore.setToken).not.toHaveBeenCalled()
+  })
+
+  it('rejects export save-file calls from an untrusted frame', async () => {
+    const mainFrame = {}
+    const { window } = createWindow(mainFrame)
+    const manager = new FakeManager()
+    const exportFileSaver = new FakeExportFileSaver()
+    register(manager, window, exportFileSaver)
+
+    const handler = handlers.get(IPC_CHANNELS.EXPORT_SAVE_FILE)
+    await expect(
+      handler?.({ senderFrame: {} } as IpcMainInvokeEvent, { suggestedName: 'a.xlsx', data: {} })
+    ).rejects.toThrow()
+    expect(exportFileSaver.save).not.toHaveBeenCalled()
+  })
+
+  it('rejects export save-file calls whose payload is not an object', async () => {
+    const mainFrame = {}
+    const { window } = createWindow(mainFrame)
+    const manager = new FakeManager()
+    const exportFileSaver = new FakeExportFileSaver()
+    register(manager, window, exportFileSaver)
+
+    const handler = handlers.get(IPC_CHANNELS.EXPORT_SAVE_FILE)
+    await expect(
+      handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, 'not-an-object')
+    ).rejects.toThrow()
+    expect(exportFileSaver.save).not.toHaveBeenCalled()
+  })
+
+  it('delegates a well-formed export save-file call to the saver', async () => {
+    const mainFrame = {}
+    const { window } = createWindow(mainFrame)
+    const manager = new FakeManager()
+    const exportFileSaver = new FakeExportFileSaver()
+    register(manager, window, exportFileSaver)
+
+    const handler = handlers.get(IPC_CHANNELS.EXPORT_SAVE_FILE)
+    const data = new Uint8Array([1, 2, 3])
+    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, {
+      suggestedName: 'report.xlsx',
+      data
+    })
+
+    expect(exportFileSaver.save).toHaveBeenCalledWith('report.xlsx', data)
+    expect(result).toEqual({ status: 'saved' })
   })
 })

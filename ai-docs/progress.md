@@ -1,18 +1,18 @@
 # 当前开发进度
 
-> 快照日期：2026-08-05
+> 快照日期：2026-08-06
 > 当前分支：`v1`
 > 原则：本文件只记录当前工作树可验证的实现事实；设计目标不等于完成。
 
 ## 1. 总体状态
 
-- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环。
-- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）。
-- 当前所在阶段：阶段 6 查询导出与桌面保存（用户已明确指令开始）。
+- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存。
+- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）。阶段 6 实现提交待创建（本文件随该提交一并交付）。
+- 当前所在阶段：阶段 6 查询导出与桌面保存已完成；阶段 7 周报闭环尚未开始。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
 - 阶段 4 实现状态：六项任务均已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
 - 阶段 5 实现状态：七项任务均已完成实现、自测、质量门禁、独立审查与提交 `1d965fe`，统一为 `DONE`。
-- 阶段 6 实现状态：`EXPORT-01` 已开始并标记 `IN_PROGRESS`；其余阶段任务按依赖保持 `TODO`。
+- 阶段 6 实现状态：五项任务（`EXPORT-01`/`EXPORT-02`/`DESK-04`/`FE-05`/`QA-06`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
 - 当前阻塞：无业务/技术决策阻塞。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 
@@ -108,6 +108,30 @@
 - `/daily`、`/daily/new`、`/daily/:id` 已实现日期/状态筛选、稳定分页、空态、Asia/Shanghai 默认日期、重复日期跳转、模板快照动态表单、草稿保存、提交/归档确认和只读状态展示。
 - 前端收到 `42201` 会把错误映射回字段；收到 `40904` 会保留当前输入并明确提示版本冲突。时间显示固定使用 `Asia/Shanghai`，未提前混入阶段 8 的设置/企业微信占位 UI。
 
+### 导出后端（阶段 6，EXPORT-01 / EXPORT-02）
+
+- `backend/app/schemas/export.py`：`ExportCreateRequest` 用 `model_validator` 强制 `report_ids` 与 `filter` 二选一（都提供或都不提供均拒绝）、`report_ids` 非空；`ExportFilter` 校验 `date_from<=date_to`。
+- `backend/app/repositories/daily_report.py` 新增 `list_owned_archived_by_ids`/`list_owned_archived_by_range`：均同时按 `owner_id` 与 `status='archived'` 过滤，按 `work_date ASC, id ASC` 排序供导出使用；不改变既有查询方法。
+- `backend/app/services/export.py::ExportService`：
+  - `_resolve_reports` 对显式 `report_ids` 去重后按同一查询同时校验所有权与归档状态，缺失/非本人/非归档的 ID 统一判定为“不可导出”，整体拒绝并在 `data.invalid_report_ids` 列出问题 ID（`40001`）；不做部分导出。
+  - `plan_export_columns` 是纯函数：按各日报模板快照的时间顺序合并 `field_key`，历史新增字段追加在后，标签取该字段最近一次出现时的文案（`field_key` 不变，标签变化不拆列）；两个不同 `field_key` 恰好得到相同表头文本时，用 `field_key` 末 4 位加后缀消歧。
+  - `build_export_workbook` 是纯函数（`asyncio.to_thread` 卸载），基础列（工作日期/提交时间/归档时间，`Asia/Shanghai` 显示）在前，动态列在后；对以 `=` 开头的字符串值加前缀单引号防止被 Excel/openpyxl 提升为可执行公式（CWE-1236），`+`/`-`/`@` 前缀不处理（openpyxl 不会将其识别为公式，且中文日报常用 `-`/`+` 作列表符号）。
+  - `create()` 在同一次调用内完成校验、生成、落盘和状态落库（`succeeded`/`failed` 两种终态），不引入后台任务队列；生成失败会被捕获并记录 `error_message`，不抛出到 HTTP 层。
+  - `get_download()`、`_expire_if_needed()`、`cleanup_expired()` 均先做 24 小时懒过期判断（`succeeded` 且 `expires_at` 已过则转 `expired` 并删除文件），再在实际删除/读取文件前调用 `_resolve_within_export_dir` 校验路径解析后确实落在 `export_temp_dir` 内。
+  - `run_startup_export_cleanup`（`backend/app/__main__.py::_cleanup_expired_exports`）在 `ensure_runtime_directories`/`run_startup_migrations` 之后、创建 FastAPI app 之前执行，扫描全部用户的到期文件（非 owner 过滤，属于维护性清理，不是业务查询）。
+  - `backend/app/core/timezone.py`：固定 UTC+8 常量偏移（不用 `zoneinfo`，避免 Windows 上依赖可选 `tzdata` 包），供导出文件内 `Asia/Shanghai` 时间显示使用。
+  - `backend/app/core/clock.py` 新增 `as_naive_utc()`：SQLite `DateTime()` 列往返后丢失 `tzinfo`（数值仍是正确 UTC），与 `Clock` 返回的 tz-aware 值比较前必须先归一化，否则直接抛 `TypeError`（已在服务层和 Repository 查询边界统一处理）。
+- `backend/app/api/v1/exports.py`：`POST /api/v1/daily-report-exports`、`GET /api/v1/daily-report-exports/{id}`、`GET /api/v1/daily-report-exports/{id}/file` 均已实现并接入 `main.py`；文件下载响应设置标准 xlsx MIME 和安全 ASCII 文件名（`daily-report-export-<Asia/Shanghai 时间戳>.xlsx`），不返回内部路径。
+- `backend/app/main.py` 的 `CORSMiddleware` 新增 `expose_headers=["Content-Disposition"]`：真实 Electron 联调发现，若不显式暴露该响应头，renderer 端 `fetch`/`axios` 读取不到服务端生成的文件名（浏览器 CORS 响应头默认安全列表不含 `Content-Disposition`），会静默回退成通用默认文件名；已加回归测试固定该行为。
+- `backend/pyproject.toml` 为 `openpyxl`（无内联类型标注）新增 `[[tool.mypy.overrides]] ignore_missing_imports`。
+
+### 桌面保存与导出交互（阶段 6，DESK-04 / FE-05）
+
+- `electron/src/main/export/file-saver.ts::ExportFileSaver`：`suggestedName` 先经 `path.basename()` 再匹配 `^[A-Za-z0-9._-]{1,150}\.xlsx$`，`data` 必须是非空且不超过 25MB 的 `Uint8Array`；校验通过后才调用注入的 `dialog.showSaveDialog`，实际写入路径始终取自该系统对话框自身的返回值，renderer 提供的文件名只影响对话框默认建议名，从不决定真实写入位置。
+- `electron/src/main/ipc/register-runtime-bridge.ts` 新增 `export:save-file` handler，与既有 channel 一样先校验 `event.senderFrame === window.webContents.mainFrame`；`electron/src/preload/index.ts` 暴露 `window.runtimeBridge.exportFile.save(suggestedName, data)`，未暴露通用文件系统能力。
+- `electron/src/renderer/src/api/client.ts` 新增 `requestBinary()`：以 `responseType:'arraybuffer'` 下载文件并从 `Content-Disposition` 解析文件名；错误路径下会把 axios 返回的 `ArrayBuffer` 错误体尝试解码为 JSON，避免真实业务错误码被降级成通用 `50001`。
+- `/daily` 列表页新增复选列与“导出所选”“导出当前筛选（仅归档）”按钮：创建任务→若 `record_count>0` 则下载字节并调用 `exportFile.save`→按 `saved`/`canceled`/`failed` 展示对应提示；命中 `40001` 时把 `invalid_report_ids` 映射为当前页可见的工作日期展示，而非裸 ULID。
+
 ### 已记录的阶段验证
 
 工程基线（阶段 1）交付记录（历史）：`npm ci`、lint、typecheck、`npm test`（1 项前端测试）、`npm run build`、`uv sync --frozen`、`uv run ruff/mypy/pytest`（3 项后端测试）均已通过。
@@ -148,12 +172,26 @@
 - `npm run build`：main/preload/renderer 生产构建通过；仅有 `@vueuse/core` 第三方 PURE 注释位置提示，renderer 主 JS 约 2.85 MB，继续由 ISS-007 跟踪。
 - `git diff --check`：通过。主 Agent 按 `dev-workflow` 完成安全、并发、Python、TypeScript/Vue 自审，修复非有限数值、固定时区显示及跨阶段 UI 混入问题；独立审查完成，当前无未解决 P0/P1。
 
+阶段 6 查询导出与桌面保存当前工作树实际执行并通过：
+
+- `uv run --directory backend ruff check .`、`ruff format --check .`：0 error，89 个文件格式合规。
+- `uv run --directory backend mypy`（strict，89 个源文件）：0 错误。
+- `uv run --directory backend pytest`：**140 项测试全部通过**（阶段 5 遗留 117 项 + 本阶段新增 23 项：动态列规划纯函数 5、导出 Service 直连测试 10——含跨模板合并/公式注入防护/失败落库/懒过期删除/路径边界拒绝/启动清理扫描、导出 API 测试 8——含互斥校验、混合状态整体拒绝、所有权隔离 404、CORS `Content-Disposition` 暴露回归）。
+- `npm run lint`、`npm run typecheck`：通过。
+- `npm test`：**16 个文件 76 项测试全部通过**，新增 `ExportFileSaver` 白名单校验、IPC 受信任帧校验、导出 API 客户端（含二进制下载与 CORS 错误体解码）、`invalid_report_ids` 展示映射测试。
+- `npm run test:integration --workspace electron`：真实后端进程 **2 项通过**，阶段 6 未破坏动态端口和退出清理链路。
+- `npm run build`：main/preload/renderer 生产构建通过；仅有 `@vueuse/core` 第三方 PURE 注释位置提示（ISS-007 继续跟踪）。
+- `git diff --check`：通过。
+- 真实环境手动验证（`npm run dev` 真实启动 Electron + 真实后端，非测试替身）：完成首次初始化→登录→创建日报→填写→提交→归档→在 `/daily` 勾选/筛选触发导出→系统原生“另存为”对话框弹出并显示服务端生成的带时间戳文件名→保存后 Toast 提示成功→用 `openpyxl` 校验磁盘上的真实文件内容与页面输入完全一致→再次导出并点击“取消”验证“已取消保存”提示。过程中发现并修复一个真实缺陷：`CORSMiddleware` 未 `expose_headers` 导致 renderer 读不到服务端文件名、保存对话框回退为通用默认名；修复后重启真实环境复现并确认已解决，已补充回归测试固定该行为。
+- 独立安全专项审查（`security-review` 流程，含二次假阳性复核）：识别出 Excel 公式注入风险——自由文本字段以 `=` 开头时会被 openpyxl 提升为可执行公式，导出文件被他人在 Excel 中打开时可能触发；已修复（仅对 `=` 前缀转义，不影响中文场景常见的 `-`/`+` 列表符号），并补充专项测试覆盖公式防护与列表符号不受影响两种场景。除该项外未发现文件白名单、路径越界、所有权隔离、CORS 放宽等方向的可利用漏洞。
+- 主 Agent 自审：无跨层访问、无临时接口、日志/异常未见密码/JWT/密钥/完整正文；独立审查完成，阶段 6 无未解决 P0/P1。
+
 ## 3. 尚未实现
 
 以下均为设计目标，当前不得标记为完成：
 
 - 开发/生产 sidecar 路径解析中，生产分支的 PyInstaller `onedir` 产物本身（`PKG-01`，阶段 9）——`build/sidecar/` 仍是空占位目录。
-- 导出、周报对应的 Repository/Service/API 与前端页面尚未实现；个人设置/企业微信占位/手动备份 UI 属于阶段 8 `FE-07`，尚未实现。
+- 周报对应的 Repository/Service/API 与前端页面尚未实现（阶段 7）；个人设置/企业微信占位/手动备份 UI 属于阶段 8 `FE-07`，尚未实现。
 - Playwright E2E、PyInstaller 和 Windows 安装/升级验证。
 - Windows Job Object 级别的孤儿进程彻底防护（ISS-010，非阻塞）。
 - admin 手动整库备份 API（`BACKUP-01`，阶段 8）——DB-03 的自动迁移前备份机制与之相关但不是同一功能，手动备份走独立的短期下载文件流程。
@@ -195,7 +233,12 @@
 5. ✅ 后端 117 项、前端 54 项、真实 sidecar 集成 2 项及生产构建全部通过；主 Agent 自审无未解决 P0/P1。
 6. ✅ 独立 Reviewer 审查完成，无未解决 P0/P1；实现提交 `1d965fe` 已创建，阶段 5 正式关闭。
 
-阶段 6 查询导出与桌面保存已开始：
+阶段 6 五项任务已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`：
 
-1. 🔄 `EXPORT-01` 已标记 `IN_PROGRESS`，先实现导出条件互斥校验、仅本人归档日报约束，以及跨模板动态列规划。
-2. ⏳ `EXPORT-02`、`DESK-04`、`FE-05`、`QA-06` 按依赖保持 `TODO`。
+1. ✅ 导出条件互斥校验（ID/筛选二选一）、仅本人归档日报约束、混合状态整体拒绝已实现。
+2. ✅ 跨模板 `field_key` 动态列合并与同名消歧已实现。
+3. ✅ xlsx 线程卸载生成、标准 MIME/安全文件名、24h 懒过期与启动清理、路径边界校验已实现。
+4. ✅ Electron 保存对话框白名单（文件名/字节双重校验、受信任帧、写入路径始终取自系统对话框）已实现。
+5. ✅ 日报列表勾选/筛选导出、处理中状态、不可导出列表提示已实现。
+6. ✅ 后端 140 项、前端 76 项、真实 sidecar 集成 2 项及生产构建全部通过；真实 `npm run dev` 环境完成含原生保存对话框的全链路手动验证。
+7. ✅ 独立审查（含专项安全审查）完成，发现并修复 Excel 公式注入与 CORS 文件名暴露两项真实问题，均已补充回归测试；无未解决 P0/P1。实现提交待创建，阶段 6 正式关闭。

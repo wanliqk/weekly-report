@@ -32,6 +32,39 @@ class DailyReportRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_owned_archived_by_ids(
+        self, owner_id: str, report_ids: list[str]
+    ) -> list[DailyReport]:
+        result = await self._session.execute(
+            select(DailyReport)
+            .where(
+                DailyReport.user_id == owner_id,
+                DailyReport.status == "archived",
+                DailyReport.id.in_(report_ids),
+            )
+            .order_by(DailyReport.work_date.asc(), DailyReport.id.asc())
+        )
+        return list(result.scalars())
+
+    async def list_owned_archived_by_range(
+        self,
+        owner_id: str,
+        *,
+        date_from: date | None,
+        date_to: date | None,
+    ) -> list[DailyReport]:
+        filters = [DailyReport.user_id == owner_id, DailyReport.status == "archived"]
+        if date_from is not None:
+            filters.append(DailyReport.work_date >= date_from)
+        if date_to is not None:
+            filters.append(DailyReport.work_date <= date_to)
+        result = await self._session.execute(
+            select(DailyReport)
+            .where(*filters)
+            .order_by(DailyReport.work_date.asc(), DailyReport.id.asc())
+        )
+        return list(result.scalars())
+
     async def list_page(
         self,
         owner_id: str,

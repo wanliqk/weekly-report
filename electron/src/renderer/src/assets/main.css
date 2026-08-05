@@ -507,6 +507,18 @@
   width: 150px;
 }
 
+.export-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.export-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .table-card .el-table__row {
   cursor: pointer;
 }
@@ -594,6 +606,7 @@
 @media (max-width: 720px) {
   .filter-card,
   .page-heading,
+  .export-toolbar,
   .report-actions {
     align-items: stretch;
     flex-direction: column;
