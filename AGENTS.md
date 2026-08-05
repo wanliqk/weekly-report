@@ -4,6 +4,12 @@
 
 `v1` 是本项目全新的主线基准，按主分支管理。除非用户明确要求，不得查看、引用、复制或合并其他分支及既往 Git 历史中的实现、配置、命令和约定。所有判断仅以当前工作树为准：`docs/需求理解.md` 定义产品范围，`docs/方案设计.md` 定义技术架构；实现与文档冲突时先修正文档或请求确认。
 
+## AI 上下文维护
+
+Agent 开始任务时必须先读取 `ai-docs/agent-context.md`，再按其路由读取 `ai-docs/README.md`、`task.md`、`progress.md` 及任务涉及的专项文档。`ai-docs/` 是便于协作的派生上下文，事实优先级依次为：用户最新指令与本文件、`docs/需求理解.md` 和 `docs/方案设计.md`、当前代码与锁文件、`ai-docs/` 汇总；发现冲突时必须先记录到 `ai-docs/issues.md` 并修正文档或请求确认。
+
+每个实现阶段结束时，应同步更新 `ai-docs/task.md` 和 `ai-docs/progress.md`；产生或改变技术决策时更新 `ai-docs/decisions.md`，发现未解决问题时更新 `ai-docs/issues.md`，并将上下文变更纳入该阶段提交。需要并行拆分时最多按三个 Agent 划分，确保每个文件只有一个主责 Agent，最终由主 Agent 统一核验和提交。
+
 ## 架构与目录
 
 代码按技术方案组织：`electron/` 包含 Electron main、preload 和 Vue 3 renderer；`backend/` 包含 FastAPI 应用、Alembic 迁移与测试；`build/` 存放图标、安装器和 sidecar 打包配置；`docs/` 存放需求与设计。
