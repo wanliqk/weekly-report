@@ -26,7 +26,7 @@ weekly-report/
 
 - `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局、用户管理、模板管理和日报工作台/动态表单页面；周报、导出及设置页面尚未实现。
 - `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证、用户管理、模板、设置和日报的 API/Service/Repository 实现。
-- 阶段 4 已完成并通过独立审查；阶段 5 已完成实现和主 Agent 自审，等待独立 Reviewer；周报、导出等后续业务 API 尚未实现。
+- 阶段 4、阶段 5 均已完成并通过独立审查；阶段 6 已从导出任务和动态列规划开始，周报等后续业务 API 尚未实现。
 - `build/sidecar/` 仍为占位，尚未生成 PyInstaller 产物。
 
 ## 2. 目标业务与平台模块
@@ -61,14 +61,14 @@ weekly-report/
 | M04 API Foundation | 部分完成 | 已有应用工厂、精确 CORS/Host、请求 ID、runtime secret、JWT/当前用户/admin 依赖、达标 `/health`、统一响应与异常；其余具体业务错误码随对应模块实现 |
 | M05 Auth | DONE | 初始化、24h JWT、持久化签名密钥、`token_version`、登录、当前用户、改密和退出均已实现、通过门禁和独立审查 |
 | M06 User Admin | DONE | 用户分页查询、创建、角色/状态修改、重置密码和末位有效管理员保护已实现、通过门禁和独立审查 |
-| M07 Template | REVIEW | 六类字段规则、稳定键、核心字段、不可变版本发布和历史摘要已实现并通过主 Agent 自审，待独立 Reviewer |
-| M08 Daily Report | REVIEW | 所有权过滤、创建/快照、稳定查询、草稿保存、提交/归档、自动归档和乐观锁已实现并通过主 Agent 自审，待独立 Reviewer |
+| M07 Template | DONE | 六类字段规则、稳定键、核心字段、不可变版本发布和历史摘要已实现并通过独立审查 |
+| M08 Daily Report | DONE | 所有权过滤、创建/快照、稳定查询、草稿保存、提交/归档、自动归档和乐观锁已实现并通过独立审查 |
 | M09 Weekly Report | 未实现 | 周范围、生成、编辑、来源与重生成均待阶段 7 |
-| M10 Settings/Capabilities | REVIEW | 自动归档设置、固定 Asia/Shanghai 和 `wecom_sync:false` API 已实现并通过主 Agent 自审，待独立 Reviewer |
-| M11 Export | 未实现 | 导出任务、动态列、xlsx 生成与清理均待阶段 6 |
+| M10 Settings/Capabilities | DONE | 自动归档设置、固定 Asia/Shanghai 和 `wecom_sync:false` API 已实现并通过独立审查 |
+| M11 Export | IN_PROGRESS | 阶段 6 已开始，当前推进导出条件、归档所有权校验与动态列规划；xlsx、清理及桌面保存待后续任务 |
 | M12 Frontend Shell | DONE | 鉴权 Store/Router、API client、40102 处理、应用布局、登录/初始化流程与安全 Token 桥接已实现、通过门禁和独立审查 |
-| M13 Daily UI | REVIEW | 日报列表/筛选/创建、动态表单、草稿、提交/归档确认与冲突反馈已实现并通过主 Agent 自审，待独立 Reviewer |
-| M14 Template UI | REVIEW | 模板字段编辑/排序/启停、类型组件和版本历史已实现并通过主 Agent 自审，待独立 Reviewer |
+| M13 Daily UI | DONE | 日报列表/筛选/创建、动态表单、草稿、提交/归档确认与冲突反馈已实现并通过独立审查 |
+| M14 Template UI | DONE | 模板字段编辑/排序/启停、类型组件和版本历史已实现并通过独立审查 |
 | M15 Weekly UI | 未实现 | 周报页面与交互待阶段 7 |
 | M16 Admin/Settings UI | 部分完成 | 用户管理已完成并通过独立审查；个人设置、企业微信占位和手动备份入口待阶段 8 `FE-07` |
 | M17 Packaging/Release | 占位 | 有 electron-builder 配置和 sidecar 目录占位；无 PyInstaller/安装升级验证闭环 |

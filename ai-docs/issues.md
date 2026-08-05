@@ -13,7 +13,7 @@
 | ISS-003 | P1 | RESOLVED | `/health` 未达到冻结契约 | 阶段 2 已补齐 `version` 字段与 `Cache-Control: no-store`，并有对应测试，已随 `7386cae` 交付 | 阶段 2 `BE-02`（已交付） |
 | ISS-004 | P1 | RESOLVED | 业务窗口不等待后端健康成功 | 阶段 2 已实现并随 `7386cae` 交付：`App.vue` 在 sidecar 未 `ready` 时渲染 `StartupView`（pending/failed 态，failed 态可重试并展示脱敏日志），不再直接展示业务首页 | 阶段 2 `DESK-03`（已交付） |
 | ISS-005 | P1 | MITIGATED | 数据库与迁移基础尚未实现 | 阶段 3 已实现 Engine/Session、8 张表 ORM、Alembic 初始迁移、PRAGMA、迁移前备份+轮转，代码与测试均完成（45 项后端测试通过），并已创建独立提交 `8480515`；独立 Reviewer 审查完成前保持 `MITIGATED`，不升级为 `RESOLVED` | 阶段 3 `DB-01`..`DB-03`（已提交，待独立 Reviewer 审查） |
-| ISS-006 | P0 | MITIGATED | 所有权与业务 API 尚未完整实现 | 阶段 4 认证已提交并通过独立审查；阶段 5 模板、设置、日报状态机及 owner 强制过滤已实现、通过门禁和主 Agent 自审，等待独立审查；周报、导出等后续业务 API 仍待各阶段实现 | 阶段 5 独立审查后确认日报边界；后续业务模块继续复用 owner 条件，全部核心业务完成后关闭 |
+| ISS-006 | P0 | MITIGATED | 所有权与业务 API 尚未完整实现 | 阶段 4 认证和阶段 5 模板、设置、日报状态机及 owner 强制过滤均已提交并通过独立审查；日报所有权边界已经确认，周报、导出等后续业务 API 仍待各阶段完整实现 | 后续业务模块继续复用 owner 条件，全部核心业务完成后关闭 |
 | ISS-007 | P2 | OPEN | Element Plus 当前全量引入 | renderer 生产包偏大，阶段基线曾观测主 JS 约 2.6 MB；会影响启动和构建告警 | 前端页面组件稳定后改为按需引入，并以构建体积对比验证；不得为此提前混入阶段 2 提交 |
 | ISS-008 | P1 | OPEN | PyInstaller sidecar 和 Windows 安装链路仍为占位 | `build/sidecar` 只有说明文件，安装包不能交付可运行后端 | 阶段 9 `PKG-01`/`PKG-02`：onedir、extraResources、无 Python 干净机验证 |
 | ISS-009 | P2 | RESOLVED | AI 上下文文档需要形成独立阶段提交 | 12 份上下文文档、启动路由和维护规则已建立并完成交叉复核 | 随本次独立文档阶段提交交付；后续每个实现阶段持续维护 |

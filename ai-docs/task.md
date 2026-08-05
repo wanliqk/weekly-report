@@ -115,13 +115,13 @@ uv sync --directory backend --frozen
 
 | ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
 |---|---|---|---|---|---|
-| TEMPLATE-01 | Agent B | 默认模板与不可变版本 Service/API | 阶段 4 | REVIEW | 六类字段、核心字段、稳定 `field_key`、不可变版本发布与历史摘要均已实现并自测，待独立审查 |
-| SETTING-01 | Agent B | 个人设置与能力开关 API | 阶段 4 | REVIEW | 自动归档读写、固定 Asia/Shanghai 与 `wecom_sync:false` 已实现并自测，待独立审查 |
-| DAILY-01 | Agent B | 日报创建、详情、查询和快照 | TEMPLATE-01 | REVIEW | 用户+日期唯一、稳定分页、所有权过滤、历史/未来/闰日及模板快照均已实现并自测，待独立审查 |
-| DAILY-02 | Agent B | 草稿保存、提交与归档状态机 | DAILY-01、SETTING-01 | REVIEW | 快照校验、条件状态转换、乐观锁与自动归档原子转换均已实现并自测，待独立审查 |
-| FE-03 | Agent A | 模板配置和动态字段渲染 | FE-01、TEMPLATE-01 | REVIEW | 字段编辑/排序/启停、六类动态组件、版本展示和服务端错误保留输入已实现并自测，待独立审查 |
-| FE-04 | Agent A | 日报列表、表单、提交归档交互 | DAILY-01、DAILY-02、FE-03 | REVIEW | 日期/状态筛选、空态、创建、草稿、提交/归档确认、冲突反馈均已实现并自测，待独立审查 |
-| QA-05 | Agent C | 模板与日报验收/审查 | TEMPLATE-01..DAILY-02、FE-03、FE-04 | REVIEW | 后端 117 项、前端 54 项、真实 sidecar 2 项及生产构建通过；主 Agent 自审无未解决 P0/P1，待独立审查 |
+| TEMPLATE-01 | Agent B | 默认模板与不可变版本 Service/API | 阶段 4 | DONE | 六类字段、核心字段、稳定 `field_key`、不可变版本发布与历史摘要均已实现、自测并通过独立审查 |
+| SETTING-01 | Agent B | 个人设置与能力开关 API | 阶段 4 | DONE | 自动归档读写、固定 Asia/Shanghai 与 `wecom_sync:false` 已实现、自测并通过独立审查 |
+| DAILY-01 | Agent B | 日报创建、详情、查询和快照 | TEMPLATE-01 | DONE | 用户+日期唯一、稳定分页、所有权过滤、历史/未来/闰日及模板快照均已实现、自测并通过独立审查 |
+| DAILY-02 | Agent B | 草稿保存、提交与归档状态机 | DAILY-01、SETTING-01 | DONE | 快照校验、条件状态转换、乐观锁与自动归档原子转换均已实现、自测并通过独立审查 |
+| FE-03 | Agent A | 模板配置和动态字段渲染 | FE-01、TEMPLATE-01 | DONE | 字段编辑/排序/启停、六类动态组件、版本展示和服务端错误保留输入已实现、自测并通过独立审查 |
+| FE-04 | Agent A | 日报列表、表单、提交归档交互 | DAILY-01、DAILY-02、FE-03 | DONE | 日期/状态筛选、空态、创建、草稿、提交/归档确认、冲突反馈均已实现、自测并通过独立审查 |
+| QA-05 | Agent C | 模板与日报验收/审查 | TEMPLATE-01..DAILY-02、FE-03、FE-04 | DONE | 后端 117 项、前端 54 项、真实 sidecar 2 项及生产构建通过；独立审查完成，无未解决 P0/P1；提交 `1d965fe` |
 
 阶段提交建议：`feat(daily): 完成模板与日报状态闭环`。
 
@@ -129,7 +129,7 @@ uv sync --directory backend --frozen
 
 | ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
 |---|---|---|---|---|---|
-| EXPORT-01 | Agent B | 导出任务、归档校验与动态列规划 | 阶段 5 | TODO | ID/筛选二选一；仅本人 archived；跨模板 `field_key` 合并与同名消歧 |
+| EXPORT-01 | Agent B | 导出任务、归档校验与动态列规划 | 阶段 5 | IN_PROGRESS | ID/筛选二选一；仅本人 archived；跨模板 `field_key` 合并与同名消歧 |
 | EXPORT-02 | Agent B | xlsx 生成、下载和过期清理 | EXPORT-01 | TODO | 事务外生成、标准 MIME/安全文件名、24h 到期、路径不泄露 |
 | DESK-04 | Agent A | Electron 保存对话框白名单流程 | EXPORT-02、DESK-03 | TODO | renderer 不取得内部路径；取消/失败反馈；参数严格校验 |
 | FE-05 | Agent A | 日报导出交互 | EXPORT-01、EXPORT-02、DESK-04 | TODO | 勾选/筛选导出、处理中状态、不可导出列表提示 |
@@ -175,7 +175,7 @@ uv sync --directory backend --frozen
 
 阶段 4 `AUTH-01`/`AUTH-02`/`USER-01`/`FE-01`/`FE-02`/`QA-04` 已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
 
-阶段 5 七项任务均已完成实现、自测、质量门禁和主 Agent 自审，当前统一为 `REVIEW`。本地实现提交按用户最新明确指令创建；下一步仅进行独立审查与问题修复，审查通过后方可标记 `DONE`。阶段 6 及以后任务不得混入阶段 5 提交。
+阶段 5 七项任务均已完成实现、自测、质量门禁、独立审查与提交 `1d965fe`，统一为 `DONE`。阶段 6 已开始，当前仅 `EXPORT-01` 为 `IN_PROGRESS`；其余阶段 6 任务按依赖保持 `TODO`。
 
 ## 5. 实际验证记录
 
@@ -185,4 +185,4 @@ uv sync --directory backend --frozen
 | 阶段 2 Desktop Bootstrap | `7386cae` | `npm ci`（636 包）、`npm run lint`（0 error/0 warning）、`npm run typecheck`（`tsc`+`vue-tsc` 0 错误）、`npm test`（9 文件 36 项通过）、`npm run build`、`npm run test:integration --workspace electron`（真实子进程，2 项通过）、`uv sync --frozen`、`uv run ruff check .`、`uv run mypy`（strict，20 文件）、`uv run pytest -q`（17 项通过）、`git diff --check` 均已实际执行并通过；手动冒烟（`npm run dev` 真实运行 + `CloseMainWindow()` 模拟正常退出）确认单一 sidecar 进程、健康检查真实通过、退出后无孤儿进程；构建产物已扫描确认无 runtime secret 泄露 | 未单独记录 | ISS-010（Electron 被外部强杀时孤儿进程防护仍不完整，需 Windows Job Object）；PyInstaller 生产二进制尚未产出，生产路径分支未被真实二进制验证过（阶段 9 `PKG-01`） |
 | 阶段 3 数据基础与 API Foundation | `8480515` | `npm run lint`、`npm run typecheck`（前端不受影响，已复核）；`uv sync --directory backend --frozen`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`（strict，40 个源文件，含 `alembic/`）、`uv run pytest -q`（45 项通过：新增 ULID、DB engine/PRAGMA、错误处理器、Alembic 迁移、备份轮转、ORM 约束共 28 项）均已实际执行并通过；手动冒烟（`uv run python -m app` 真实启动）确认迁移自动执行、8 张业务表 + `alembic_version` 正确创建、`/health` 可访问 | 待独立 Reviewer | 无 Repository/Service 层（按阶段边界属于阶段 4 起逐步实现）；`所有权过滤`/`乐观锁` 本阶段只在 ORM 层面验证模式可行，实际业务强制仍需阶段 4/5 的 Repository/Service 落地 |
 | 阶段 4 认证与用户管理 | `1a50e75` | `uv sync --directory backend --frozen`（46 个包）；Ruff check/format、mypy strict（66 个源文件）、pytest（**94 项通过**）；前端 lint、typecheck、Vitest（**12 文件 49 项通过**）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。覆盖 JWT 过期/篡改、运行期与用户 Token 双校验、改密/重置/禁用失效、末位管理员并发保护、safeStorage 无明文回退、40102 清理和管理界面核心交互 | 独立审查完成；无未解决 P0/P1 | 阶段 4 已完成；阶段 5 从干净工作树开始 |
-| 阶段 5 模板、设置与日报闭环 | 本次本地实现提交 | Ruff check/format、mypy strict（81 个源文件）、pytest（**117 项通过**）；前端 lint、typecheck、Vitest（**14 文件 54 项通过**）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。覆盖模板不可变版本/稳定键/核心字段、个人设置、同日并发、未来/闰日、快照、字段类型/有限数值、状态机、自动归档、乐观锁与所有权隔离 | 主 Agent 自审通过；待独立 Reviewer | 按用户明确指令创建本地实现提交；任务仍为 `REVIEW`，不代表 `DONE` |
+| 阶段 5 模板、设置与日报闭环 | `1d965fe` | Ruff check/format、mypy strict（81 个源文件）、pytest（**117 项通过**）；前端 lint、typecheck、Vitest（**14 文件 54 项通过**）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。覆盖模板不可变版本/稳定键/核心字段、个人设置、同日并发、未来/闰日、快照、字段类型/有限数值、状态机、自动归档、乐观锁与所有权隔离 | 独立审查完成；无未解决 P0/P1 | 无；阶段 6 从干净工作树开始 |
