@@ -2,7 +2,7 @@
 
 > 状态基准：2026-08-06
 > 范围依据：`requirements.md`、`architecture.md`、`modules.md`、`database.md`、`api.md`、`coding-rule.md`
-> 当前实现基线：工程骨架提交 `3a9fdbc`；阶段 2 Desktop Bootstrap 提交 `7386cae`；阶段 3 数据基础与 API Foundation 提交 `8480515`（编码规则补充随 `b6b1b47`）；阶段 4 认证与用户管理提交 `1a50e75`；阶段 5 模板、设置与日报闭环提交 `1d965fe`
+> 当前实现基线：工程骨架提交 `3a9fdbc`；阶段 2 Desktop Bootstrap 提交 `7386cae`；阶段 3 数据基础与 API Foundation 提交 `8480515`（编码规则补充随 `b6b1b47`）；阶段 4 认证与用户管理提交 `1a50e75`；阶段 5 模板、设置与日报闭环提交 `1d965fe`；阶段 6 查询导出与桌面保存提交 `d6ab86e`
 
 ## 1. 状态与协作约定
 
@@ -135,7 +135,7 @@ uv sync --directory backend --frozen
 | FE-05 | Agent A | 日报导出交互 | EXPORT-01、EXPORT-02、DESK-04 | DONE | 勾选/筛选导出、处理中状态、不可导出列表提示均已实现、自测并通过独立审查 |
 | QA-06 | Agent C | 导出集成测试与审查 | EXPORT-01..FE-05 | DONE | 混合状态拒绝、跨模板、空值、过期/越权、文件可打开、取消保存均有自动化测试；真实 Electron 应用手动全链路验证；独立审查完成，无未解决 P0/P1 |
 
-阶段提交：`feat(export): 完成归档日报 Excel 导出`。
+阶段提交：`d6ab86e`（`feat(export): 完成归档日报 Excel 导出 [EXPORT-01][EXPORT-02][DESK-04][FE-05][QA-06]`）。
 
 ### 阶段 7：周报闭环
 
@@ -188,4 +188,4 @@ uv sync --directory backend --frozen
 | 阶段 3 数据基础与 API Foundation | `8480515` | `npm run lint`、`npm run typecheck`（前端不受影响，已复核）；`uv sync --directory backend --frozen`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`（strict，40 个源文件，含 `alembic/`）、`uv run pytest -q`（45 项通过：新增 ULID、DB engine/PRAGMA、错误处理器、Alembic 迁移、备份轮转、ORM 约束共 28 项）均已实际执行并通过；手动冒烟（`uv run python -m app` 真实启动）确认迁移自动执行、8 张业务表 + `alembic_version` 正确创建、`/health` 可访问 | 待独立 Reviewer | 无 Repository/Service 层（按阶段边界属于阶段 4 起逐步实现）；`所有权过滤`/`乐观锁` 本阶段只在 ORM 层面验证模式可行，实际业务强制仍需阶段 4/5 的 Repository/Service 落地 |
 | 阶段 4 认证与用户管理 | `1a50e75` | `uv sync --directory backend --frozen`（46 个包）；Ruff check/format、mypy strict（66 个源文件）、pytest（**94 项通过**）；前端 lint、typecheck、Vitest（**12 文件 49 项通过**）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。覆盖 JWT 过期/篡改、运行期与用户 Token 双校验、改密/重置/禁用失效、末位管理员并发保护、safeStorage 无明文回退、40102 清理和管理界面核心交互 | 独立审查完成；无未解决 P0/P1 | 阶段 4 已完成；阶段 5 从干净工作树开始 |
 | 阶段 5 模板、设置与日报闭环 | `1d965fe` | Ruff check/format、mypy strict（81 个源文件）、pytest（**117 项通过**）；前端 lint、typecheck、Vitest（**14 文件 54 项通过**）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。覆盖模板不可变版本/稳定键/核心字段、个人设置、同日并发、未来/闰日、快照、字段类型/有限数值、状态机、自动归档、乐观锁与所有权隔离 | 独立审查完成；无未解决 P0/P1 | 无；阶段 6 从干净工作树开始 |
-| 阶段 6 查询导出与桌面保存 | 待创建 | Ruff check/format、mypy strict（89 个源文件）、pytest（**140 项通过**，新增 23 项：动态列规划、跨模板合并消歧、公式注入防护、导出条件互斥/越权/混合状态拒绝、过期懒清理与启动清理、CORS `Content-Disposition` 暴露回归）；前端 lint、typecheck、Vitest（**16 文件 76 项通过**，新增文件保存白名单、导出 API/IPC 契约）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。另在真实 `npm run dev` 环境完成手动全链路验证（初始化→登录→创建/提交/归档日报→勾选/筛选导出→原生另存为对话框保存成功→打开校验内容→取消保存反馈），过程中发现并修复一个真实缺陷：`CORSMiddleware` 未 `expose_headers` 导致 renderer 读不到服务端文件名（已加回归测试）；独立安全审查另发现并修复 Excel 公式注入风险（自由文本以 `=` 开头时被 openpyxl 提升为可执行公式），已窄范围加前缀转义且不影响中文项目常见的“-”“+”列表符号 | 独立审查完成（含专项安全审查）；无未解决 P0/P1 | 无；阶段 7 从干净工作树开始 |
+| 阶段 6 查询导出与桌面保存 | `d6ab86e` | Ruff check/format、mypy strict（89 个源文件）、pytest（**140 项通过**，新增 23 项：动态列规划、跨模板合并消歧、公式注入防护、导出条件互斥/越权/混合状态拒绝、过期懒清理与启动清理、CORS `Content-Disposition` 暴露回归）；前端 lint、typecheck、Vitest（**16 文件 76 项通过**，新增文件保存白名单、导出 API/IPC 契约）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。另在真实 `npm run dev` 环境完成手动全链路验证（初始化→登录→创建/提交/归档日报→勾选/筛选导出→原生另存为对话框保存成功→打开校验内容→取消保存反馈），过程中发现并修复一个真实缺陷：`CORSMiddleware` 未 `expose_headers` 导致 renderer 读不到服务端文件名（已加回归测试）；独立安全审查另发现并修复 Excel 公式注入风险（自由文本以 `=` 开头时被 openpyxl 提升为可执行公式），已窄范围加前缀转义且不影响中文项目常见的“-”“+”列表符号 | 独立审查完成（含专项安全审查）；无未解决 P0/P1 | 无；阶段 7 从干净工作树开始 |
