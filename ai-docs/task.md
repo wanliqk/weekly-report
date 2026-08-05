@@ -2,7 +2,7 @@
 
 > 状态基准：2026-08-06
 > 范围依据：`requirements.md`、`architecture.md`、`modules.md`、`database.md`、`api.md`、`coding-rule.md`
-> 当前实现基线：工程骨架提交 `3a9fdbc`；阶段 2 Desktop Bootstrap 提交 `7386cae`；阶段 3 数据基础与 API Foundation 提交 `8480515`（编码规则补充随 `b6b1b47`）；阶段 4 认证与用户管理提交 `1a50e75`；阶段 5 模板、设置与日报闭环提交 `1d965fe`；阶段 6 查询导出与桌面保存提交 `d6ab86e`
+> 当前实现基线：工程骨架提交 `3a9fdbc`；阶段 2 Desktop Bootstrap 提交 `7386cae`；阶段 3 数据基础与 API Foundation 提交 `8480515`（编码规则补充随 `b6b1b47`）；阶段 4 认证与用户管理提交 `1a50e75`；阶段 5 模板、设置与日报闭环提交 `1d965fe`；阶段 6 查询导出与桌面保存提交 `d6ab86e`；阶段 7 周报闭环提交待创建
 
 ## 1. 状态与协作约定
 
@@ -141,12 +141,12 @@ uv sync --directory backend --frozen
 
 | ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
 |---|---|---|---|---|---|
-| WEEKLY-01 | Agent B | 自然周可用性、生成和来源快照 | 阶段 5 | TODO | 周一校验、只含 archived、空周可生成、同周唯一、来源可追溯 |
-| WEEKLY-02 | Agent B | 编辑、乐观锁和确认重生成 | WEEKLY-01 | TODO | 人工内容不反写日报；未确认不覆盖；确认后原子替换基线/内容/来源 |
-| FE-06 | Agent A | 周报列表、生成、编辑与来源 UI | WEEKLY-01、WEEKLY-02、FE-01 | TODO | 周范围、未归档提示、空周、来源跳转、醒目覆盖确认 |
-| QA-07 | Agent C | 周报验收与审查 | WEEKLY-01、WEEKLY-02、FE-06 | TODO | 跨年周、闰日、空周、同周并发、人工修改和重生成覆盖语义 |
+| WEEKLY-01 | Agent B | 自然周可用性、生成和来源快照 | 阶段 5 | DONE | 周一校验、只含 archived、空周可生成、同周唯一、来源可追溯均已实现、自测并通过独立审查 |
+| WEEKLY-02 | Agent B | 编辑、乐观锁和确认重生成 | WEEKLY-01 | DONE | 人工内容不反写日报、未确认不覆盖、确认后原子替换基线/内容/来源均已实现、自测并通过独立审查 |
+| FE-06 | Agent A | 周报列表、生成、编辑与来源 UI | WEEKLY-01、WEEKLY-02、FE-01 | DONE | 周范围、未归档提示、空周、来源跳转、醒目覆盖确认均已实现、自测并通过独立审查 |
+| QA-07 | Agent C | 周报验收与审查 | WEEKLY-01、WEEKLY-02、FE-06 | DONE | 跨年周、闰日、空周、同周并发、人工修改和重生成覆盖语义均有自动化测试；真实 Electron 应用手动全链路验证；独立审查完成，无未解决 P0/P1 |
 
-阶段提交建议：`feat(weekly): 完成周报生成与编辑闭环`。
+阶段提交：`feat(weekly): 完成周报生成与编辑闭环 [WEEKLY-01][WEEKLY-02][FE-06][QA-07]`。
 
 ### 阶段 8：设置、占位与备份界面收口
 
@@ -177,7 +177,9 @@ uv sync --directory backend --frozen
 
 阶段 5 七项任务均已完成实现、自测、质量门禁、独立审查与提交 `1d965fe`，统一为 `DONE`。
 
-阶段 6 五项任务（`EXPORT-01`/`EXPORT-02`/`DESK-04`/`FE-05`/`QA-06`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。阶段 7 周报闭环从干净工作树开始。
+阶段 6 五项任务（`EXPORT-01`/`EXPORT-02`/`DESK-04`/`FE-05`/`QA-06`）均已完成实现、自测、质量门禁、独立审查与提交 `d6ab86e`，统一为 `DONE`。
+
+阶段 7 四项任务（`WEEKLY-01`/`WEEKLY-02`/`FE-06`/`QA-07`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。阶段 8 设置、占位与备份界面收口从干净工作树开始。
 
 ## 5. 实际验证记录
 
@@ -189,3 +191,4 @@ uv sync --directory backend --frozen
 | 阶段 4 认证与用户管理 | `1a50e75` | `uv sync --directory backend --frozen`（46 个包）；Ruff check/format、mypy strict（66 个源文件）、pytest（**94 项通过**）；前端 lint、typecheck、Vitest（**12 文件 49 项通过**）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。覆盖 JWT 过期/篡改、运行期与用户 Token 双校验、改密/重置/禁用失效、末位管理员并发保护、safeStorage 无明文回退、40102 清理和管理界面核心交互 | 独立审查完成；无未解决 P0/P1 | 阶段 4 已完成；阶段 5 从干净工作树开始 |
 | 阶段 5 模板、设置与日报闭环 | `1d965fe` | Ruff check/format、mypy strict（81 个源文件）、pytest（**117 项通过**）；前端 lint、typecheck、Vitest（**14 文件 54 项通过**）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。覆盖模板不可变版本/稳定键/核心字段、个人设置、同日并发、未来/闰日、快照、字段类型/有限数值、状态机、自动归档、乐观锁与所有权隔离 | 独立审查完成；无未解决 P0/P1 | 无；阶段 6 从干净工作树开始 |
 | 阶段 6 查询导出与桌面保存 | `d6ab86e` | Ruff check/format、mypy strict（89 个源文件）、pytest（**140 项通过**，新增 23 项：动态列规划、跨模板合并消歧、公式注入防护、导出条件互斥/越权/混合状态拒绝、过期懒清理与启动清理、CORS `Content-Disposition` 暴露回归）；前端 lint、typecheck、Vitest（**16 文件 76 项通过**，新增文件保存白名单、导出 API/IPC 契约）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。另在真实 `npm run dev` 环境完成手动全链路验证（初始化→登录→创建/提交/归档日报→勾选/筛选导出→原生另存为对话框保存成功→打开校验内容→取消保存反馈），过程中发现并修复一个真实缺陷：`CORSMiddleware` 未 `expose_headers` 导致 renderer 读不到服务端文件名（已加回归测试）；独立安全审查另发现并修复 Excel 公式注入风险（自由文本以 `=` 开头时被 openpyxl 提升为可执行公式），已窄范围加前缀转义且不影响中文项目常见的“-”“+”列表符号 | 独立审查完成（含专项安全审查）；无未解决 P0/P1 | 无；阶段 7 从干净工作树开始 |
+| 阶段 7 周报闭环 | 待创建 | Ruff check/format、mypy strict（96 个源文件）、pytest（**169 项通过**，新增 29 项：周一校验/跨年周/闰日纯函数、生成/保存/重生成 Service 直连测试——含并发同周唯一、乐观锁、人工内容不反写日报、导出 API 测试——含互斥所有权隔离与 40903/40904/40001 错误码）；前端 lint、typecheck、Vitest（**17 文件 91 项通过**，新增周一定位/来源 ID 提取/字段展示纯函数测试）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。另在真实 `npm run dev` 环境完成手动全链路验证（选择自然周→查看逐日可用性与状态标签→生成本周周报→来源日报内容正确汇总→保存本周补充/下周计划/问题风险→"查看来源日报"正确跳转到 `/daily/:id`→醒目确认对话框→重新生成后人工编辑与自动内容均被清空重建），过程中发现并修复一处真实的时间显示缺陷：周报生成时间/更新时间原样展示服务端 UTC ISO 字符串（含 `+00:00`），未按 `Asia/Shanghai` 格式化，已复用 `formatShanghaiTime` 修正；独立安全专项审查未发现所有权隔离、SQL 注入、确认绕过或 XSS 方向的可利用漏洞 | 独立审查完成（含专项安全审查）；无未解决 P0/P1 | 无；阶段 8 从干净工作树开始 |

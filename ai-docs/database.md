@@ -1,6 +1,6 @@
 # 数据库设计
 
-> 状态：目标数据库契约已基线化（V1；`users`/`user_settings`/`report_templates`/`template_versions`/`daily_reports`/`export_jobs` 已有真实 Repository/Service 落地，`weekly_reports`/`weekly_report_sources` 尚未实现）
+> 状态：目标数据库契约已基线化（V1；全部 8 张业务表均已有真实 Repository/Service 落地）
 > 更新日期：2026-08-06
 > 数据库：SQLite（SQLAlchemy 2.x + Alembic）
 
@@ -8,7 +8,7 @@
 
 - 阶段 3（`DB-01`/`DB-02`/`DB-03`）已实现：异步 Engine/Session（`backend/app/db/engine.py`、`session.py`）、PRAGMA（`foreign_keys`/`journal_mode=WAL`/`synchronous=NORMAL`/`busy_timeout`）、8 张业务表的 SQLAlchemy Model（`backend/app/models/`）、Alembic 初始迁移（`backend/alembic/versions/3f6f955b87bb_initial_schema.py`）、启动时迁移前备份/轮转（`backend/app/db/migrate.py`）均已落地，代码与测试为准，未使用 `create_all()` 代替迁移。
 - 下列表、约束、索引、事务与备份**规则**仍是权威契约来源；实现细节（如具体文件路径）以代码为准，本节只记录"哪些已经真实存在"，不重复描述设计意图。
-- Repository、Service 层（`backend/app/repositories/`、`app/services/`）已随阶段 4/5/6 逐步落地：`user.py`/`user_settings.py`/`template.py`/`daily_report.py`/`export_job.py` repository 及对应 Service 均已实现所有权过滤查询和/或乐观锁条件更新；`weekly_reports`/`weekly_report_sources` 仍待阶段 7，其"所有权过滤查询""乐观锁条件更新"访问模式目前仍只在 `backend/tests/test_model_constraints.py` 中以 ORM 直接操作的方式验证了可行性——落地时必须遵循本文件规则，不得引入新的访问模式。
+- Repository、Service 层（`backend/app/repositories/`、`app/services/`）已随阶段 4/5/6/7 逐步落地：`user.py`/`user_settings.py`/`template.py`/`daily_report.py`/`export_job.py`/`weekly_report.py` repository 及对应 Service 均已实现所有权过滤查询和/或乐观锁条件更新，全部 8 张业务表均有真实业务代码强制执行本文件的访问模式（不再仅存在于 `backend/tests/test_model_constraints.py` 的 ORM 直接验证）。
 - 迁移与备份基础设施验证方式：`backend/tests/test_migrations.py`（空库 upgrade/降级/幂等）、`backend/tests/test_migrate_backup.py`（备份触发条件、轮转、路径边界、失败停止启动）、`backend/tests/test_db_engine.py`（PRAGMA 实际连接值）。
 - 实现后以 migration、Model、自动化测试和 `progress.md` 共同证明状态；若代码与本文冲突，先修正文档或请求确认。
 

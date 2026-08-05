@@ -44,6 +44,7 @@ async function signOut(): Promise<void> {
       </div>
       <nav class="app-nav" aria-label="主导航">
         <RouterLink to="/daily">日报工作台</RouterLink>
+        <RouterLink to="/weekly">周报工作台</RouterLink>
         <RouterLink to="/templates">模板管理</RouterLink>
         <RouterLink v-if="authStore.isAdmin" to="/admin/users">用户管理</RouterLink>
       </nav>

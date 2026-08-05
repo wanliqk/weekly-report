@@ -6,13 +6,14 @@
 
 ## 1. 总体状态
 
-- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存。
-- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）。
-- 当前所在阶段：阶段 6 查询导出与桌面保存已完成；阶段 7 周报闭环尚未开始。
+- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存、阶段 7 周报闭环。
+- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）。阶段 7 实现提交待创建（本文件随该提交一并交付）。
+- 当前所在阶段：阶段 7 周报闭环已完成；阶段 8 设置、占位与备份界面收口尚未开始。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
 - 阶段 4 实现状态：六项任务均已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
 - 阶段 5 实现状态：七项任务均已完成实现、自测、质量门禁、独立审查与提交 `1d965fe`，统一为 `DONE`。
-- 阶段 6 实现状态：五项任务（`EXPORT-01`/`EXPORT-02`/`DESK-04`/`FE-05`/`QA-06`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
+- 阶段 6 实现状态：五项任务（`EXPORT-01`/`EXPORT-02`/`DESK-04`/`FE-05`/`QA-06`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查）与提交 `d6ab86e`，统一为 `DONE`。
+- 阶段 7 实现状态：四项任务（`WEEKLY-01`/`WEEKLY-02`/`FE-06`/`QA-07`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
 - 当前阻塞：无业务/技术决策阻塞。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 
@@ -132,6 +133,24 @@
 - `electron/src/renderer/src/api/client.ts` 新增 `requestBinary()`：以 `responseType:'arraybuffer'` 下载文件并从 `Content-Disposition` 解析文件名；错误路径下会把 axios 返回的 `ArrayBuffer` 错误体尝试解码为 JSON，避免真实业务错误码被降级成通用 `50001`。
 - `/daily` 列表页新增复选列与“导出所选”“导出当前筛选（仅归档）”按钮：创建任务→若 `record_count>0` 则下载字节并调用 `exportFile.save`→按 `saved`/`canceled`/`failed` 展示对应提示；命中 `40001` 时把 `invalid_report_ids` 映射为当前页可见的工作日期展示，而非裸 ULID。
 
+### 周报后端（阶段 7，WEEKLY-01 / WEEKLY-02）
+
+- `backend/app/services/weekly_report.py::week_end_for`：纯函数，校验 `week_start` 必须是周一（`weekday()==0`，否则 `40001`），返回 `week_start+6`；跨年周（如 2025-12-29→2026-01-04）和闰周（2024-02-26→2024-03-03）已用真实日期验证。
+- `build_weekly_content` 是纯函数：对每份日报解析其自身 `template_snapshot_json`/`content_json`（不读取当前模板），只保留 `enabled` 字段并按 `sort_order` 排序，输出 `{field_key,label,value}`；`field_type`/`options` 不进入周报 JSON（与 `database.md` 3.6 节固定结构一致），前端展示因此退化为纯文本摘要，不复用日报的分类型输入组件。
+- `WeeklyReportRepository`（`backend/app/repositories/weekly_report.py`）：`save_content`/`replace_on_regenerate` 均用 `WHERE id=? AND user_id=? AND version=?` 条件更新；`replace_sources` 对 `weekly_report_sources` 先删后插且不带 owner 过滤，但调用方（`generate`/`regenerate`）只会在已经拿到本人的 `report.id`（刚插入或条件更新命中之后）时才调用它，不构成越权路径（已由独立安全审查确认）。
+- `WeeklyReportService.generate()`：读取当前 owner 在该自然周内的 `list_owned_archived_by_range`（复用阶段 6 已有方法，只取 `archived`），在一次事务内插入 `weekly_reports` 与 `weekly_report_sources`；同周唯一冲突通过捕获 `IntegrityError` 后回查现有记录判定，返回 `40903` 与 `existing_weekly_report_id`（与日报唯一创建同一模式），已用真实并发 `asyncio.gather` 验证只成功一次。
+- `availability()` 新增 `DailyReportRepository.list_owned_in_range`（不筛选状态，仅按 `owner_id`+日期区间），用于展示自然周内 7 天各自的日报状态（`draft`/`submitted`/`archived`/`None`），独立于只取 `archived` 的生成路径，避免"预检"和"生成"混用同一查询产生误导。
+- `save()` 只接受并覆盖 `supplement`/`next_week_plan`/`risks` 三个自由文本字段，`content_json` 中的 `days` 保持不变，从机制上保证"人工编辑不反写日报"且不篡改自动摘要部分。
+- `regenerate()` 强制 `confirm_overwrite=True`（`WeeklyRegenerateRequest` 无默认值，缺省即 422；服务层再显式校验一次，`40001`），确认后用当天重新查询到的 `archived` 日报重建 `days`，同时重置 `supplement`/`next_week_plan`/`risks` 为空，`generated_content_json` 与 `content_json` 都指向这份新内容（不保留任何历史版本，符合 `ADR-008`/`RISK-002`）。
+- `backend/app/api/v1/weekly_reports.py`：`/availability`、`""`（GET 列表/POST 生成）、`/{id}`（GET/PUT）、`/{id}/regenerate` 六个接口均已实现并接入 `main.py`；`/availability` 路由必须先于 `/{report_id}` 注册，否则会被路径参数捕获。
+
+### 周报前端（阶段 7，FE-06）
+
+- `/weekly` 新增自然周选择（任选一天自动定位到周一，不依赖 Element Plus 周选择器语义）、逐日状态标签、未归档日期提示、空周提示、生成/查看按钮（已存在则直接跳转，不重复生成）；下方为按周范围筛选的历史周报分页列表。
+- `/weekly/:id` 展示按日期分组的来源卡片（含"查看来源日报"跳转到 `/daily/:id`，不提供反向编辑入口）、三个自由文本编辑区、保存与重新生成操作；重新生成走 `ElMessageBox.confirm` 醒目二次确认（危险态按钮），文案明确告知会同时覆盖自动内容和人工编辑且不可撤销。
+- `electron/src/renderer/src/utils/weekly-report.ts`：`mondayOfWeek`/`weekEndFor` 使用 UTC 锚定的纯日期算术（不做真实时区换算，只做日历计算），避免本地时区在日期边界产生偏差；已用跨年周和闰周输入验证。
+- 真实 Electron 环境联调发现并修复一处显示缺陷：周报生成时间/更新时间最初直接展示服务端 UTC ISO 字符串（含 `+00:00`），未按 `Asia/Shanghai` 格式化；已改为复用日报页面已有的 `formatShanghaiTime`。
+
 ### 已记录的阶段验证
 
 工程基线（阶段 1）交付记录（历史）：`npm ci`、lint、typecheck、`npm test`（1 项前端测试）、`npm run build`、`uv sync --frozen`、`uv run ruff/mypy/pytest`（3 项后端测试）均已通过。
@@ -186,12 +205,26 @@
 - 独立安全专项审查（`security-review` 流程，含二次假阳性复核）：识别出 Excel 公式注入风险——自由文本字段以 `=` 开头时会被 openpyxl 提升为可执行公式，导出文件被他人在 Excel 中打开时可能触发；已修复（仅对 `=` 前缀转义，不影响中文场景常见的 `-`/`+` 列表符号），并补充专项测试覆盖公式防护与列表符号不受影响两种场景。除该项外未发现文件白名单、路径越界、所有权隔离、CORS 放宽等方向的可利用漏洞。
 - 主 Agent 自审：无跨层访问、无临时接口、日志/异常未见密码/JWT/密钥/完整正文；独立审查完成，阶段 6 无未解决 P0/P1。
 
+阶段 7 周报闭环当前工作树实际执行并通过：
+
+- `uv run --directory backend ruff check .`、`ruff format --check .`：0 error，96 个文件格式合规。
+- `uv run --directory backend mypy`（strict，96 个源文件）：0 错误。
+- `uv run --directory backend pytest`：**169 项测试全部通过**（阶段 6 遗留 140 项 + 本阶段新增 29 项：周一校验/跨年周/闰周纯函数 7、周报 Service 直连测试 14——含并发同周唯一、乐观锁冲突、人工内容不反写日报、重生成整体覆盖、所有权 404、周报 API 测试 8——含互斥所有权隔离与 40903/40904/40001 错误码）。
+- `npm run lint`、`npm run typecheck`：通过。
+- `npm test`：**17 个文件 91 项测试全部通过**，新增周一定位/跨年周纯函数、`existing_weekly_report_id` 提取、周报字段展示格式化测试。
+- `npm run test:integration --workspace electron`：真实后端进程 **2 项通过**，阶段 7 未破坏动态端口和退出清理链路。
+- `npm run build`：main/preload/renderer 生产构建通过；仅有 `@vueuse/core` 第三方 PURE 注释位置提示（ISS-007 继续跟踪）。
+- `git diff --check`：通过。
+- 真实环境手动验证（`npm run dev` 真实启动 Electron + 真实后端，非测试替身）：进入 `/weekly` 自动定位到本周（任选一天自动吸附到周一）→逐日状态标签正确反映真实归档/草稿/无日报状态→点击生成→周报正确汇总已归档日报的字段内容→保存本周补充/下周计划/问题风险成功且版本递增→"查看来源日报"正确跳转到对应 `/daily/:id` 详情页→返回后列表页正确显示"查看本周周报"（不重复生成）→点击重新生成弹出醒目二次确认（危险态按钮+明确覆盖提示）→确认后生成时间/版本更新且此前保存的人工文本被清空重建。过程中发现并修复一处真实的时间显示缺陷：周报生成/更新时间原样展示服务端 UTC ISO 字符串，未转换为 `Asia/Shanghai` 显示；已复用现有 `formatShanghaiTime` 修正并通过同一真实环境复验。
+- 独立安全专项审查（`security-review` 流程）：逐项核查所有权隔离（6 个接口的每条查询）、`replace_sources` 缺 owner 过滤但不可达越权路径、乐观锁 WHERE 条件是否同时锁定 `user_id`、`confirm_overwrite` 服务端强制校验、SQL 注入、XSS，未发现可利用漏洞。
+- 主 Agent 自审：无跨层访问、无临时接口、日志/异常未见密码/JWT/密钥/完整正文；独立审查完成，阶段 7 无未解决 P0/P1。
+
 ## 3. 尚未实现
 
 以下均为设计目标，当前不得标记为完成：
 
 - 开发/生产 sidecar 路径解析中，生产分支的 PyInstaller `onedir` 产物本身（`PKG-01`，阶段 9）——`build/sidecar/` 仍是空占位目录。
-- 周报对应的 Repository/Service/API 与前端页面尚未实现（阶段 7）；个人设置/企业微信占位/手动备份 UI 属于阶段 8 `FE-07`，尚未实现。
+- 个人设置/企业微信占位/手动备份 UI 属于阶段 8 `FE-07`，尚未实现。
 - Playwright E2E、PyInstaller 和 Windows 安装/升级验证。
 - Windows Job Object 级别的孤儿进程彻底防护（ISS-010，非阻塞）。
 - admin 手动整库备份 API（`BACKUP-01`，阶段 8）——DB-03 的自动迁移前备份机制与之相关但不是同一功能，手动备份走独立的短期下载文件流程。
@@ -242,3 +275,11 @@
 5. ✅ 日报列表勾选/筛选导出、处理中状态、不可导出列表提示已实现。
 6. ✅ 后端 140 项、前端 76 项、真实 sidecar 集成 2 项及生产构建全部通过；真实 `npm run dev` 环境完成含原生保存对话框的全链路手动验证。
 7. ✅ 独立审查（含专项安全审查）完成，发现并修复 Excel 公式注入与 CORS 文件名暴露两项真实问题，均已补充回归测试；无未解决 P0/P1。实现提交 `d6ab86e` 已创建，阶段 6 正式关闭。
+
+阶段 7 四项任务已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`：
+
+1. ✅ 自然周周一校验、仅归档日报参与生成、空周可生成、同周唯一（含并发）、来源快照可追溯已实现。
+2. ✅ 人工编辑（本周补充/下周计划/问题风险）不反写日报、未显式确认不覆盖、确认后原子替换基线/内容/来源已实现。
+3. ✅ 周报列表、周范围选择与逐日可用性展示、生成、编辑保存、来源跳转到日报详情、重新生成醒目覆盖确认已实现。
+4. ✅ 后端 169 项、前端 91 项、真实 sidecar 集成 2 项及生产构建全部通过；真实 `npm run dev` 环境完成含生成/编辑/来源跳转/重新生成的全链路手动验证，过程中发现并修复时间显示未转换 `Asia/Shanghai` 的缺陷。
+5. ✅ 独立审查（含专项安全审查）完成，逐项核查所有权隔离、`replace_sources` 可达性、乐观锁、确认绕过、SQL 注入与 XSS，均未发现可利用漏洞；无未解决 P0/P1。实现提交待创建，阶段 7 正式关闭。

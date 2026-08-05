@@ -1,6 +1,6 @@
 # API 接口规范
 
-> 状态：目标 API 契约已基线化（V1；系统、认证、用户管理、模板、日报、设置/能力、导出已实现，周报待实现）
+> 状态：目标 API 契约已基线化（V1；系统、认证、用户管理、模板、日报、设置/能力、导出、周报已实现；手动整库备份待实现）
 > 更新日期：2026-08-06
 > 基础路径：`/api/v1`
 
@@ -16,7 +16,8 @@
 - `GET /api/v1/system/bootstrap-status`、`POST /api/v1/system/bootstrap-admin` 已在阶段 4 `AUTH-01` 实现并有自动化测试：仍需 `X-Runtime-Secret`；空库返回 `initialized:false`；创建成功后返回账号元数据（不含密码/哈希）并原子建立默认模板；重复调用返回 `40001`（含并发场景）。
 - `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`PUT /api/v1/auth/password`、`POST /api/v1/auth/logout` 及五个 `/api/v1/users` 管理接口已在阶段 4 实现；除匿名入口外均同时校验 runtime secret、JWT、用户启用状态和 `token_version`，admin 接口还校验角色。
 - 第 6 节三个模板接口、第 7 节六个日报接口、第 10 节三个设置/能力接口均已在阶段 5 实现（细节见各节末尾说明）。
-- 第 8 节三个导出接口已在阶段 6 `EXPORT-01`/`EXPORT-02` 实现（细节见该节末尾说明）。周报（第 9 节）和手动整库备份（第 4.1 节）仍未实现。
+- 第 8 节三个导出接口已在阶段 6 `EXPORT-01`/`EXPORT-02` 实现（细节见该节末尾说明）。
+- 第 9 节六个周报接口已在阶段 7 `WEEKLY-01`/`WEEKLY-02` 实现（细节见该节末尾说明）。手动整库备份（第 4.1 节）仍未实现。
 
 本文后续示例均为目标契约；实现任务不得为了匹配“已存在”的假象跳过测试或状态更新。
 
@@ -241,6 +242,8 @@ JWT 声明至少包含 `sub`、`role`、`ver`、`iat`、`exp`、`jti`。每次�
 ```
 
 `week_start` 非周一返回 40001。若同周已存在，40903 的 `data` 返回 `existing_weekly_report_id`。重生成同时执行乐观锁检查。
+
+上述六个接口已实现。`availability` 展示自然周内 7 天各自的日报状态（`draft`/`submitted`/`archived`/无日报）供前端提示未归档日期，只读、不写入任何记录；生成（`POST`）会重新查询归档日报，不信任 `availability` 的预检结果。`PUT` 只接受并覆盖 `supplement`/`next_week_plan`/`risks` 三个自由文本字段（`content.days` 保持不变），从机制上保证人工编辑不反写日报。`regenerate` 的 `confirm_overwrite` 服务端强制校验为 `true`（缺省即 422，传 `false` 返回 40001），确认后原子重建 `days`、来源快照，并把 `supplement`/`next_week_plan`/`risks` 重置为空——不保留任何历史版本。
 
 ## 10. 设置与能力
 

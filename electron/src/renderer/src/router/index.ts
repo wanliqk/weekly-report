@@ -11,6 +11,8 @@ import LoginView from '@renderer/views/LoginView.vue'
 import SetupView from '@renderer/views/SetupView.vue'
 import TemplatesView from '@renderer/views/TemplatesView.vue'
 import UsersView from '@renderer/views/UsersView.vue'
+import WeeklyDetailView from '@renderer/views/WeeklyDetailView.vue'
+import WeeklyListView from '@renderer/views/WeeklyListView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -35,6 +37,8 @@ export const router = createRouter({
         { path: 'daily', name: 'daily', component: DailyListView },
         { path: 'daily/new', name: 'daily-create', component: DailyCreateView },
         { path: 'daily/:id', name: 'daily-detail', component: DailyDetailView },
+        { path: 'weekly', name: 'weekly', component: WeeklyListView },
+        { path: 'weekly/:id', name: 'weekly-detail', component: WeeklyDetailView },
         { path: 'templates', name: 'templates', component: TemplatesView },
         {
           path: 'admin/users',

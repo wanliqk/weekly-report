@@ -65,6 +65,20 @@ class DailyReportRepository:
         )
         return list(result.scalars())
 
+    async def list_owned_in_range(
+        self, owner_id: str, *, date_from: date, date_to: date
+    ) -> list[DailyReport]:
+        result = await self._session.execute(
+            select(DailyReport)
+            .where(
+                DailyReport.user_id == owner_id,
+                DailyReport.work_date >= date_from,
+                DailyReport.work_date <= date_to,
+            )
+            .order_by(DailyReport.work_date.asc(), DailyReport.id.asc())
+        )
+        return list(result.scalars())
+
     async def list_page(
         self,
         owner_id: str,

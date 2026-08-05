@@ -14,6 +14,7 @@ from app.api.v1.settings import router as settings_router
 from app.api.v1.system import router as system_router
 from app.api.v1.templates import router as templates_router
 from app.api.v1.users import router as users_router
+from app.api.v1.weekly_reports import router as weekly_reports_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.jwt_secret import load_or_create_jwt_secret
@@ -82,4 +83,5 @@ def create_app(settings: Settings | None = None, *, jwt_secret: str | None = Non
     application.include_router(settings_router)
     application.include_router(daily_reports_router)
     application.include_router(exports_router)
+    application.include_router(weekly_reports_router)
     return application

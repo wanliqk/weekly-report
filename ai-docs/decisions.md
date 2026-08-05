@@ -33,6 +33,7 @@
 | PROD-006 | 企业微信仅提供本地“未开放”占位，不定义同步 API | Accepted for V1 | `requirements.md`、`api.md` | 不引入 SDK，不产生企业微信网络请求 |
 | PROD-007 | 导出动态列按 `field_key` 首次出现顺序排列，表头取该字段最近一次出现的标签文本 | Accepted for V1 | `EXPORT-01` 实现（`requirements.md` 4.4 只给出“按稳定 `field_key` 合并、同名标签追加短标识”的原则，未定义具体排序/取值算法） | 历史新增字段追加在已见字段之后；`field_key` 不变时标签变化不拆列；两个不同 `field_key` 恰好得到相同表头文本才追加 `field_key` 后缀消歧 |
 | PROD-008 | 导出文件内的 `Asia/Shanghai` 时间展示使用固定 UTC+8 偏移而非 `zoneinfo` | Accepted for V1 | `EXPORT-02` 实现 | 中国大陆自 1991 年后不施行夏令时，固定偏移在数值上等价且避免生产环境依赖可选的 `tzdata` 包（Windows 默认不含 IANA 时区数据库）；若产品未来需要真实多时区支持需新 ADR |
+| PROD-009 | 周报 `PUT` 只接受并覆盖 `supplement`/`next_week_plan`/`risks` 三个自由文本字段，`content.days` 由服务端固定为生成/重生成时的快照，不做逐字段编辑 | Accepted for V1 | `WEEKLY-02` 实现（`requirements.md` 4.3.4/4.3.5 只描述"自动内容"与"编辑区"两部分，未定义 `PUT` 的字段粒度） | 从机制上保证"人工编辑不反写日报"且不会让用户绕过重新生成来局部篡改来源摘要；若未来需要允许编辑单日摘要文本需新 ADR |
 | SEC-001 | JWT 持久化使用 Electron safeStorage | Accepted | `architecture.md`、`AGENTS.md` | renderer 不写 `localStorage`/`sessionStorage`；不可用时必须显式失败或提示 |
 | SEC-002 | 所有业务 API 同时校验 JWT 与 `X-Runtime-Secret` | Accepted | `architecture.md`、`api.md` | `/health` 是唯一例外；Main 随机生成，renderer API 客户端仅在内存持有，不得进入 Vite 变量、持久化存储或日志 |
 | SEC-003 | V1 不做 SQLite 整库加密 | Accepted for V1 | `requirements.md`、`architecture.md` | 密码使用 Argon2id、Token safeStorage；若要求磁盘泄露防护需新 ADR |
