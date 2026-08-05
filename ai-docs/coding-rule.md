@@ -97,6 +97,8 @@
 - safeStorage 不可用时必须显式降级/提示，不得静默改存明文。
 - 外部 URL 使用协议和域名 allowlist，禁止直接 `shell.openExternal(userInput)`。
 - 应用退出、崩溃和重复启动场景必须清理 sidecar，不能误删用户数据。
+- Windows 下终止 sidecar/子进程必须用 `taskkill /pid <pid> /t /f` 按整棵进程树终止，不要依赖 `child.kill()`：某些启动器（例如 `uv` 管理的 venv `python.exe`）会再 fork 真正干活的孙进程，`child.kill()` 只杀 Node 记录的那一个 pid，孙进程会变孤儿（DESK-02 实测踩过此坑，参考 `electron/src/main/sidecar/process-kill.ts` 注释）。
+- `electron/src/main` 下会被 Vitest 单元测试 import 到的模块（例如 `sidecar/`、`ipc/` 里的文件），禁止在模块顶层 `import ... from 'electron'` 或 `'@electron-toolkit/utils'`：后者内部对 `electron` 做具名 ESM import，脱离真实 Electron 运行时（包括 Vitest）会直接抛出 `SyntaxError: Named export 'X' not found`。需要 `is.dev`/`app.*` 等能力的模块应通过调用方传入的值或回调获取，只在 `index.ts`（或其他确定不被测试 import 的文件）里直接读取 electron 全局（参考 `electron/src/main/sidecar/create-runtime-deps.ts` 的 `getLaunchOptions` 回调模式，以及 `paths.ts`/`manager.ts` 完全不 import electron 的写法）。
 - electron-vite 环境变量必须按 main/preload/renderer 前缀隔离；JWT、runtime secret、密码、数据库路径不得写入 `VITE_`、`RENDERER_VITE_` 或任何会被静态打包的变量。
 - main/preload 新增依赖时必须审查 electron-vite externalization 与 electron-builder 收集结果；不得使用未声明的幻影依赖。sandbox preload 如需第三方依赖，应完整打包或改为 Main 白名单能力，不得关闭 sandbox。
 - 开发、CI 和发布统一使用 Node.js 22.12+ LTS、npm 10+，并从仓库根执行 npm workspace 命令。
@@ -109,6 +111,7 @@
 - JSON 写入前使用版本化 schema 校验；读取历史 JSON 时提供兼容策略或明确迁移。
 - 禁止在日志打印 SQL 参数中的正文和凭据。
 - 测试至少覆盖新库升级和上一版本库升级；迁移前备份失败时禁止继续。
+- 新写 Alembic migration（尤其用 `--autogenerate`）或涉及 `run_startup_migrations`/异步 Engine 的测试前，先看 `database.md` §5 记录的两个已知坑（autogenerate 会静默丢弃表达式/`DESC` 索引；同步的迁移入口不能嵌套在异步 fixture 里调用）。
 
 ## 8. API 与错误处理
 

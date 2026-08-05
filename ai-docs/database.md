@@ -223,6 +223,8 @@ users 1──N export_jobs
 - 表/列/索引命名必须稳定，代码与本文不一致时先修改设计并获批。
 - 初始 migration 必须一次性建立本文 V1 表、外键、CHECK、唯一约束和索引，并测试“空库 upgrade 到 head”；发布后不得回改该 migration。
 - 迁移命令与数据文件必须使用测试专用临时目录验证，不得让测试读写真实 `userData` 或 `.local-data` 数据。
+- **已知坑 1**：`alembic revision --autogenerate` 在 SQLite 方言下无法反射“表达式索引”（例如按 `desc()` 排序的列），会**静默丢弃**这类索引、不报错也不在 diff 里提示——初始迁移已实测踩过（`ix_daily_reports_user_date` 等 4 个 `DESC` 索引被自动漏掉）。每次跑完 autogenerate 必须把生成的 `upgrade()`/`downgrade()` 和 Model 逐项核对，手动补回表达式索引；这类索引要用模块级 `op.create_index(name, table, [..., sa.text('col DESC')])`，不要放进 `with op.batch_alter_table(...) as batch_op:` 里调用 `batch_op.create_index(...)`（其类型签名只接受纯字符串列名，混入 `sa.text()` 会被 mypy 拒绝）。
+- **已知坑 2**：`run_startup_migrations()`（`backend/app/db/migrate.py`）内部用 `asyncio.run()` 驱动 Alembic，是同步函数。测试里如果在**异步** fixture 或异步测试函数内直接调用它，会报 `asyncio.run() cannot be called from a running event loop`。需要它的测试必须拆成两层 fixture：一个同步 fixture 先跑 `ensure_runtime_directories()` + `run_startup_migrations()`，再由一个依赖它的异步 fixture 创建 Engine/Session（参考 `backend/tests/test_model_constraints.py` 的 `migrated_settings`/`session_factory` 写法）。
 
 ## 6. 数据访问与删除策略
 
