@@ -36,6 +36,8 @@ API 基础路径为 `/api/v1`，统一返回 `{code,msg,data}`；时间使用带
 
 从 `v1` 起统一采用 Conventional Commits，例如 `feat(daily): 增加日报归档`、`fix(auth): 修复令牌失效校验`。每个提交只处理一个明确问题。拉取请求必须说明变更范围、关联任务、验证命令及结果；界面变更附截图，并明确标注数据库、API、安全或打包影响。
 
+代码实现按技术方案分阶段推进。每个阶段完成并通过对应质量门禁后，必须复核工作树并创建一个独立的 Conventional Commit；不得把下一阶段的实现混入当前阶段提交。创建本地提交不代表允许推送远端，推送仍需用户明确授权。
+
 ## 安全与代理执行约束
 
 FastAPI 只监听 `127.0.0.1` 动态端口，禁止绑定 `0.0.0.0` 或启动多 worker。Electron 必须启用 `contextIsolation` 和 sandbox、禁用 `nodeIntegration`；JWT 由 `safeStorage` 保存，不得写入 `localStorage`。日志不得包含密码、JWT、运行时密钥或报告正文；不得提交 `.env`、本地数据库、日志和构建产物。
