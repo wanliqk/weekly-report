@@ -24,9 +24,9 @@ weekly-report/
 
 ### 1.1 当前工程状态（2026-08-05）
 
-- `electron/` 已有 main/preload/renderer 骨架、Router、Pinia、Element Plus、Axios 和 Vitest 基线；仅有首页占位，尚无业务页面与 HTTP API 层。
-- `backend/` 已有 FastAPI 应用工厂、配置、请求 ID、统一成功响应 schema、`GET /health` 与测试；Service、Repository、Model 目录仍为空壳。
-- 尚无 Alembic 配置或迁移、数据库会话、认证和业务 API。
+- `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局和用户管理页面；日报、周报等后续业务页面尚未实现。
+- `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证和用户管理的 API/Service/Repository 实现。
+- 阶段 4 实现与质量门禁已完成，等待独立 Reviewer；模板、日报、周报、导出等后续业务 API 尚未实现。
 - `build/sidecar/` 仍为占位，尚未生成 PyInstaller 产物。
 
 ## 2. 目标业务与平台模块
@@ -56,13 +56,15 @@ weekly-report/
 | 模块 | 状态 | 当前事实 / 下一缺口 |
 |---|---|---|
 | M01 Desktop Bootstrap | 部分完成 | 已有单实例、安全窗口、sidecar 启停、动态端口、健康等待、退出清理（`taskkill /t /f`）；缺保存对话框白名单（阶段 6 `DESK-04`）和生产运行期目录的实际落地验证（依赖阶段 9 `PKG-01` 产出真实二进制） |
-| M02 Runtime Bridge | 部分完成 | preload 已暴露 `runtimeBridge.{sidecar,api}`（状态查询/订阅/重试、API 基址与 runtime secret）；缺 Token 安全存取（`safeStorage`，阶段 4 `FE-01`）和下载保存白名单（阶段 6 `DESK-04`） |
+| M02 Runtime Bridge | 部分完成 | preload 已暴露受限 `runtimeBridge.{sidecar,api,token}`；Token 由 Main `safeStorage` 加密持久化且不可用时不明文回退；缺下载保存白名单（阶段 6 `DESK-04`） |
 | M03 Persistence | 部分完成 | 已有异步 Engine/Session、PRAGMA（WAL/FK/busy_timeout/synchronous）、8 张表 ORM Model、Alembic 初始迁移、迁移前备份+轮转+路径边界校验；Repository 层已有首个落地（`user`/`user_settings`/`template`，随 `AUTH-01`）；缺其余模块 Repository 与手动整库备份 API（`BACKUP-01`，阶段 8） |
-| M04 API Foundation | 部分完成 | 已有应用工厂、精确 CORS/Host、请求 ID、`RuntimeSecretMiddleware`、达标 `/health`（`version`+`Cache-Control: no-store`）、成功响应 schema、统一异常处理器（`AppError`/422/50301/50001）；缺 JWT 鉴权依赖和其余具体业务错误码（随各业务任务实现） |
-| M05 Auth | 部分完成 | `AUTH-01` 已实现首次管理员初始化（`POST /api/v1/system/bootstrap-admin`、`GET /api/v1/system/bootstrap-status`）；JWT、`token_version`、登录、改密、退出（`AUTH-02`）尚未实现 |
-| M06—M11 业务后端 | 未实现 | 尚无用户管理、模板、日报、周报、设置、能力或导出接口 |
-| M12 Frontend Shell | 部分完成 | 已有 Vue/Router/Pinia/UI 基线与首页；缺鉴权、API client、布局、全局错误处理 |
-| M13—M16 业务前端 | 未实现 | 尚无对应页面与交互 |
+| M04 API Foundation | 部分完成 | 已有应用工厂、精确 CORS/Host、请求 ID、runtime secret、JWT/当前用户/admin 依赖、达标 `/health`、统一响应与异常；其余具体业务错误码随对应模块实现 |
+| M05 Auth | REVIEW | 初始化、24h JWT、持久化签名密钥、`token_version`、登录、当前用户、改密和退出均已实现并通过门禁，待独立 Reviewer |
+| M06 User Admin | REVIEW | 用户分页查询、创建、角色/状态修改、重置密码和末位有效管理员保护已实现并通过门禁，待独立 Reviewer |
+| M07—M11 业务后端 | 未实现 | 尚无模板发布、日报、周报、设置、能力或导出接口 |
+| M12 Frontend Shell | REVIEW | 已有鉴权 Store/Router、API client、40102 处理、应用布局、登录/初始化流程与安全 Token 桥接，待独立 Reviewer |
+| M13—M15 业务前端 | 未实现 | 尚无日报、模板、周报等对应页面与交互 |
+| M16 User Admin UI | REVIEW | admin 用户管理页面已实现账号元数据列表、创建、编辑和重置密码，待独立 Reviewer |
 | M17 Packaging/Release | 占位 | 有 electron-builder 配置和 sidecar 目录占位；无 PyInstaller/安装升级验证闭环 |
 
 ## 3. 后端模块内部契约

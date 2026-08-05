@@ -1,6 +1,6 @@
-from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
 
-from pydantic import BaseModel, ConfigDict, Field
+from app.schemas.user import UserData
 
 
 class BootstrapStatusData(BaseModel):
@@ -12,13 +12,22 @@ class BootstrapAdminRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     display_name: str = Field(min_length=1, max_length=100)
 
+    @field_validator("username")
+    @classmethod
+    def _strip_valid_username(cls, value: str) -> str:
+        stripped = value.strip()
+        if len(stripped) < 3:
+            raise ValueError("must contain at least 3 non-whitespace characters")
+        return stripped
 
-class BootstrapAdminData(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    @field_validator("display_name")
+    @classmethod
+    def _strip_non_blank_display_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
 
-    id: str
-    username: str
-    display_name: str
-    role: str
-    is_active: bool
-    created_at: datetime
+
+class BootstrapAdminData(UserData):
+    pass

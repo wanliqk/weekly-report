@@ -5,8 +5,10 @@ import {
   IPC_CHANNELS,
   RUNTIME_SECRET_HEADER,
   type RuntimeApiConfig,
+  type SecureTokenSnapshot,
   type SidecarStatusSnapshot
 } from '../../shared/contracts'
+import type { SecureTokenStore } from '../security/secure-token-store'
 import type { SidecarManager } from '../sidecar/manager'
 
 function assertTrustedSender(event: IpcMainInvokeEvent, window: BrowserWindow): void {
@@ -16,7 +18,11 @@ function assertTrustedSender(event: IpcMainInvokeEvent, window: BrowserWindow): 
 }
 
 /** Wires the sidecar manager to the small, purpose-named IPC surface the preload script exposes. Returns a disposer to call when the owning window is destroyed. */
-export function registerRuntimeBridge(manager: SidecarManager, window: BrowserWindow): () => void {
+export function registerRuntimeBridge(
+  manager: SidecarManager,
+  window: BrowserWindow,
+  tokenStore: SecureTokenStore
+): () => void {
   ipcMain.handle(IPC_CHANNELS.SIDECAR_GET_STATUS, (event): SidecarStatusSnapshot => {
     assertTrustedSender(event, window)
     return manager.getSnapshot()
@@ -41,6 +47,27 @@ export function registerRuntimeBridge(manager: SidecarManager, window: BrowserWi
     }
   })
 
+  ipcMain.handle(IPC_CHANNELS.TOKEN_GET, async (event): Promise<SecureTokenSnapshot> => {
+    assertTrustedSender(event, window)
+    return tokenStore.getToken()
+  })
+
+  ipcMain.handle(
+    IPC_CHANNELS.TOKEN_SET,
+    async (event, token: unknown): Promise<SecureTokenSnapshot> => {
+      assertTrustedSender(event, window)
+      if (typeof token !== 'string') {
+        throw new Error('rejected invalid token payload')
+      }
+      return tokenStore.setToken(token)
+    }
+  )
+
+  ipcMain.handle(IPC_CHANNELS.TOKEN_CLEAR, async (event): Promise<SecureTokenSnapshot> => {
+    assertTrustedSender(event, window)
+    return tokenStore.clearToken()
+  })
+
   const forwardStateChange = (snapshot: SidecarStatusSnapshot): void => {
     if (window.isDestroyed()) {
       return
@@ -53,6 +80,9 @@ export function registerRuntimeBridge(manager: SidecarManager, window: BrowserWi
     ipcMain.removeHandler(IPC_CHANNELS.SIDECAR_GET_STATUS)
     ipcMain.removeHandler(IPC_CHANNELS.SIDECAR_RETRY)
     ipcMain.removeHandler(IPC_CHANNELS.API_GET_CONFIG)
+    ipcMain.removeHandler(IPC_CHANNELS.TOKEN_GET)
+    ipcMain.removeHandler(IPC_CHANNELS.TOKEN_SET)
+    ipcMain.removeHandler(IPC_CHANNELS.TOKEN_CLEAR)
     manager.off('state-changed', forwardStateChange)
   }
 }

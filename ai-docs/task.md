@@ -102,12 +102,12 @@ uv sync --directory backend --frozen
 
 | ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
 |---|---|---|---|---|---|
-| AUTH-01 | Agent B | 首次管理员初始化与默认关联数据 | 阶段 3 | DONE | 空库原子创建 admin、设置、模板及默认版本；重复初始化安全失败（含并发）；`backend/app/repositories/{user,user_settings,template}.py`、`backend/app/services/{bootstrap,user}.py`、`backend/app/api/v1/system.py`、`backend/app/schemas/system.py`、`backend/app/core/{clock,security}.py` |
-| AUTH-02 | Agent B | JWT、Argon2id、token_version 与鉴权依赖 | AUTH-01 | TODO | 24h Token；改密、重置、禁用后旧 Token 立即失效；业务请求双重校验 |
-| USER-01 | Agent B | 管理员用户管理 | AUTH-02 | TODO | 账号查询/创建/更新/重置；末位有效管理员保护；不可查看他人正文 |
-| FE-01 | Agent A | 首次初始化、登录与安全 Token 桥接 | DESK-03、AUTH-02 | TODO | safeStorage 持久化；renderer 不使用 local/sessionStorage；路由权限与 40102 处理 |
-| FE-02 | Agent A | 用户管理界面 | USER-01、FE-01 | TODO | admin 路由、账号元数据管理、确认/错误反馈，不出现他人业务入口 |
-| QA-04 | Agent C | 认证权限测试与审查 | AUTH-01..USER-01、FE-01、FE-02 | TODO | 初始化并发、弱密码、过期/篡改 Token、token_version、禁用用户和末位管理员测试 |
+| AUTH-01 | Agent B | 首次管理员初始化与默认关联数据 | 阶段 3 | REVIEW | 实现、自测和主 Agent 审查已完成，待独立 Reviewer；空库原子创建 admin、设置、模板及默认版本；重复初始化安全失败（含并发） |
+| AUTH-02 | Agent B | JWT、Argon2id、token_version 与鉴权依赖 | AUTH-01 | REVIEW | 24h HS256 JWT、持久化随机签名密钥、登录/当前用户/改密/退出 API、admin 依赖与双重校验均已实现；改密、重置、禁用或角色变更后旧 Token 立即失效；待独立 Reviewer |
+| USER-01 | Agent B | 管理员用户管理 | AUTH-02 | REVIEW | 账号分页查询/创建/更新/重置已实现；创建时原子建立设置与默认模板，包含大小写无关判重、末位有效管理员保护和权限测试；待独立 Reviewer |
+| FE-01 | Agent A | 首次初始化、登录与安全 Token 桥接 | DESK-03、AUTH-02 | REVIEW | 初始化/登录/改密/退出、鉴权守卫与 40102 处理已实现；Token 由 Main `safeStorage` 加密持久化，renderer 仅内存持有且不使用 local/sessionStorage；待独立 Reviewer |
+| FE-02 | Agent A | 用户管理界面 | USER-01、FE-01 | REVIEW | admin 路由、账号元数据列表/创建/编辑/重置及敏感变更确认已实现；未提供他人业务正文入口；待独立 Reviewer |
+| QA-04 | Agent C | 认证权限测试与审查 | AUTH-01..USER-01、FE-01、FE-02 | REVIEW | 初始化并发、弱密码、过期/篡改 Token、token_version、禁用用户、末位管理员、safeStorage、API client 与真实 sidecar 集成测试已通过；主 Agent 自审无未解决 P0/P1，待独立 Reviewer |
 
 阶段提交建议：`feat(auth): 完成初始化登录与用户管理`。
 
@@ -173,7 +173,7 @@ uv sync --directory backend --frozen
 
 阶段 3（`DB-01`/`DB-02`/`DB-03`/`API-01`/`QA-03`）已实现、通过质量门禁并创建独立提交 `8480515`；独立 Reviewer 审查仍待补齐（非阻塞）。
 
-阶段 4 `AUTH-01`（首次管理员初始化与默认关联数据）已实现、通过质量门禁，待创建阶段提交；独立 Reviewer 审查仍待补齐（非阻塞）。`AUTH-02`（JWT、Argon2id、token_version 与鉴权依赖）为下一可领取任务。
+阶段 4 `AUTH-01`/`AUTH-02`/`USER-01`/`FE-01`/`FE-02`/`QA-04` 均已完成实现、自测、主 Agent 审查与质量门禁，当前统一为 `REVIEW`；本地实现提交已按用户明确指令创建。下一步由独立 Reviewer 复核，未解决 P0/P1 清零后再标记 `DONE`。
 
 阶段 5 及以后任务不得混入阶段 4 提交。
 
@@ -184,4 +184,4 @@ uv sync --directory backend --frozen
 | 阶段 1 工程基线 | `3a9fdbc` | `npm ci`、lint、typecheck、Vitest、build、Ruff、mypy、pytest、`uv sync --frozen` 已由阶段交付记录为通过 | 未单独记录 | Element Plus 当前全量引入；sidecar 生命周期与完整健康契约待阶段 2 |
 | 阶段 2 Desktop Bootstrap | `7386cae` | `npm ci`（636 包）、`npm run lint`（0 error/0 warning）、`npm run typecheck`（`tsc`+`vue-tsc` 0 错误）、`npm test`（9 文件 36 项通过）、`npm run build`、`npm run test:integration --workspace electron`（真实子进程，2 项通过）、`uv sync --frozen`、`uv run ruff check .`、`uv run mypy`（strict，20 文件）、`uv run pytest -q`（17 项通过）、`git diff --check` 均已实际执行并通过；手动冒烟（`npm run dev` 真实运行 + `CloseMainWindow()` 模拟正常退出）确认单一 sidecar 进程、健康检查真实通过、退出后无孤儿进程；构建产物已扫描确认无 runtime secret 泄露 | 未单独记录 | ISS-010（Electron 被外部强杀时孤儿进程防护仍不完整，需 Windows Job Object）；PyInstaller 生产二进制尚未产出，生产路径分支未被真实二进制验证过（阶段 9 `PKG-01`） |
 | 阶段 3 数据基础与 API Foundation | `8480515` | `npm run lint`、`npm run typecheck`（前端不受影响，已复核）；`uv sync --directory backend --frozen`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`（strict，40 个源文件，含 `alembic/`）、`uv run pytest -q`（45 项通过：新增 ULID、DB engine/PRAGMA、错误处理器、Alembic 迁移、备份轮转、ORM 约束共 28 项）均已实际执行并通过；手动冒烟（`uv run python -m app` 真实启动）确认迁移自动执行、8 张业务表 + `alembic_version` 正确创建、`/health` 可访问 | 待独立 Reviewer | 无 Repository/Service 层（按阶段边界属于阶段 4 起逐步实现）；`所有权过滤`/`乐观锁` 本阶段只在 ORM 层面验证模式可行，实际业务强制仍需阶段 4/5 的 Repository/Service 落地 |
-| `AUTH-01` 首次管理员初始化 | 待创建 | `npm run lint`、`npm run typecheck`（前端不受影响，已复核）；`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`（strict，53 个源文件）、`uv run pytest`（**63 项通过**：新增 18 项 — Argon2id 哈希/校验 5、Clock 1、Bootstrap Service 6、Bootstrap API 6）均已实际执行并通过；并发竞争测试（两个 `asyncio.gather` 并发 `bootstrap_admin` 调用）额外重复执行 5 次均稳定通过；手动冒烟：`uv run python -m app` 真实子进程启动，确认 `/api/v1/system/bootstrap-status` 路由已注册且仍强制 `X-Runtime-Secret` 校验（未配置密钥时返回 40103） | 待独立 Reviewer | 只创建首个 admin；`AUTH-02` 才落地 JWT/登录，`bootstrap-admin` 目前是唯一能写 `users` 表的入口；密码最小长度（8 位）为本任务新增的输入校验基线，已记录到 `decisions.md`（无更早期文档给出具体数值） |
+| 阶段 4 认证与用户管理 | 本次本地实现提交 | `uv sync --directory backend --frozen`（46 个包）；Ruff check/format、mypy strict（66 个源文件）、pytest（**94 项通过**）；前端 lint、typecheck、Vitest（**12 文件 49 项通过**）、生产 build；Electron 真实 sidecar 集成测试（**2 项通过**）；`git diff --check` 通过。覆盖 JWT 过期/篡改、运行期与用户 Token 双校验、改密/重置/禁用失效、末位管理员并发保护、safeStorage 无明文回退、40102 清理和管理界面核心交互 | 主 Agent 自审完成；待独立 Reviewer | 本地提交按用户明确指令创建；按全局 DoD，独立 Reviewer 完成且未解决 P0/P1 为零后才能标记 `DONE` |

@@ -1,4 +1,8 @@
-import type { RuntimeApiConfig, SidecarStatusSnapshot } from '../shared/contracts'
+import type {
+  RuntimeApiConfig,
+  SecureTokenSnapshot,
+  SidecarStatusSnapshot
+} from '../shared/contracts'
 
 declare global {
   interface Window {
@@ -13,6 +17,11 @@ declare global {
       }
       readonly api: {
         readonly getConfig: () => Promise<RuntimeApiConfig | null>
+      }
+      readonly token: {
+        readonly get: () => Promise<SecureTokenSnapshot>
+        readonly set: (token: string) => Promise<SecureTokenSnapshot>
+        readonly clear: () => Promise<SecureTokenSnapshot>
       }
     }
   }

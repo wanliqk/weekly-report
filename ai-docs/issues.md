@@ -13,7 +13,7 @@
 | ISS-003 | P1 | RESOLVED | `/health` 未达到冻结契约 | 阶段 2 已补齐 `version` 字段与 `Cache-Control: no-store`，并有对应测试，已随 `7386cae` 交付 | 阶段 2 `BE-02`（已交付） |
 | ISS-004 | P1 | RESOLVED | 业务窗口不等待后端健康成功 | 阶段 2 已实现并随 `7386cae` 交付：`App.vue` 在 sidecar 未 `ready` 时渲染 `StartupView`（pending/failed 态，failed 态可重试并展示脱敏日志），不再直接展示业务首页 | 阶段 2 `DESK-03`（已交付） |
 | ISS-005 | P1 | MITIGATED | 数据库与迁移基础尚未实现 | 阶段 3 已实现 Engine/Session、8 张表 ORM、Alembic 初始迁移、PRAGMA、迁移前备份+轮转，代码与测试均完成（45 项后端测试通过），并已创建独立提交 `8480515`；独立 Reviewer 审查完成前保持 `MITIGATED`，不升级为 `RESOLVED` | 阶段 3 `DB-01`..`DB-03`（已提交，待独立 Reviewer 审查） |
-| ISS-006 | P0 | OPEN | 认证、所有权与业务 API 尚未实现 | `AUTH-01` 已实现首次管理员初始化（Repository/Service 首个真实落地），但仍无 JWT、登录、`token_version` 校验或所有权隔离；除 bootstrap 外的 Repository/Service 仍是空壳；不得把占位模块暴露为可用功能 | 阶段 4 `AUTH-02` 起按依赖逐步实现；每个业务 Repository 查询强制 owner 条件 |
+| ISS-006 | P0 | MITIGATED | 认证、所有权与业务 API 尚未完整实现 | 阶段 4 已实现初始化、JWT/`token_version` 双校验、认证与用户管理 API、safeStorage Token 生命周期和前端权限路由，并通过自动化测试与主 Agent 自审；模板、日报、周报等后续业务 API 的所有权过滤仍待各阶段落地 | 独立 Reviewer 完成阶段 4 审查后可关闭认证部分；后续每个业务 Repository 查询继续强制 owner 条件 |
 | ISS-007 | P2 | OPEN | Element Plus 当前全量引入 | renderer 生产包偏大，阶段基线曾观测主 JS 约 2.6 MB；会影响启动和构建告警 | 前端页面组件稳定后改为按需引入，并以构建体积对比验证；不得为此提前混入阶段 2 提交 |
 | ISS-008 | P1 | OPEN | PyInstaller sidecar 和 Windows 安装链路仍为占位 | `build/sidecar` 只有说明文件，安装包不能交付可运行后端 | 阶段 9 `PKG-01`/`PKG-02`：onedir、extraResources、无 Python 干净机验证 |
 | ISS-009 | P2 | RESOLVED | AI 上下文文档需要形成独立阶段提交 | 12 份上下文文档、启动路由和维护规则已建立并完成交叉复核 | 随本次独立文档阶段提交交付；后续每个实现阶段持续维护 |
@@ -27,7 +27,7 @@
 | RISK-002 | P2 | MITIGATED | 周报确认重生成会覆盖人工编辑且 V1 无恢复 | UI 必须醒目确认；API 必须要求显式 `confirm_overwrite` 和乐观锁 | 用户要求历史比较/恢复时设计版本表并进入 P2 |
 | RISK-003 | P2 | OPEN | PyInstaller 体积和杀软误报 | 采用 onedir、许可证清单和干净机验证；发布时评估签名 | 首个 sidecar 包产出后测量体积、启动耗时和杀软结果 |
 | RISK-004 | P2 | MITIGATED | admin 手动备份包含所有用户数据 | 仅 admin、创建者下载、随机短期 ID、15 分钟过期、UI 敏感提示 | 若备份需要细分用户范围或外部存储，先更新契约与安全设计 |
-| RISK-005 | P2 | OPEN | 当前测试大部分仍是基础设施覆盖，业务逻辑覆盖刚起步 | 现有前端 36 项（sidecar 生命周期/UI）+ 后端 63 项（健康契约/runtime secret/数据库/迁移/异常处理 45 项 + `AUTH-01` 首次初始化业务逻辑 18 项，含并发竞争）；登录、日报、周报等其余业务逻辑仍无测试 | 各阶段按 `task.md` 添加契约、权限、并发、集成和 E2E 覆盖 |
+| RISK-005 | P2 | MITIGATED | 业务自动化覆盖仍需随模块扩展 | 当前后端 94 项、前端 49 项、真实 sidecar 集成 2 项均通过；阶段 4 已覆盖初始化、登录、JWT、权限、账号变更失效、并发末位管理员保护、safeStorage 和 API client。日报、周报、导出等后续业务仍无测试 | 各阶段按 `task.md` 添加契约、权限、并发、集成和 E2E 覆盖 |
 
 ## 3. 当前阻塞项
 

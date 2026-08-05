@@ -4,6 +4,7 @@ import type { IpcRendererEvent } from 'electron'
 import {
   IPC_CHANNELS,
   type RuntimeApiConfig,
+  type SecureTokenSnapshot,
   type SidecarStatusSnapshot
 } from '../shared/contracts'
 
@@ -26,6 +27,12 @@ const runtimeBridge = Object.freeze({
   api: Object.freeze({
     getConfig: (): Promise<RuntimeApiConfig | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.API_GET_CONFIG)
+  }),
+  token: Object.freeze({
+    get: (): Promise<SecureTokenSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.TOKEN_GET),
+    set: (token: string): Promise<SecureTokenSnapshot> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TOKEN_SET, token),
+    clear: (): Promise<SecureTokenSnapshot> => ipcRenderer.invoke(IPC_CHANNELS.TOKEN_CLEAR)
   })
 })
 

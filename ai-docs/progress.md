@@ -10,7 +10,7 @@
 - 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）。
 - 当前所在阶段：阶段 4 认证与用户管理（用户已明确指令开始）。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
-- 阶段 4 实现状态：`AUTH-01`（首次管理员初始化与默认关联数据）已实现并通过质量门禁，尚未创建阶段提交；`AUTH-02`/`USER-01`/`FE-01`/`FE-02`/`QA-04` 尚未开始。
+- 阶段 4 实现状态：`AUTH-01`/`AUTH-02`/`USER-01`/`FE-01`/`FE-02`/`QA-04` 均已完成实现、自测、主 Agent 审查和质量门禁，并按用户明确指令创建本地实现提交；当前统一处于 `REVIEW`，独立 Reviewer 尚未完成。
 - 当前阻塞：无业务/技术决策阻塞。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 
@@ -22,7 +22,7 @@
 - 已存在根 `package-lock.json` 和后端 `uv.lock`。
 - 根命令已提供开发、前端 lint、类型检查、测试、构建和 Windows 打包入口。
 - Electron 使用 Electron 39、electron-vite 5、Vue 3、TypeScript、Vue Router、Pinia、Element Plus、Axios 和 Vitest。
-- 后端使用 Python 3.12、FastAPI、Uvicorn、Pydantic Settings、SQLAlchemy 2.x（异步）、Alembic、aiosqlite；Argon2、JWT、openpyxl 仍只是声明依赖，业务层尚未使用。
+- 后端使用 Python 3.12、FastAPI、Uvicorn、Pydantic Settings、SQLAlchemy 2.x（异步）、Alembic、aiosqlite；Argon2id、PyJWT 已用于阶段 4 认证，openpyxl 仍只是声明依赖。
 - 根 `npm run dev` 只调用 `npm run dev --workspace electron`；`concurrently` 依赖已移除。`dev:backend`（`uv run --directory backend python -m app`）保留作为独立手动调试入口。
 
 ### Electron/Vue sidecar 生命周期（阶段 2，已提交 `7386cae`）
@@ -74,6 +74,23 @@
 - `backend/app/services/user.py::normalize_username`：`strip().casefold()`，是 `uq_users_username_normalized` 唯一约束背后的规范化规则，供 `AUTH-01` 和未来 `USER-01` 共用同一实现，避免两处判重逻辑漂移。
 - `backend/app/schemas/system.py` + `backend/app/api/v1/system.py`：`GET /api/v1/system/bootstrap-status`（匿名，仍需 `X-Runtime-Secret`）、`POST /api/v1/system/bootstrap-admin`（同上）。请求校验：`username` 3–64 字符、`password` 8–128 字符、`display_name` 1–100 字符；密码最小长度 8 位是本任务新增的输入校验基线（上游文档未给出具体数值，已记录到 `decisions.md`）。响应只返回账号元数据（`id`/`username`/`display_name`/`role`/`is_active`/`created_at`），不回传密码或哈希。已注册进 `backend/app/main.py`。
 
+### 认证与用户管理（阶段 4，AUTH-02 / USER-01）
+
+- `backend/app/core/access_token.py`：HS256、24 小时 JWT，强制声明 `sub`/`role`/`ver`/`iat`/`exp`/`jti`，拒绝过期、篡改、缺失或类型错误的 Token。
+- `backend/app/core/jwt_secret.py`：首次启动在数据目录独占创建 256-bit 随机签名密钥，后续重启复用；格式损坏时拒绝使用。测试环境可显式注入，生产不使用硬编码密钥。
+- `backend/app/services/auth.py` 与 `backend/app/api/dependencies.py`：登录、当前用户、改密、退出及 admin 鉴权依赖已实现；每次鉴权同时检查用户存在、启用状态、角色和 `token_version`。未知用户执行 dummy Argon2 校验，避免明显时序差异；改密后旧 Token 立即失效。
+- `backend/app/services/user.py` 与 `backend/app/repositories/user.py`：管理员分页查询、创建、更新角色/状态、重置密码已实现；新用户、设置、默认模板和首个版本同事务创建；大小写无关重复用户名安全回滚；角色/状态变更和重置密码递增 `token_version`。
+- 末位有效管理员保护使用条件更新而非“先查再写”，覆盖并发禁用场景；普通用户调用管理 API 返回 `40301`，不存在资源返回 `40401`。管理响应仅含账号元数据，不返回密码哈希、`token_version` 或业务正文。
+- `backend/app/core/middleware.py` 已为 `/api/v1/*` 业务响应统一增加 `Cache-Control: no-store`。
+
+### 桌面认证与用户界面（阶段 4，FE-01 / FE-02）
+
+- Electron Main 新增 `SecureTokenStore`，使用 `safeStorage.encryptString/decryptString` 和 `userData/access-token.bin` 保存 Token；preload 仅暴露受信任 frame 的 `token.get/set/clear`，不可用时返回明确状态且不明文回退。
+- renderer Axios client 只从内存读取 Bearer Token，同时携带运行期密钥；统一解析 `{code,msg,data}`，收到 `40102` 时清理 Token 并返回登录页。
+- Pinia auth store 覆盖首次初始化、safeStorage 恢复后 `/auth/me` 校验、登录、改密与退出；数据库仍需初始化时会清理陈旧 Token。
+- Router 已接入 setup/login/app layout/admin users，并按 sidecar、初始化、登录和 admin 角色守卫；用户管理页支持列表、创建、角色/状态编辑与密码重置，对敏感变更展示确认。
+- renderer 未使用 `localStorage` 或 `sessionStorage`，未在日志中记录 Token、密码、签名密钥或 runtime secret。
+
 ### 已记录的阶段验证
 
 工程基线（阶段 1）交付记录（历史）：`npm ci`、lint、typecheck、`npm test`（1 项前端测试）、`npm run build`、`uv sync --frozen`、`uv run ruff/mypy/pytest`（3 项后端测试）均已通过。
@@ -90,25 +107,25 @@
 - 手动冒烟：`uv run --directory backend python -m app` 真实启动，观察到日志 `Running upgrade  -> 3f6f955b87bb, initial schema`，随后 `/health` 可访问；用 `sqlite3`/Python 直接检查 `.local-data/weekly-report.db`，确认 8 张业务表 + `alembic_version` 均已正确创建。
 - `git status --short`：除预期新增/修改文件外无遗留改动。
 
-阶段 4 `AUTH-01` 本次交付实际执行并通过：
+阶段 4 认证与用户管理当前工作树实际执行并通过：
 
-- `npm run lint`、`npm run typecheck`：前端未受影响（本任务为后端专属，无 Electron/Vue 改动），复核通过。
-- `uv run --directory backend ruff check .`、`ruff format --check .`：0 error。
-- `uv run --directory backend mypy`（strict，53 个源文件）：0 错误。
-- `uv run --directory backend pytest`：**63 项测试全部通过**（阶段 3 遗留 45 项 + 本任务新增 18 项：Argon2id 哈希/校验 5、Clock 1、Bootstrap Service 6（含并发竞争 1 项）、Bootstrap API 6）；并发竞争测试额外单独重复执行 5 次，稳定通过、未观察到 flaky。
-- 手动冒烟：`uv run python -m app` 真实子进程启动于独立 scratch 数据目录，确认迁移自动执行、`/api/v1/system/bootstrap-status` 路由已注册且在未配置 `runtime_secret` 时仍正确返回 `40103`（新路由未意外绕过既有中间件）。
-- `git status --short`：除预期新增/修改文件外无遗留改动。
+- `uv sync --directory backend --frozen`：锁文件一致，共检查 46 个包。
+- `uv run --directory backend ruff check .`、`ruff format --check .`：0 error，66 个文件格式合规。
+- `uv run --directory backend mypy`（strict，66 个源文件）：0 错误。
+- `uv run --directory backend pytest`：**94 项测试全部通过**，覆盖初始化并发、JWT 过期/篡改、登录错误、运行期密钥与 JWT 双校验、改密/重置/禁用旧 Token 失效、创建关联数据、重复用户名事务回滚、非 admin 权限和并发末位管理员保护。
+- `npm run lint`、`npm run typecheck`：通过。
+- `npm test`：**12 个文件 49 项测试全部通过**，包含 safeStorage Token Store/IPC、auth store 和 API client。
+- `npm run test:integration --workspace electron`：真实后端进程 **2 项通过**，连续启动使用不同动态端口且退出后无孤儿进程。
+- `npm run build`：main/preload/renderer 生产构建通过；仅有 `@vueuse/core` 的第三方 PURE 注释位置提示，不影响产物。
+- `git diff --check`：通过；敏感模式扫描未发现 local/sessionStorage、Token/密码/密钥日志或构建变量泄露。
+- 主 Agent 按 `dev-workflow` 完成安全、Python、TypeScript/Vue 自审，审查中发现并修复：用户名去空白后的最小长度校验、已登录用户根路由绕过应用布局、确认框取消导致未处理 Promise。当前无未解决 P0/P1；独立 Reviewer 仍待补齐。
 
 ## 3. 尚未实现
 
 以下均为设计目标，当前不得标记为完成：
 
 - 开发/生产 sidecar 路径解析中，生产分支的 PyInstaller `onedir` 产物本身（`PKG-01`，阶段 9）——`build/sidecar/` 仍是空占位目录。
-- safeStorage Token 生命周期（阶段 2 只搭了 preload 命名空间骨架，未接入具体 Token 存取；阶段 4 `FE-01`）。
-- Repository、Service 层：`AUTH-01` 已交付第一批真实实现（`user`/`user_settings`/`template` repository，`bootstrap`/`user` service），但仅覆盖首次初始化路径；登录、鉴权依赖、用户管理、模板发布、日报、周报、导出对应的 Repository/Service 仍未实现。
-- JWT 鉴权、`token_version` 校验、登录/退出/改密 API（`AUTH-02`）——目前唯一能写 `users` 表的入口是 `bootstrap-admin`，且只能创建首个 admin。
-- 管理员用户管理（`USER-01`）、模板、设置、日报、导出和周报全部业务能力。
-- 前端首次初始化/登录页面与 Token 桥接（`FE-01`）、用户管理界面（`FE-02`）。
+- 模板发布、设置、日报、导出和周报对应的 Repository/Service/API 与前端页面尚未实现；阶段 4 用户管理已经实现，不得据此把后续业务标记为完成。
 - Playwright E2E、PyInstaller 和 Windows 安装/升级验证。
 - Windows Job Object 级别的孤儿进程彻底防护（ISS-010，非阻塞）。
 - admin 手动整库备份 API（`BACKUP-01`，阶段 8）——DB-03 的自动迁移前备份机制与之相关但不是同一功能，手动备份走独立的短期下载文件流程。
@@ -117,7 +134,7 @@
 
 根 `npm run dev` 只启动 `electron-vite dev`；Electron Main 自行拉起并管理 FastAPI sidecar。sidecar 启动时会自动执行 `ensure_runtime_directories()` → `run_startup_migrations()`（首次运行即完成建表）→ 启动 Uvicorn。`dev:backend` 脚本仍保留，供脱离 Electron 单独调试后端时使用（需自行在 `.env` 设置 `WEEKLY_REPORT_RUNTIME_SECRET`，非 `test` 环境启动都会走同样的迁移检查）。
 
-页面启动流程：窗口创建后立即显示，`App.vue` 根据 sidecar 状态在 `StartupView`（pending/failed）与业务路由（ready）之间切换。
+页面启动流程：窗口创建后立即显示，`App.vue` 先根据 sidecar 状态展示 `StartupView`（pending/failed）；ready 后恢复 safeStorage Token 并调用 `/auth/me` 校验，再按 bootstrap、登录和角色状态进入对应路由。
 
 ## 5. 下一检查点
 
@@ -129,12 +146,14 @@
 4. ✅ migration、Model 字段命名与 `database.md` 一致（8 张表、约束、索引均逐项对照实现）。
 5. ✅ 阶段 3 质量门禁通过并创建独立提交；独立 Reviewer 审查仍待补齐（非阻塞）。
 
-阶段 4（认证与用户管理）已开始，`AUTH-01`（首次管理员初始化与默认关联数据）已实现并通过质量门禁：
+阶段 4（认证与用户管理）六项任务已完成实现、自测、主 Agent 审查与质量门禁，当前统一为 `REVIEW`：
 
 1. ✅ 空库原子创建 admin + `user_settings` + `report_templates` + `template_versions`（同一事务，自动化测试验证）。
 2. ✅ 重复初始化安全失败，含真实并发场景（`asyncio.gather` 双重调用，仅一个成功，自动化测试验证，额外重复执行 5 次无 flaky）。
 3. ✅ 密码使用 Argon2id 哈希，不落明文、不回传哈希。
 4. ✅ 默认模板核心字段（今日工作内容/明日工作计划）与 `database.md` 3.4 节 JSON 结构一致。
-5. ✅ 质量门禁（ruff/mypy/pytest/lint/typecheck）通过；待创建阶段提交，独立 Reviewer 审查仍待补齐（非阻塞）。
-
-`AUTH-01` 建立的 Repository/Service 分层范式（Repository 只做数据访问，跨表事务编排在 Service，业务异常子类化 `AppError`）供 `AUTH-02`（JWT/登录/token_version）及后续任务复用，而不是简单在 Router 里直接操作 Model。
+5. ✅ 24h JWT、持久化签名密钥、用户实时状态/角色/`token_version` 校验、登录/改密/退出与 admin 依赖完成。
+6. ✅ 管理员用户查询、创建、角色/状态修改、重置密码、关联默认数据和并发末位管理员保护完成。
+7. ✅ safeStorage Token 桥接、初始化/登录/布局/鉴权守卫/40102 处理及用户管理界面完成，renderer 无普通 Web Storage 持久化。
+8. ✅ 后端 94 项、前端 49 项、真实 sidecar 集成 2 项及生产构建全部通过；主 Agent 自审无未解决 P0/P1。
+9. ⏳ 本地实现提交已按用户明确指令创建；下一检查点是独立 Reviewer 复核。按项目 DoD，审查完成前保持 `REVIEW`，通过后统一标记 `DONE`，不提前进入阶段 5。

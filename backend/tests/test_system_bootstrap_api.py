@@ -122,3 +122,18 @@ def test_bootstrap_admin_rejects_a_blank_display_name(client: TestClient) -> Non
 
     assert response.status_code == 400
     assert response.json()["code"] == 40001
+
+
+def test_bootstrap_admin_validates_username_length_after_trimming(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/system/bootstrap-admin",
+        headers=HEADERS,
+        json={
+            "username": "  ab  ",
+            "password": "correct horse battery staple",
+            "display_name": "Admin",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 40001

@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process'
 import { join } from 'path'
 
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, safeStorage } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
 import { registerRuntimeBridge } from './ipc/register-runtime-bridge'
+import { SecureTokenStore } from './security/secure-token-store'
 import { createRuntimeDeps } from './sidecar/create-runtime-deps'
 import { getSidecarManager } from './sidecar/manager'
 import type { ResolveLaunchPlanOptions } from './sidecar/paths'
@@ -51,7 +52,16 @@ function createWindow(): void {
     }
   })
 
-  unregisterRuntimeBridge = registerRuntimeBridge(getSidecarManager(sidecarDeps), mainWindow)
+  const tokenStore = new SecureTokenStore(join(app.getPath('userData'), 'access-token.bin'), {
+    isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+    encryptString: (plainText) => safeStorage.encryptString(plainText),
+    decryptString: (encrypted) => safeStorage.decryptString(encrypted)
+  })
+  unregisterRuntimeBridge = registerRuntimeBridge(
+    getSidecarManager(sidecarDeps),
+    mainWindow,
+    tokenStore
+  )
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])

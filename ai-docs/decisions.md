@@ -35,6 +35,7 @@
 | SEC-002 | 所有业务 API 同时校验 JWT 与 `X-Runtime-Secret` | Accepted | `architecture.md`、`api.md` | `/health` 是唯一例外；Main 随机生成，renderer API 客户端仅在内存持有，不得进入 Vite 变量、持久化存储或日志 |
 | SEC-003 | V1 不做 SQLite 整库加密 | Accepted for V1 | `requirements.md`、`architecture.md` | 密码使用 Argon2id、Token safeStorage；若要求磁盘泄露防护需新 ADR |
 | SEC-004 | 密码最小长度 8 位、最大 128 位（服务端统一校验） | Accepted for V1 | `AUTH-01` 实现（`docs/需求理解.md`/`docs/方案设计.md` 未给出具体数值） | 仅为输入校验基线，非完整密码复杂度策略；`bootstrap-admin`/`AUTH-02` 登录改密/`USER-01` 重置密码均须复用同一下限，不得各自定义 |
+| SEC-005 | JWT HS256 签名密钥由后端首次启动随机生成并持久化于数据目录 | Accepted for V1 | `AUTH-02` 实现 | 使用 256-bit 随机密钥和独占创建；重启后复用，格式损坏时拒绝启动；不得硬编码、记录日志或经 renderer 暴露 |
 
 ## 3. 工程协作决策
 
