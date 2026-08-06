@@ -1,6 +1,6 @@
 # 技术决策记录
 
-> 更新日期：2026-08-06
+> 更新日期：2026-08-07
 > 说明：本文件汇总已经接受的决策，不在此发明新架构。变更核心决策必须先走 `architecture.md` 的架构变更门禁。
 
 ## 1. 已接受架构决策
@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | PROD-001 | V1 首发仅支持 Windows 10/11 x64 | Accepted for V1 | `requirements.md`、`docs/方案设计.md` | macOS/Linux 属于后续范围 |
 | PROD-002 | admin 管理账号但默认不能查看其他用户业务正文 | Accepted | `requirements.md`、`api.md` | 管理接口只返回账号元数据；业务 Repository 仍按 owner 过滤 |
-| PROD-003 | 日报状态固定为 `draft→submitted→archived`，归档后只读且不撤回 | Accepted for V1 | `requirements.md`、`database.md` | 自动归档必须在提交事务内完成 |
+| PROD-003 | V1 日报状态固定为 `draft→submitted→archived`，归档后只读且不撤回 | Superseded for second version | `requirements.md`、`database.md`、CR-20260807-01 | 仅用于描述当前 V1 实现；第二版改为同日多条目与日期级汇总归档 |
 | PROD-004 | 自然周固定为 Asia/Shanghai 周一至周日，周报仅汇总 archived 日报 | Accepted | `requirements.md`、`api.md` | 未归档日报只作提示，空周允许创建周报 |
 | PROD-005 | V1 模板支持 text、textarea、number、date、select、multiselect，无附件 | Accepted for V1 | `requirements.md`、`database.md` | 核心字段不可删除且至少启用一个 |
 | PROD-006 | 企业微信仅提供本地“未开放”占位，不定义同步 API | Accepted for V1 | `requirements.md`、`api.md` | 不引入 SDK，不产生企业微信网络请求 |
@@ -35,6 +35,9 @@
 | PROD-008 | 导出文件内的 `Asia/Shanghai` 时间展示使用固定 UTC+8 偏移而非 `zoneinfo` | Accepted for V1 | `EXPORT-02` 实现 | 中国大陆自 1991 年后不施行夏令时，固定偏移在数值上等价且避免生产环境依赖可选的 `tzdata` 包（Windows 默认不含 IANA 时区数据库）；若产品未来需要真实多时区支持需新 ADR |
 | PROD-009 | 周报 `PUT` 只接受并覆盖 `supplement`/`next_week_plan`/`risks` 三个自由文本字段，`content.days` 由服务端固定为生成/重生成时的快照，不做逐字段编辑 | Accepted for V1 | `WEEKLY-02` 实现（`requirements.md` 4.3.4/4.3.5 只描述"自动内容"与"编辑区"两部分，未定义 `PUT` 的字段粒度） | 从机制上保证"人工编辑不反写日报"且不会让用户绕过重新生成来局部篡改来源摘要；若未来需要允许编辑单日摘要文本需新 ADR |
 | PROD-010 | 手动整库备份不落业务表，改用进程内 `BackupRegistry`（随机 ULID -> 记录），15 分钟懒过期 + `create()` 时序清理 + 启动时目录级清理三重机制共同保证残留可控 | Accepted for V1 | `BACKUP-01` 实现（`database.md` §6 已给出"不登记业务表、进程内随机 ID 映射、15 分钟过期、启动清理"的原则，未定义具体触发时机的组合） | 进程重启即清空注册表，因此启动清理可以对目录下的 `*.db` 文件做无条件删除而无需比对任何持久状态；若未来需要备份跨进程重启仍可查询，需改为持久化记录并新增 ADR |
+| PROD-011 | 第二版日期未归档时允许同日多篇条目，日期级归档汇总当天全部已提交条目并关闭日期 | Product direction accepted; design pending | `docs/需求理解.md` CR-20260807-01 | 有草稿时当前基线为阻止归档；正式日报唯一、来源可追溯、自动归档停用；需新数据/API/迁移设计 |
+| PROD-012 | 第二版 admin 可撤销任意用户尚未归档的已提交条目，普通用户不能撤销 | Product direction accepted; permission detail pending | `docs/需求理解.md` CR-20260807-01 | 默认只开放必要元数据；是否查看他人正文待用户确认，操作需记录原因且不记录正文 |
+| PROD-013 | 第二版首次初始化创建普通用户，并自动创建同初始密码的默认管理员 | Product direction accepted; account detail pending | `docs/需求理解.md` CR-20260807-01 | 两账号及默认数据必须原子创建、密码分别哈希；管理员用户名和强制改密策略待确认 |
 | SEC-001 | JWT 持久化使用 Electron safeStorage | Accepted | `architecture.md`、`AGENTS.md` | renderer 不写 `localStorage`/`sessionStorage`；不可用时必须显式失败或提示 |
 | SEC-002 | 所有业务 API 同时校验 JWT 与 `X-Runtime-Secret` | Accepted | `architecture.md`、`api.md` | `/health` 是唯一例外；Main 随机生成，renderer API 客户端仅在内存持有，不得进入 Vite 变量、持久化存储或日志 |
 | SEC-003 | V1 不做 SQLite 整库加密 | Accepted for V1 | `requirements.md`、`architecture.md` | 密码使用 Argon2id、Token safeStorage；若要求磁盘泄露防护需新 ADR |

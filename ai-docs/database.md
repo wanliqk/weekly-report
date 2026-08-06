@@ -1,10 +1,12 @@
 # 数据库设计
 
-> 状态：目标数据库契约已基线化（V1；全部 8 张业务表均已有真实 Repository/Service 落地）
-> 更新日期：2026-08-06
+> 状态：V1 数据库契约已实现；第二版日报聚合、审计与统计数据模型待设计
+> 更新日期：2026-08-07
 > 数据库：SQLite（SQLAlchemy 2.x + Alembic）
 
 ## 0. 当前实现状态
+
+> **CR-20260807-01 冲突**：现有 `uq_daily_reports_user_work_date`、三态日报表、无业务删除规则和周报直接外键到 `daily_reports` 均不能完整承载“同日多篇条目 + 日期级唯一正式日报 + 管理员撤销提交 + 草稿删除 + 统计”。本文件后续表结构仅描述当前 V1 实现，第二版不得直接改代码；需先确定新表/约束、审计、旧数据迁移和回滚方案。
 
 - 阶段 3（`DB-01`/`DB-02`/`DB-03`）已实现：异步 Engine/Session（`backend/app/db/engine.py`、`session.py`）、PRAGMA（`foreign_keys`/`journal_mode=WAL`/`synchronous=NORMAL`/`busy_timeout`）、8 张业务表的 SQLAlchemy Model（`backend/app/models/`）、Alembic 初始迁移（`backend/alembic/versions/3f6f955b87bb_initial_schema.py`）、启动时迁移前备份/轮转（`backend/app/db/migrate.py`）均已落地，代码与测试为准，未使用 `create_all()` 代替迁移。
 - 下列表、约束、索引、事务与备份**规则**仍是权威契约来源；实现细节（如具体文件路径）以代码为准，本节只记录"哪些已经真实存在"，不重复描述设计意图。
