@@ -14,7 +14,12 @@ const execFileAsync = promisify(execFile)
 const ELECTRON_APP_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..')
 
 function realDevDeps(): ReturnType<typeof createRuntimeDeps> {
-  return createRuntimeDeps(() => ({ isDev: true, appPath: ELECTRON_APP_PATH, resourcesPath: '' }))
+  return createRuntimeDeps(() => ({
+    isDev: true,
+    appPath: ELECTRON_APP_PATH,
+    resourcesPath: '',
+    userDataPath: ''
+  }))
 }
 
 async function isPidAlive(pid: number): Promise<boolean> {

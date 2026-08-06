@@ -20,7 +20,8 @@ function getLaunchOptions(): ResolveLaunchPlanOptions {
   return {
     isDev: is.dev,
     appPath: app.getAppPath(),
-    resourcesPath: process.resourcesPath
+    resourcesPath: process.resourcesPath,
+    userDataPath: app.getPath('userData')
   }
 }
 

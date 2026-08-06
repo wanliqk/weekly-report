@@ -24,6 +24,13 @@ dev = [
     "pytest-asyncio==1.1.0",
     "ruff==0.12.7",
 ]
+# Only needed to produce the PyInstaller onedir sidecar release artifact
+# (`weekly-report-backend.spec`); not required for the normal lint/typecheck/
+# test loop, so it is kept out of `dev` and only installed on demand with
+# `uv sync --directory backend --group build`.
+build = [
+    "pyinstaller==6.21.0",
+]
 
 [build-system]
 requires = ["hatchling"]

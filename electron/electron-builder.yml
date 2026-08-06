@@ -14,7 +14,14 @@ asarUnpack:
 win:
   executableName: weekly-report
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  # `${name}` resolves to package.json's raw `name` field, which for this npm
+  # workspace member is the scoped `@weekly-report/electron` — the `/` in
+  # that gets treated as a path separator, so NSIS tries to write the
+  # installer into a non-existent `dist/@weekly-report/` subdirectory and
+  # fails with "Can't open output file" (found by actually running
+  # `build:win`, not by inspection). `${productFilename}` is electron-builder's
+  # already-sanitized, filesystem-safe variant of `productName` above.
+  artifactName: ${productFilename}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always

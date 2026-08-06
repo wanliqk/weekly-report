@@ -1,4 +1,5 @@
 import sqlite3
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ from app.core.paths import ensure_runtime_directories
 from app.db.migrate import (
     MAX_BACKUPS_TO_KEEP,
     _assert_within_directory,
+    _resolve_alembic_ini_path,
     _rotate_backups,
     run_startup_migrations,
 )
@@ -122,3 +124,32 @@ def test_assert_within_directory_accepts_paths_inside_the_target_directory(
     directory.mkdir()
 
     _assert_within_directory(directory / "weekly-report-x.db", directory)
+
+
+def test_alembic_ini_path_is_derived_from_this_module_when_not_frozen() -> None:
+    # Guards the normal dev/test path: `sys.frozen` is unset outside of a
+    # PyInstaller build, so this must keep resolving relative to
+    # `app/db/migrate.py`'s own location (two directories up from `app/db`
+    # is `backend/`), not the frozen-executable branch.
+    assert not hasattr(sys, "frozen")
+
+    resolved = _resolve_alembic_ini_path()
+
+    assert resolved == Path(__file__).resolve().parents[1] / "alembic.ini"
+    assert resolved.is_file()
+
+
+def test_alembic_ini_path_is_derived_from_sys_executable_when_frozen(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Simulates a PyInstaller onedir freeze: `sys.frozen is True` and
+    # `sys.executable` points at the bundled exe. `alembic.ini` must then be
+    # resolved next to that exe (where the spec file's `datas=[...]` puts
+    # it), not via `__file__`, which would point into the frozen archive.
+    fake_executable = tmp_path / "weekly-report-backend.exe"
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_executable))
+
+    resolved = _resolve_alembic_ini_path()
+
+    assert resolved == tmp_path / "alembic.ini"

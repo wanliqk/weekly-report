@@ -26,8 +26,8 @@ weekly-report/
 
 - `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局、用户管理、模板管理、日报工作台/动态表单页面、导出保存对话框白名单、周报列表/编辑/来源页面和设置页面（自动归档、企业微信占位、管理员整库备份保存对话框白名单）。
 - `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证、用户管理、模板、设置、日报、导出、周报和手动整库备份的 API/Service 实现（手动备份因不落业务表，无独立 Repository 层，属 `database.md` §6 记录的既定例外）。
-- 阶段 4、阶段 5、阶段 6、阶段 7、阶段 8 均已完成并通过独立审查（阶段 6、阶段 7、阶段 8 含专项安全审查）。
-- `build/sidecar/` 仍为占位，尚未生成 PyInstaller 产物。
+- 阶段 4、阶段 5、阶段 6、阶段 7、阶段 8、阶段 9 均已完成并通过独立审查（阶段 6、阶段 7、阶段 8 含专项安全审查）。V1 规划的全部 9 个阶段现已交付。
+- `build/sidecar/weekly-report-backend.exe` 已由真实 PyInstaller `onedir` 构建产出并验证；`electron/dist/win-unpacked/`、`electron/dist/weekly-report-0.1.0-setup.exe` 已真实构建并完成本机安装/升级/卸载验证。
 
 ## 2. 目标业务与平台模块
 
@@ -71,7 +71,7 @@ weekly-report/
 | M14 Template UI | DONE | 模板字段编辑/排序/启停、类型组件和版本历史已实现并通过独立审查 |
 | M15 Weekly UI | DONE | 周范围选择、逐日可用性、生成、编辑保存、来源跳转和重新生成醒目确认已实现并通过独立审查 |
 | M16 Admin/Settings UI | DONE | 用户管理、个人设置（自动归档开关、固定时区展示）、企业微信占位（零外部请求本地提示）和管理员整库备份创建/保存入口均已实现并通过独立审查（含专项安全审查） |
-| M17 Packaging/Release | 占位 | 有 electron-builder 配置和 sidecar 目录占位；无 PyInstaller/安装升级验证闭环 |
+| M17 Packaging/Release | DONE | electron-vite `out/`、PyInstaller `onedir` sidecar、electron-builder `extraResources`、NSIS 安装包均已真实产出；本机完成安装/升级/卸载验证（无独立干净虚拟机，已与用户确认该限制）；过程中发现并修复三个真实缺陷（sidecar 生产环境变量注入缺失、主进程模块打包遗漏、npm workspace 作用域包名导致安装产物异常，见 `issues.md` ISS-014/ISS-015/ISS-016）；代码签名和正式多杀软兼容性矩阵测试仍未做（非阻塞，`issues.md` RISK-003） |
 
 ## 3. 后端模块内部契约
 

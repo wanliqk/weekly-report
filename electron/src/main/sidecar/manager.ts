@@ -180,6 +180,7 @@ export class SidecarManager extends EventEmitter {
       cwd: launchPlan.plan.cwd,
       env: {
         ...process.env,
+        ...launchPlan.plan.env,
         WEEKLY_REPORT_PORT: '0',
         [RUNTIME_SECRET_ENV_VAR]: runtimeSecret
       },

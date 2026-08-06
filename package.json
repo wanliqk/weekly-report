@@ -17,6 +17,7 @@
     "lint": "npm run lint --workspace electron",
     "typecheck": "npm run typecheck --workspace electron",
     "test": "npm run test --workspace electron",
+    "test:e2e": "npm run test:e2e --workspace electron",
     "build": "npm run build --workspace electron",
     "build:win": "npm run build:win --workspace electron"
   }

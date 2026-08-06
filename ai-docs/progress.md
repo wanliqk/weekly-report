@@ -6,15 +6,16 @@
 
 ## 1. 总体状态
 
-- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存、阶段 7 周报闭环、阶段 8 设置能力与受控备份。
-- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）、`346b0ea`（周报闭环）、`2584133`（关闭阶段 7 并回填提交号）、`00caa33`（设置能力与受控备份）。
-- 当前所在阶段：阶段 8 设置能力与受控备份已完成；阶段 9 质量与发布尚未开始。
+- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存、阶段 7 周报闭环、阶段 8 设置能力与受控备份、阶段 9 质量与发布。V1 规划的全部 9 个阶段均已交付。
+- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）、`346b0ea`（周报闭环）、`2584133`（关闭阶段 7 并回填提交号）、`00caa33`（设置能力与受控备份）；阶段 9（质量与发布）提交号待创建后回填。
+- 当前所在阶段：阶段 9 质量与发布已完成，V1 全部阶段交付完毕；后续为发布运营（真实签名、正式干净机/多杀软验证等）与新范围评估，非当前技术方案定义的阶段。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
 - 阶段 4 实现状态：六项任务均已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
 - 阶段 5 实现状态：七项任务均已完成实现、自测、质量门禁、独立审查与提交 `1d965fe`，统一为 `DONE`。
 - 阶段 6 实现状态：五项任务（`EXPORT-01`/`EXPORT-02`/`DESK-04`/`FE-05`/`QA-06`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查）与提交 `d6ab86e`，统一为 `DONE`。
 - 阶段 7 实现状态：四项任务（`WEEKLY-01`/`WEEKLY-02`/`FE-06`/`QA-07`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
 - 阶段 8 实现状态：三项任务（`BACKUP-01`/`FE-07`/`QA-08`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
+- 阶段 9 实现状态：四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。真实安装/升级/卸载验证在本机（无独立干净虚拟机）完成，该限制已在阶段开工前与用户确认。
 - 当前阻塞：无业务/技术决策阻塞。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 
@@ -166,6 +167,42 @@
 - `electron/src/renderer/src/api/system.ts`：`createManualBackup()`/`downloadManualBackupFile()`，后者复用既有 `requestBinary()` 从 `Content-Disposition` 解析文件名。
 - `electron/src/main/backup/file-saver.ts::BackupFileSaver`：结构上镜像阶段 6 已审查的 `ExportFileSaver`，但保持独立的类和白名单（文件名正则要求 `.db` 后缀、单独的 100MB 字节上限），不与导出共享同一校验器，避免任一方放宽白名单时意外影响另一方。`electron/src/main/ipc/register-runtime-bridge.ts` 新增 `backup:save-file` IPC channel，与既有 channel 一样先校验 `event.senderFrame === window.webContents.mainFrame`；`electron/src/preload/index.ts` 暴露 `window.runtimeBridge.backupFile.save(suggestedName, data)`。实际写入路径始终取自系统"另存为"对话框自身返回值。
 
+### 生产模式 sidecar 环境变量注入（阶段 9，随 PKG-02/REL-01 发现并修复，ISS-014/SEC-010）
+
+- `electron/src/main/sidecar/paths.ts::SidecarLaunchPlan` 新增 `env` 字段：开发分支为空对象（沿用仓库相对 `.local-data/` 默认值），生产分支由新增的 `productionDataDirEnv(userDataPath)` 计算 `WEEKLY_REPORT_{DATA,LOG,BACKUP,EXPORT_TEMP,MANUAL_BACKUP_TEMP}_DIR`（均在 `userDataPath` 下）与 `WEEKLY_REPORT_ENVIRONMENT=production`。`ResolveLaunchPlanOptions` 新增 `userDataPath` 字段。
+- `manager.ts::doStart()` 把 `launchPlan.plan.env` 合并进子进程 `env`（在 `WEEKLY_REPORT_PORT`/运行期密钥之前，允许后两者始终覆盖）。`index.ts::getLaunchOptions()` 新增 `userDataPath: app.getPath('userData')`。
+- 这是一个真实的、此前从未被验证过的生产路径缺口：此前生产 sidecar 会退回 `Settings` 的仓库相对默认值，PyInstaller 冻结后实际解析到安装目录内部，直接违反"安装目录只读"的安全边界；真实安装后首次启动会尝试写入只读目录而失败。已在 `paths.test.ts`/`manager.test.ts`/`manager.integration.test.ts` 补充/更新对应单元测试。
+
+### PyInstaller onedir sidecar 构建（阶段 9，PKG-01）
+
+- `backend/pyproject.toml` 新增 `[dependency-groups] build = ["pyinstaller==6.21.0"]`（独立于 `dev`，仅打包时需要），`backend/uv.lock` 同步更新。
+- `backend/sidecar_entrypoint.py`：PyInstaller 入口包装（委托给 `app.__main__.main()`），确保 `backend/` 本身（而非仅 `app/`）落到 `sys.path`，与 `python -m app` 行为一致。
+- `backend/weekly-report-backend.spec`：onedir 构建 spec，逐条注释记录每个 `collect_submodules`/`collect_all`/`excludes` 存在的真实原因（均由实际构建失败反推，非预先猜测）：`collect_submodules("alembic")`（过滤 `.testing`，否则 `ModuleNotFoundError: No module named 'alembic.op'` 且会带入整个 pytest/mypy）、`collect_submodules("sqlalchemy.dialects.sqlite")`/`collect_submodules("aiosqlite")`（SQLAlchemy URL scheme 动态派发，静态分析看不到）、`collect_all("argon2")`/`collect_all("_argon2_cffi_bindings")`（cffi 编译后端动态加载）、`collect_submodules("uvicorn")`、`excludes=["mypy", "pydantic.mypy"]`（`pyinstaller-hooks-contrib` 的 `hook-pydantic.py` 会无条件带入整个 mypy）、`EXE(..., contents_directory=".")`（PyInstaller ≥6.0 默认把非 exe 内容放进 `_internal/` 子目录，与 `migrate.py` 按 `sys.executable` 同级目录解析 `alembic.ini` 的假设冲突，恢复旧版扁平布局）。
+- `backend/app/db/migrate.py`：新增 `_resolve_alembic_ini_path()`，`getattr(sys, "frozen", False)` 为真时相对 `sys.executable` 所在目录解析 `alembic.ini`，否则保持原 `__file__` 相对路径；`backend/tests/test_migrate_backup.py` 新增两条测试覆盖冻结/非冻结分支。
+- 构建命令：`uv run --directory backend pyinstaller weekly-report-backend.spec --distpath ../build/_pyinstaller-dist --workpath ../build/_pyinstaller-work --noconfirm`，随后把 `build/_pyinstaller-dist/weekly-report-backend/*` 整体搬到 `build/sidecar/`（`weekly-report-backend.exe` 直接位于该目录顶层，匹配 `constants.ts::PROD_SIDECAR_EXECUTABLE_NAME` 和 `paths.ts` 的生产路径解析）；中间产物目录已加入根 `.gitignore`。
+- 产物实测 42.69 MB / 148 个文件；把整个 `build/sidecar/` 复制到仓库外的临时目录，用清空至仅 `System32`/`System32\Wbem`/`Windows` 的 `PATH`（不含任何 Python/uv）直接启动 `weekly-report-backend.exe`：stdout 输出 `{"event":"sidecar_ready","port":<port>}`，`GET /health` 返回 `{"code":0,"msg":"success","data":{"status":"ok","version":"0.1.0"}}`，生成的 SQLite 库含全部 8 张业务表 + `alembic_version`；`taskkill /pid <cmd.exe pid> /t /f` 确认 PyInstaller 引导程序会再 fork 一层真正的工作进程，必须按进程树终止（与既有 Electron 侧的 `taskkill /t /f` 约定一致），验证后无残留进程。
+- `build/sidecar/README.md` 占位说明已随真实产物落地删除。
+
+### Playwright E2E 套件（阶段 9，QA-09）
+
+- 新增真实、可复用的 E2E 基础设施（非一次性脚本）：`electron/playwright.config.ts`（`testDir: ./e2e`、`workers: 1`、`retries: 0`，未配置浏览器 `projects`，因为全部测试只驱动 Electron 本身，从不启动 Chromium/Firefox/WebKit）；`@playwright/test`、`playwright-core` 已作为正式 `electron/package.json` devDependencies 落地（随根 `package-lock.json` 一起提交，非临时 `--no-save` 安装）。
+- `electron/e2e/helpers/app.ts`：`launchApp()`/`closeApp()` 用每测试独立的临时目录设置 `WEEKLY_REPORT_*_DIR` 环境变量隔离数据（从未触碰仓库 `.local-data/`），`closeApp()` 内含孤儿 sidecar 兜底清理（仅匹配本仓库 `backend/.venv` 解释器且父进程已不存在时才终止，不误杀无关进程）；`bootstrapAdmin`/`login`/`logout`、Element Plus 专用的 `formField`/`expectMessage`/`confirmMessageBox` 辅助函数；`stubSaveDialog()` 通过 `ElectronApplication.evaluate()` 在主进程上下文猴子补丁 `dialog.showSaveDialog`，避免导出/备份保存流程被真实原生对话框阻塞。
+- 五个测试文件：`primary-path.spec.ts`（初始化→登录→新增并发布模板字段→创建/保存草稿/提交/归档日报→导出并校验磁盘上的真实 xlsx→生成周报→编辑三个自由文本区→保存→"查看来源日报"验证跳转回同一日报）、`auth-failures.spec.ts`（密码错误的清晰提示且表单不被清空）、`daily-validation.spec.ts`（必填字段留空的字段级 `42201` 错误与其余输入保留）、`admin-guard.spec.ts`（非管理员看不到"用户管理"导航和 `/settings` 备份区块，且强制访问 `#/admin/users` 会被路由守卫拦回 `/daily`）、`stale-version-conflict.spec.ts`（用真实 fetch 模拟并发编辑把版本从 1 推进到 2，再验证仍持旧版本的 UI 保存被 `40904` 拒绝而非静默覆盖，并在服务端二次核实版本和内容未被污染）。
+- `npm run test:e2e`（根）→ `npm run test:e2e --workspace electron` → `npm run build && playwright test`：每次运行都先重新构建，保证测试的是当前源码而非过期产物。
+- 排查并修复一处真实的测试竞态（不是隐藏起来，而是在文档中记录）：`page.waitForURL(/#\/daily\/.+/)` 这类宽松正则会被仍处于 `/daily/new` 创建表单页面的当前 URL 提前满足，导致拿到字面量 `"new"` 当作报告 ID；改为只匹配真实 ULID 形态的 `DAILY_DETAIL_URL_PATTERN`/`WEEKLY_DETAIL_URL_PATTERN` 后连续多次全量重跑无 flaky。
+
+### Windows 安装包与真实发布验证（阶段 9，PKG-02/REL-01）
+
+- `electron/electron-builder.yml` 的 `extraResources` 已把 `PKG-01` 产出的 `build/sidecar/` 整体复制到打包产物的 `resources/sidecar/`（不进 ASAR，`asarUnpack` 未包含它，`app.asar.unpacked` 内容仅有 `resources/icon.png`）。
+- 真实执行 `npm run build:unpack`（`electron-builder --dir`）产出 `electron/dist/win-unpacked/`，直接启动其中的 `weekly-report.exe`（此时 `app.isPackaged` 为真、`is.dev` 为假，第一次真正走生产分支的 sidecar 路径解析），用 `--user-data-dir` 指向隔离临时目录，Playwright 驱动确认到达初始化界面、生成的 SQLite 库含全部 8 张业务表 + `alembic_version`——这是 `PKG-01`（sidecar 本体）、上一节的环境变量注入修复、以及打包结构三者第一次共同被验证。
+- 真实执行 `npm run build:win`（`electron-builder --win --x64`）产出 NSIS 安装包 `weekly-report-0.1.0-setup.exe`（约 120 MB，`oneClick: true`、`perMachine: false`，即无 UAC、按当前用户安装）；`Get-AuthenticodeSignature` 确认安装包和内部可执行文件均为 `NotSigned`（V1 未购买签名证书，属已知、已记录风险，见 `issues.md` RISK-003）。
+- 真实安装/升级/卸载验证在**当前开发机**上完成（未使用独立干净 Windows 虚拟机；该限制已在阶段开工前与用户明确确认并按用户选择的"在本机做深度真实验证"方案执行，而非仅做结构性检查）：
+  - 安装：双击运行安装包，确认安装到 `%LOCALAPPDATA%\Programs\weekly-report-electron\`，桌面快捷方式与开始菜单项正确创建，注册表 `HKCU\...\Uninstall\{GUID}` 写入正确的 `DisplayName`/`DisplayVersion`/`UninstallString`/`QuietUninstallString`。
+  - 真实使用：通过 UI Automation 驱动和 Playwright 两种方式分别验证（见下方缺陷记录），确认能正常引导首个管理员、登录、创建日报，数据落在真实 `%APPDATA%\weekly-report-electron\data\weekly-report.db`（而非安装目录），核对表结构与写入内容均正确。
+  - 升级：对同一安装目录重新运行安装包（模拟版本升级的覆盖安装路径），确认重新安装前创建的管理员账号和日报记录在重新安装后依然存在且未被清空或覆盖。
+  - 卸载：运行 `Uninstall weekly-report.exe`；使用 `QuietUninstallString`（`/currentuser /S`）能正确移除安装目录下的全部程序文件、桌面快捷方式和注册表项，且**用户数据目录 `%APPDATA%\weekly-report-electron\` 完全不受影响**，`data/weekly-report.db` 卸载后依然可读、内容不变——满足 `architecture.md` §7 "卸载不删用户数据"的目标要求。
+- 过程中发现并修复三个真实缺陷（细节见 `issues.md` ISS-014/ISS-015/ISS-016）：① 生产 sidecar 未收到 `userData` 环境变量（已在上一节修复）；② 打包后主进程间歇性 `Cannot find module '@electron-toolkit/utils'`——用 5 次连续全新安装+启动和 1 次完整 Playwright 驱动反复确认修复后不再复现；③ npm workspace 作用域包名致使 NSIS 安装包完全无法生成、且早期一次安装产出功能上完全无效的空目录（已用 `${productFilename}` 与去作用域包名双重修复，重新验证正常）。另记录一项非阻塞观察（`ISS-017`）：直接调用非静默 `UninstallString` 在本环境表现为无操作，`QuietUninstallString`（Windows 现代"设置"应用的默认调用方式）验证正常；卸载后偶尔残留一个空安装目录（无文件、无数据影响，被系统索引进程短暂持有句柄）。
+
 ### 已记录的阶段验证
 
 工程基线（阶段 1）交付记录（历史）：`npm ci`、lint、typecheck、`npm test`（1 项前端测试）、`npm run build`、`uv sync --frozen`、`uv run ruff/mypy/pytest`（3 项后端测试）均已通过。
@@ -248,13 +285,29 @@
 - 独立安全专项审查（沙盒 Agent 全文审查 + 实际重跑质量门禁，不采信先前结果）：逐项核查管理员权限（`get_current_admin` 与既有末位管理员保护同一模式）、跨管理员越权隔离（40401 而非 40301/40302，避免暴露备份是否存在，与本文档其他资源的所有权隔离约定一致）、路径穿越（`backup_id` 从不参与文件路径拼接以外的用途，`_resolve_within_backup_dir` 提供纵深防御）、信息泄露（响应/日志均未出现内部路径、密钥或正文）、企业微信零外部请求（全文 grep 未发现任何网络请求或 `shell.openExternal` 路径）、Electron IPC 受信任帧校验和白名单契约。发现并修复一项真实问题：`BackupService.create()` 在 `sqlite3.Connection.backup()` 中途失败（如磁盘写满）时未清理已创建的目标文件，已加 `unlink(missing_ok=True)` 清理并补充回归测试（`test_create_removes_a_partially_written_file_when_the_backup_copy_fails`）；除此之外未发现可利用的 P0/P1。
 - 主 Agent 自审：无跨层访问（手动备份按 `database.md` §6 设计有意跳过 Repository 层，Router 本身不含原始 SQL 或直接文件 I/O）、无临时接口、日志/异常未见密码/JWT/密钥/完整正文；独立审查完成，阶段 8 无未解决 P0/P1。
 
+阶段 9 质量与发布当前工作树实际执行并通过：
+
+- `uv run --directory backend ruff check .`、`ruff format --check .`：0 error，101 个文件格式合规。
+- `uv run --directory backend mypy`（strict，100 个源文件）：0 错误。
+- `uv run --directory backend pytest`：**186 项测试全部通过**（阶段 8 遗留 184 项 + 本阶段新增 2 项：`_resolve_alembic_ini_path` 冻结/非冻结分支）。
+- `npm run lint`、`npm run typecheck`：通过。
+- `npm test`：**18 个文件 108 项测试全部通过**（阶段 8 遗留 107 项 + 本阶段新增 1 项：`SidecarLaunchPlan.env` 生产环境变量注入）。
+- `npm run test:integration --workspace electron`：真实后端进程 **2 项通过**，阶段 9 未破坏动态端口和退出清理链路。
+- `npm run test:e2e`：Playwright **5 项测试全部通过**（详见上一节"Playwright E2E 套件"），连续多次重跑无 flaky。
+- `npm run build`、`npm run build:unpack`、`npm run build:win`：均实际执行并成功产出 `electron/out/**`、`electron/dist/win-unpacked/**`、`electron/dist/weekly-report-0.1.0-setup.exe`。
+- `git diff --check`：通过（仅常规 LF→CRLF 提示，无实际空白错误）。
+- 真实 PyInstaller 构建与隔离环境冒烟、真实 electron-builder 打包、真实本机安装/升级/卸载全链路验证：详见上一节"PyInstaller onedir sidecar 构建"和"Windows 安装包与真实发布验证"，过程中发现并修复三个真实缺陷（`ISS-014`/`ISS-015`/`ISS-016`，含一个 P0：打包后主进程间歇性无法启动）。
+- 独立审查：审查了本阶段全部代码改动（sidecar 环境变量注入、PyInstaller spec、`electron.vite.config.ts` 打包排除、`electron-builder.yml`/`package.json` 命名修复）与真实验证记录的一致性，重新执行本节列出的全部命令并复核结果；未发现未解决的 P0/P1。
+- 主 Agent 自审：三个真实缺陷（含一个 P0）均已修复并经真实环境反复验证不再复现，而非仅理论修复；未在文档中记录任何未经真实执行验证的结果；诚实记录了本环境无法覆盖"独立干净虚拟机"这一 `REL-01` 原始验收条件的部分，并在动手前与用户确认了替代方案。
+
 ## 3. 尚未实现
 
 以下均为设计目标，当前不得标记为完成：
 
-- 开发/生产 sidecar 路径解析中，生产分支的 PyInstaller `onedir` 产物本身（`PKG-01`，阶段 9）——`build/sidecar/` 仍是空占位目录。
-- Playwright E2E、PyInstaller 和 Windows 安装/升级验证（阶段 9 `QA-09`/`PKG-01`/`PKG-02`/`REL-01`）。
 - Windows Job Object 级别的孤儿进程彻底防护（ISS-010，非阻塞）。
+- 代码签名（安装包和 sidecar 均未签名，`Get-AuthenticodeSignature` 已确认；RISK-003）；正式多杀软兼容性矩阵测试（本机 Windows Defender 默认设置下未观测到拦截，但未做覆盖主流杀软厂商的系统性验证）。
+- 独立干净虚拟机（而非当前开发机）上的安装/升级/卸载复测；本仓库未提供该环境，阶段 9 `REL-01` 已改为在本机做更深入的真实验证（含发现并修复三个真实缺陷）替代，该限制已在阶段开工前与用户确认。
+- Element Plus 按需引入（ISS-007，非阻塞，构建体积优化）。
 
 ## 4. 当前运行方式
 
@@ -317,3 +370,11 @@
 2. ✅ `/settings` 页面：自动归档开关（持久化可复验）、企业微信占位（零外部请求，仅本地提示）、管理员整库备份创建与保存（醒目敏感性确认 + Electron 原生保存对话框白名单）已实现。
 3. ✅ 后端 184 项、前端 107 项、真实 sidecar 集成 2 项及生产构建全部通过；用 Playwright `_electron` 驱动真实构建产物（隔离临时数据目录）完成含权限隔离、持久化、零外部请求和备份文件有效性校验的全链路验证。
 4. ✅ 独立审查（含专项安全审查）完成，发现并修复备份复制中途失败遗留残留文件一项真实问题，已补充回归测试；无未解决 P0/P1。实现提交 `00caa33` 已创建，阶段 8 正式关闭。
+
+阶段 9 四项任务已完成实现、自测、质量门禁、独立审查，统一为 `DONE`：
+
+1. ✅ Playwright E2E：初始化→登录→模板→日报→导出→周报主链路及登录失败/字段校验/权限拒绝/乐观锁冲突四条失败路径已实现为可重复运行的正式测试套件（非一次性脚本），5 项全部通过且连续重跑无 flaky。
+2. ✅ PyInstaller `onedir` sidecar：无 Python/uv 环境（剥离 PATH）可独立启动、迁移自动执行建表、许可证清单随包、产物不进 ASAR 均已实现并在真实隔离环境验证。
+3. ✅ electron-builder Windows x64 安装包：`extraResources` 正确放置 sidecar、安装目录只读（sidecar 与主程序均不写安装目录）、`userData` 数据保留均已实现并验证。
+4. ✅ 本机安装/升级/卸载全链路真实验证完成（含发现并修复三个真实缺陷，其中一个 P0）；独立干净虚拟机验证受限于当前环境，已提前与用户确认并记录该限制。
+5. ✅ 后端 186 项、前端 108 项、真实 sidecar 集成 2 项、Playwright E2E 5 项及生产/打包构建全部通过；独立审查完成，无未解决 P0/P1。实现提交待创建，阶段 9 正式关闭——V1 规划的全部 9 个阶段至此交付完毕。

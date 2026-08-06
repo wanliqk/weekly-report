@@ -33,7 +33,7 @@ Electron Main
 
 ### 1.1 当前实现快照（2026-08-06）
 
-已完成阶段 1 工程基线（提交 `3a9fdbc`）、阶段 2 Desktop Bootstrap（提交 `7386cae`）、阶段 3 数据基础与 API Foundation（提交 `8480515`）、阶段 4 认证与用户管理（提交 `1a50e75`）、阶段 5 模板、设置与日报闭环（提交 `1d965fe`）、阶段 6 查询导出与桌面保存（提交 `d6ab86e`）、阶段 7 周报闭环（提交 `346b0ea`）和阶段 8 设置能力与受控备份（独立审查完成，含专项安全审查）。发布链路（PyInstaller/安装包）尚未实现：
+已完成阶段 1 工程基线（提交 `3a9fdbc`）、阶段 2 Desktop Bootstrap（提交 `7386cae`）、阶段 3 数据基础与 API Foundation（提交 `8480515`）、阶段 4 认证与用户管理（提交 `1a50e75`）、阶段 5 模板、设置与日报闭环（提交 `1d965fe`）、阶段 6 查询导出与桌面保存（提交 `d6ab86e`）、阶段 7 周报闭环（提交 `346b0ea`）、阶段 8 设置能力与受控备份（提交 `00caa33`）和阶段 9 质量与发布（独立审查完成）。V1 规划的全部 9 个阶段已交付；发布链路仍缺代码签名与正式多杀软兼容性矩阵测试（非阻塞，见 `issues.md` RISK-003）：
 
 - 根目录已建立 npm workspace；`npm run dev` 现在只启动 electron-vite，Electron Main 在 `whenReady()` 中自行拉起并管理 FastAPI sidecar（开发模式直接 spawn `backend/.venv/Scripts/python.exe -m app`，不经过 `uv run`）。
 - Electron 已实现单实例、窗口安全选项、禁止新窗口和跨地址导航；已有 `electron/src/main/sidecar/` 子进程管理模块（动态端口获取、runtime secret 生成、健康检查轮询、Windows 下 `taskkill /pid /t /f` 进程树终止）和 `electron/src/main/ipc/register-runtime-bridge.ts`（5 个受信任 frame 校验的 IPC channel，含阶段 6 新增的导出保存）。
@@ -41,7 +41,7 @@ Electron Main
 - FastAPI 已建立应用工厂、精确 CORS/Trusted Host（含 `expose_headers=["Content-Disposition"]`）、请求 ID 中间件、`RuntimeSecretMiddleware`（除 `/health`/`/docs`/`/openapi.json` 外强制校验 `X-Runtime-Secret`）、达到目标契约的 `GET /health`（含 `version` 字段和 `Cache-Control: no-store`），以及统一异常处理基础（`AppError`/Pydantic 422 归一化/`OperationalError`→50301/兜底 500，均不泄露堆栈）。
 - SQLAlchemy 异步 Engine/Session、SQLite PRAGMA、8 张业务表 ORM、Alembic 初始迁移和迁移前备份均已实现。认证、用户管理、模板、个人设置、日报、导出和周报均已落地 `API → Service → Repository → Model/DB` 链路；日报所有权、模板快照、条件状态转换、自动归档和乐观锁已由 Service/Repository 强制；导出的所有权/归档校验、跨模板动态列合并、xlsx 线程卸载生成、24 小时过期（懒清理 + 启动扫描）和路径边界校验均已实现并通过独立审查；周报的自然周校验、仅归档来源、同周唯一（含并发）、来源快照、人工编辑不反写日报和确认后原子重生成均已实现并通过独立审查（含专项安全审查）。
 - 手动整库备份（`BACKUP-01`）已实现：admin 触发 `PRAGMA wal_checkpoint(TRUNCATE)` + `sqlite3.Connection.backup()` 生成一致性快照，用进程内 `BackupRegistry`（不落业务表）以随机 ULID 映射文件路径/创建者/过期时间，15 分钟懒过期加启动残留清理，仅创建该备份的 admin 本人可下载。`/settings` 页面（`FE-07`）已实现自动归档开关、固定时区展示、企业微信占位（零外部请求）和管理员整库备份创建/保存交互，复用阶段 6 已审查的 Electron 保存对话框白名单模式（新增独立的 `.db` 文件名/大小校验器，不与导出共享白名单以避免互相放宽）。
-- `build/sidecar/` 当前只有占位说明；PyInstaller sidecar、`extraResources` 可用性和安装包流程仍未完成（阶段 9 `PKG-01`）。生产环境的可执行文件路径解析逻辑已就绪（见 §8 命名约定），文件不存在时会走类型化失败态而非崩溃。
+- `build/sidecar/weekly-report-backend.exe` 已由真实 PyInstaller `onedir` 构建产出（42.69 MB/148 文件），在剥离 PATH（无 Python/uv）的隔离环境下验证可独立启动、通过 `/health`、正确建表。`electron-builder.yml` 的 `extraResources` 已把它放入打包产物的 `resources/sidecar/`（不进 ASAR）；生产模式下 Electron 会向 sidecar 子进程注入指向 `app.getPath('userData')` 的数据目录环境变量（阶段 9 新增，此前从未被验证过，见 `issues.md` ISS-014）。真实 NSIS 安装包已产出并在本机完成安装/升级/卸载验证（阶段 9 `PKG-02`/`REL-01`，未使用独立干净虚拟机，该限制已与用户确认），过程中另发现并修复两个真实打包缺陷（`issues.md` ISS-015 主进程模块打包遗漏、ISS-016 npm workspace 作用域包名导致安装产物异常）。Playwright E2E 套件（阶段 9 `QA-09`）已交付并纳入 `npm run test:e2e`，覆盖初始化→登录→模板→日报→导出→周报主链路及四条失败路径。
 
 后续实现必须逐阶段把真实进度更新到 `progress.md`；本节只用于防止将目标架构误读为现状。
 
@@ -150,15 +150,16 @@ Electron Main
 
 ## 8. 发布架构
 
-以下是目标发布流程。当前 electron-vite 构建基线、electron-builder 配置和 Electron 侧 sidecar 生命周期管理（阶段 2）已完成；PyInstaller 产物本身和安装包闭环仍是占位（阶段 9 `PKG-01`/`PKG-02`）。
+以下发布流程已在阶段 9（`PKG-01`/`PKG-02`/`REL-01`）全部落地并经真实构建/安装验证，不再是目标占位。
 
-- 开发模式下 Electron Main 直接 spawn `backend/.venv/Scripts/python.exe -m app`（不经过 `uv run`，避免其包装进程在 Windows 下导致 Node 持有错误 pid、清理不掉真正的解释器进程）；生产后端用 PyInstaller `onedir` 打包为 sidecar。
-- 生产包不得依赖目标机器已有 Python、uv、Node.js 或全局环境变量。
-- 根 npm workspace 通过 `npm ci` 安装；`npm run build` 调用 electron-vite，将 main、preload、renderer 统一输出到 `electron/out/`。
-- `electron-builder` 使用 `electron/electron-builder.yml` 打包 `electron/out/`；PyInstaller sidecar、Alembic 迁移和许可证通过 `extraResources` 放入 `process.resourcesPath` 下的固定子目录。
-- PyInstaller 可执行文件及其 `onedir` 依赖不得放入 ASAR；生产启动只能从 `process.resourcesPath` 解析，不得依赖源码目录、`cwd` 或开发机绝对路径。
-- **命名约定（阶段 2 已定义，阶段 9 `PKG-01` 必须遵循）**：生产 sidecar 可执行文件必须命名为 `weekly-report-backend.exe`，并放在 `process.resourcesPath/sidecar/weekly-report-backend.exe`（对应 `electron-builder.yml` 的 `extraResources: {from: ../build/sidecar, to: sidecar}`）。该常量定义在 `electron/src/main/sidecar/constants.ts` 的 `PROD_SIDECAR_EXECUTABLE_NAME`；`electron/src/main/sidecar/paths.ts` 已实现该路径的解析与"文件不存在则返回类型化失败"逻辑，可在 `build/sidecar/` 仍为空目录时通过单元测试验证，但尚未被真实生产二进制触发过。
-- 每次发布必须验证干净机安装、首次初始化、从上一版升级、数据保留和卸载不误删用户数据。
+- 开发模式下 Electron Main 直接 spawn `backend/.venv/Scripts/python.exe -m app`（不经过 `uv run`，避免其包装进程在 Windows 下导致 Node 持有错误 pid、清理不掉真正的解释器进程）；生产后端用 PyInstaller `onedir` 打包为 sidecar（`backend/weekly-report-backend.spec`，已产出真实 `build/sidecar/weekly-report-backend.exe`，42.69 MB/148 文件）。
+- 生产包不依赖目标机器已有 Python、uv、Node.js 或全局环境变量；已在剥离 PATH（仅 `System32`/`Windows`）的隔离环境下真实验证独立启动成功。
+- 根 npm workspace 通过 `npm ci` 安装；`npm run build` 调用 electron-vite，将 main、preload、renderer 统一输出到 `electron/out/`。main 进程构建对 `@electron-toolkit/utils` 显式排除外部化（强制打包，见 `issues.md` ISS-015）——npm workspace 依赖提升会导致 electron-builder 的默认依赖收集间歇性遗漏该模块，造成打包后主进程随机启动失败。
+- `electron-builder` 使用 `electron/electron-builder.yml` 打包 `electron/out/`；PyInstaller sidecar、Alembic 迁移和许可证通过 `extraResources` 放入 `process.resourcesPath` 下的固定子目录，已用 `npm run build:unpack`/`npm run build:win` 真实验证 `resources/sidecar/` 内容正确。
+- PyInstaller 可执行文件及其 `onedir` 依赖不放入 ASAR；生产启动只从 `process.resourcesPath` 解析（已用 `win-unpacked` 真实构建验证 `app.isPackaged=true`/`is.dev=false` 分支）。
+- **命名约定**：生产 sidecar 可执行文件命名为 `weekly-report-backend.exe`，放在 `process.resourcesPath/sidecar/weekly-report-backend.exe`（对应 `electron-builder.yml` 的 `extraResources: {from: ../build/sidecar, to: sidecar}`）。该常量定义在 `electron/src/main/sidecar/constants.ts` 的 `PROD_SIDECAR_EXECUTABLE_NAME`；`electron/src/main/sidecar/paths.ts` 已实现该路径解析、"文件不存在则返回类型化失败"逻辑，以及生产分支向 `userData` 注入数据目录环境变量（`issues.md` ISS-014），均已被真实生产二进制触发验证。
+- `electron/package.json` 的 `name` 字段不得使用 npm scope 前缀（`@scope/name`）——electron-builder 在本项目的 NSIS 配置（`oneClick: true`、`perMachine: false`）下会用该字段（而非 `productFilename`）拼装默认安装目录名，且不处理 scope 前缀，会产出畸形目录名和完全无效的空安装（`issues.md` ISS-016）；`nsis.artifactName` 同理必须用 `${productFilename}` 而非 `${name}`。
+- 每次发布已在本机验证干净安装、首次初始化、从上一版升级（同版本号重装模拟）数据保留和卸载不误删用户数据；未在独立干净虚拟机上复测，该限制已与用户确认（`issues.md` ISS-017）。
 
 ## 9. 架构决策记录
 

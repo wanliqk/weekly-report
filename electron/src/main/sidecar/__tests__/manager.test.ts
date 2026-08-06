@@ -24,10 +24,10 @@ function readyLine(port: number): Buffer {
   return Buffer.from(`${JSON.stringify({ event: 'sidecar_ready', port })}\n`)
 }
 
-function okPlan(): SidecarLaunchPlanResult {
+function okPlan(env: NodeJS.ProcessEnv = {}): SidecarLaunchPlanResult {
   return {
     ok: true,
-    plan: { executablePath: 'python', args: ['-m', 'app'], cwd: '/backend' }
+    plan: { executablePath: 'python', args: ['-m', 'app'], cwd: '/backend', env }
   }
 }
 
@@ -97,6 +97,32 @@ describe('SidecarManager', () => {
       { env: Record<string, string> }
     ]
     expect(spawnCall[2].env[RUNTIME_SECRET_ENV_VAR]).toBe('the-secret')
+  })
+
+  it('merges the launch plan env (e.g. production userData directories) into the child env', async () => {
+    const child = new FakeChildProcess()
+    const deps = createDeps({
+      resolveLaunchPlan: vi.fn(() =>
+        okPlan({
+          WEEKLY_REPORT_ENVIRONMENT: 'production',
+          WEEKLY_REPORT_DATA_DIR: 'C:/userData/data'
+        })
+      ),
+      spawnProcess: vi.fn(() => asChildProcess(child))
+    })
+    const manager = new SidecarManager(deps)
+
+    const startPromise = manager.start()
+    child.stdout.emit('data', readyLine(5011))
+    await startPromise
+
+    const spawnCall = (deps.spawnProcess as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      string[],
+      { env: Record<string, string> }
+    ]
+    expect(spawnCall[2].env.WEEKLY_REPORT_ENVIRONMENT).toBe('production')
+    expect(spawnCall[2].env.WEEKLY_REPORT_DATA_DIR).toBe('C:/userData/data')
   })
 
   it('fails and records the exit code when the child exits before announcing a port', async () => {

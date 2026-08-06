@@ -7,6 +7,11 @@ release/
 .eslintcache
 *.log
 
+# ---- Playwright E2E (QA-09) ----
+electron/test-results/
+electron/playwright-report/
+electron/playwright/.cache/
+
 # ---- 运行期数据（开发态，仅本地） ----
 .local-data/
 logs/
@@ -34,6 +39,11 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# ---- PyInstaller sidecar 构建产物（PKG-01，本地可重新生成，不进 Git） ----
+build/sidecar/
+build/_pyinstaller-dist/
+build/_pyinstaller-work/
 
 # ---- OS / 编辑器 ----
 .DS_Store
