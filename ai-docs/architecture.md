@@ -1,12 +1,12 @@
 # 系统架构基线
 
-> 状态：V1 架构已实现；第二版 CR-20260807-01 涉及核心架构变更，重设计待完成
+> 状态：V1 架构已实现；第二版 CR-20260807-01 方案已完成、待用户确认、尚未实现
 > 更新日期：2026-08-07
 > 原始方案：`docs/方案设计.md`
 
 ## 0. 文档定位与事实边界
 
-> **第二版变更门禁**：新需求已推翻 V1 的同日唯一、单篇归档、提交自动归档和首位管理员初始化，并新增管理员撤销提交与个人统计。第 1.1 节仍是当前实现事实，其余旧日报/周报契约不能直接作为第二版实现依据。必须先更新 `docs/方案设计.md`、`database.md`、`api.md`、模块边界和迁移方案。
+> **第二版事实边界**：第 1.1 节和 `progress.md` 仍描述当前 V1 实现；第二版目标以本文第 13 节和 `docs/方案设计.md` 的 2026-08-07 增量为准。方案已完成但待用户确认，且不等于代码已实现。
 
 - 本文件描述 V1 的目标架构、依赖方向和不可突破的安全边界，不以“已批准”表示代码已经完成。
 - 产品范围以 `docs/需求理解.md` 为准，技术设计以 `docs/方案设计.md` 为准；本文件是供 Agent 快速恢复上下文的提炼版，不得反向覆盖上游文档。
@@ -205,3 +205,54 @@ Electron Main
 变更流程：在对应 `ai-docs` 文件记录动机、备选方案、兼容性和迁移影响 -> 技术负责人批准 -> 更新任务和验收标准 -> 才能改代码。
 
 每个技术方案阶段完成并通过适用质量门禁后，必须复核工作树并创建独立的 Conventional Commit；不得混入下一阶段，也不得在未获用户明确授权时推送远端。
+
+## 13. 第二版目标架构（CR-20260807-01）
+
+### 13.1 领域拆分
+
+- `daily_reports` 变为同日可多篇的来源条目；保留 `draft/submitted/archived` 以兼容追溯，但不再提供单篇归档入口。
+- 新增 `daily_report_days`，以 `(user_id, work_date)` 唯一表示日期容器和不可变正式日报；`open/archived` 是日期关闭状态。
+- 日期行是创建、保存、删除、提交、admin 撤销和日期级归档的共同写入互斥点。SQLite 下通过短事务中的条件 `UPDATE` 取得写锁并复查状态。
+- 新增 `admin_audit_events` 记录撤销提交和用户删除；只存白名单元数据和原因，禁止正文/模板快照。
+- 周报、导出和完成日期统计只读取 `daily_report_days.status=archived` 的正式快照；来源条目不重复参与正式结果。
+
+### 13.2 服务和依赖
+
+```text
+API
+├─ DailyReportService          # 条目创建幂等、保存、删除、提交
+├─ DailyReportDayService       # 月历、日期详情、正式归档事务
+├─ AdminDailyReportService     # 最小元数据、撤销与审计
+├─ StatisticsService          # 当前用户月份聚合和连续天数
+├─ WeeklyReportService         # 读取日期级正式快照
+└─ ExportService               # 一日期一正式记录
+        ↓
+Repository -> Model/SQLite
+```
+
+模块仍严格遵循 API -> Service -> Repository -> Model/DB。管理员跨所有者的撤销是专用 Service/Repository 的窄权限例外，普通 Daily Repository 继续强制 owner 过滤；管理员查询 SQL 不选择正文列。
+
+### 13.3 认证与安全
+
+- 首次 bootstrap 在同一事务创建普通用户和固定 `admin`；密码分别 Argon2id 哈希。
+- `users.must_change_password` 强制默认 admin 和被重置密码的用户先改密。认证基础依赖允许 `/auth/me`、改密和退出；业务依赖返回 `40303`。
+- admin 仍默认不能查看他人正文。本次只开放待归档条目的必要元数据、撤销动作和脱敏审计。
+- Electron Main/preload、回环 REST、runtime secret、safeStorage、CSP、单 sidecar/单 worker边界均不改变，也不新增 AI/外部网络能力。
+
+### 13.4 一致性和迁移
+
+- 日期级归档在一个事务内复查无草稿、构造版本化快照、批量归档来源并关闭日期；重复/并发请求最多得到一个正式日报。
+- 创建使用 renderer 生成的 `client_request_id` 区分真实多次创建与同一请求重试。
+- V1 每条日报迁移为一个同 ID 日期容器和一个来源条目；旧 archived 构造单来源正式快照，旧 draft/submitted 保持开放。
+- `weekly_report_sources` 外键改指日期容器，历史 ID 保持不变；周报 JSON 逐行升级。无法无损降级时拒绝 downgrade，以升级前自动备份恢复。
+
+### 13.5 第二版 ADR
+
+| ADR | 决策 | 状态 | 约束理由 |
+|---|---|---|---|
+| ADR-014 | 日期容器 1:n 日报来源条目 | Proposed for V2 | 表达同日多篇、日期关闭、唯一正式结果和来源追溯 |
+| ADR-015 | 日期行保存版本化不可变正式快照 | Proposed for V2 | 周报/导出稳定且不依赖模板后续变化 |
+| ADR-016 | 日期行作为该日全部写操作的并发互斥点 | Proposed for V2 | SQLite 下确定地协调创建、撤销与归档 |
+| ADR-017 | admin 撤销使用专用最小元数据查询和独立审计 | Proposed for V2 | 满足操作能力而不扩大正文权限 |
+| ADR-018 | 有业务账号不物理删除，只允许停用 | Proposed for V2 | 避免级联数据损失并保持外键追溯 |
+| ADR-019 | 周报、导出和完成统计只读取日期级正式日报 | Proposed for V2 | 每个完成日期只参与一次，消除重复汇总 |

@@ -20,6 +20,12 @@
 | ADR-011 | 手动整库备份仅 admin 可用，通过短期下载文件交付 | Accepted | `requirements.md`、`architecture.md`、`api.md` | 备份含所有用户数据；随机 ID、15 分钟过期、界面明确提示敏感性 |
 | ADR-012 | electron-vite 5 是唯一 Electron 开发/构建工具 | Accepted | `architecture.md`、`docs/方案设计.md` 工具链变更 | 源码固定在 `electron/src/main|preload|renderer`，产物固定在 `electron/out` |
 | ADR-013 | Node.js 22.12+、npm 10+、根 npm workspace 是 JS 工具链基线 | Accepted | `architecture.md`、`AGENTS.md`、根 `package.json` | 使用根 `package-lock.json`；不在未评审时改用 pnpm |
+| ADR-014 | 第二版使用日期容器 1:n 日报来源条目 | Proposed for V2 | `docs/方案设计.md` 第二版、`architecture.md` §13 | 日期容器唯一表达日期关闭和正式日报；条目表取消同日唯一 |
+| ADR-015 | 日期行保存版本化不可变正式快照 | Proposed for V2 | `docs/方案设计.md` 第二版、`database.md` §8 | 按来源稳定排序，无损保留边界；周报/导出不临时拼装正式结果 |
+| ADR-016 | 日期行作为创建、保存、删除、提交、撤销和归档的共同并发互斥点 | Proposed for V2 | `docs/方案设计.md` 第二版、`architecture.md` §13 | SQLite 短事务条件更新协调全部同日写操作，防止部分归档 |
+| ADR-017 | admin 撤销使用专用最小元数据查询与独立审计 | Proposed for V2 | `requirements.md`、`api.md` §13 | 不查询/返回他人正文；审计只存原因和白名单元数据 |
+| ADR-018 | 有业务记录的账号不得物理删除 | Proposed for V2 | `requirements.md`、`database.md` §8 | 无业务账号可安全删除；有业务账号只能停用，避免级联丢失 |
+| ADR-019 | 周报、导出和完成统计只读取日期级正式日报 | Proposed for V2 | `requirements.md`、`docs/方案设计.md` 第二版 | 一日期只参与一次，来源条目仅作篇数和追溯，不重复汇总 |
 
 ## 2. 已接受产品与安全默认值
 
@@ -35,9 +41,10 @@
 | PROD-008 | 导出文件内的 `Asia/Shanghai` 时间展示使用固定 UTC+8 偏移而非 `zoneinfo` | Accepted for V1 | `EXPORT-02` 实现 | 中国大陆自 1991 年后不施行夏令时，固定偏移在数值上等价且避免生产环境依赖可选的 `tzdata` 包（Windows 默认不含 IANA 时区数据库）；若产品未来需要真实多时区支持需新 ADR |
 | PROD-009 | 周报 `PUT` 只接受并覆盖 `supplement`/`next_week_plan`/`risks` 三个自由文本字段，`content.days` 由服务端固定为生成/重生成时的快照，不做逐字段编辑 | Accepted for V1 | `WEEKLY-02` 实现（`requirements.md` 4.3.4/4.3.5 只描述"自动内容"与"编辑区"两部分，未定义 `PUT` 的字段粒度） | 从机制上保证"人工编辑不反写日报"且不会让用户绕过重新生成来局部篡改来源摘要；若未来需要允许编辑单日摘要文本需新 ADR |
 | PROD-010 | 手动整库备份不落业务表，改用进程内 `BackupRegistry`（随机 ULID -> 记录），15 分钟懒过期 + `create()` 时序清理 + 启动时目录级清理三重机制共同保证残留可控 | Accepted for V1 | `BACKUP-01` 实现（`database.md` §6 已给出"不登记业务表、进程内随机 ID 映射、15 分钟过期、启动清理"的原则，未定义具体触发时机的组合） | 进程重启即清空注册表，因此启动清理可以对目录下的 `*.db` 文件做无条件删除而无需比对任何持久状态；若未来需要备份跨进程重启仍可查询，需改为持久化记录并新增 ADR |
-| PROD-011 | 第二版日期未归档时允许同日多篇条目，日期级归档汇总当天全部已提交条目并关闭日期 | Product direction accepted; design pending | `docs/需求理解.md` CR-20260807-01 | 有草稿时当前基线为阻止归档；正式日报唯一、来源可追溯、自动归档停用；需新数据/API/迁移设计 |
-| PROD-012 | 第二版 admin 可撤销任意用户尚未归档的已提交条目，普通用户不能撤销 | Product direction accepted; permission detail pending | `docs/需求理解.md` CR-20260807-01 | 默认只开放必要元数据；是否查看他人正文待用户确认，操作需记录原因且不记录正文 |
-| PROD-013 | 第二版首次初始化创建普通用户，并自动创建同初始密码的默认管理员 | Product direction accepted; account detail pending | `docs/需求理解.md` CR-20260807-01 | 两账号及默认数据必须原子创建、密码分别哈希；管理员用户名和强制改密策略待确认 |
+| PROD-011 | 第二版日期未归档时允许同日多篇条目，日期级归档汇总当天全部已提交条目并关闭日期 | Accepted for V2 | `docs/需求理解.md` CR-20260807-01、第二版方案 | 有草稿时阻止归档；正式日报唯一、来源可追溯、自动归档移除 |
+| PROD-012 | 第二版 admin 可撤销任意用户尚未归档的已提交条目，普通用户不能撤销 | Accepted for V2 | `docs/需求理解.md` CR-20260807-01、第二版方案 | 仅开放必要元数据，不开放正文；必须填写原因并记录脱敏审计 |
+| PROD-013 | 第二版首次初始化创建普通用户，并自动创建同初始密码的默认管理员 | Accepted for V2 | `docs/需求理解.md` CR-20260807-01、第二版方案 | admin 用户名固定、密码分别哈希、首次登录强制改密、双账号和默认数据原子创建 |
+| PROD-014 | 第二版统计按自然日，日报篇数按来源条目，管理员只看本人统计 | Accepted for V2 | `docs/需求理解.md` CR-20260807-01 | 周末计入；日期正式日报不重复加一；不做团队排名 |
 | SEC-001 | JWT 持久化使用 Electron safeStorage | Accepted | `architecture.md`、`AGENTS.md` | renderer 不写 `localStorage`/`sessionStorage`；不可用时必须显式失败或提示 |
 | SEC-002 | 所有业务 API 同时校验 JWT 与 `X-Runtime-Secret` | Accepted | `architecture.md`、`api.md` | `/health` 是唯一例外；Main 随机生成，renderer API 客户端仅在内存持有，不得进入 Vite 变量、持久化存储或日志 |
 | SEC-003 | V1 不做 SQLite 整库加密 | Accepted for V1 | `requirements.md`、`architecture.md` | 密码使用 Argon2id、Token safeStorage；若要求磁盘泄露防护需新 ADR |

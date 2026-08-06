@@ -1,12 +1,12 @@
 # 数据库设计
 
-> 状态：V1 数据库契约已实现；第二版日报聚合、审计与统计数据模型待设计
+> 状态：V1 数据库契约已实现；第二版数据模型与迁移已设计、待用户确认、尚未实现
 > 更新日期：2026-08-07
 > 数据库：SQLite（SQLAlchemy 2.x + Alembic）
 
 ## 0. 当前实现状态
 
-> **CR-20260807-01 冲突**：现有 `uq_daily_reports_user_work_date`、三态日报表、无业务删除规则和周报直接外键到 `daily_reports` 均不能完整承载“同日多篇条目 + 日期级唯一正式日报 + 管理员撤销提交 + 草稿删除 + 统计”。本文件后续表结构仅描述当前 V1 实现，第二版不得直接改代码；需先确定新表/约束、审计、旧数据迁移和回滚方案。
+> **CR-20260807-01 事实边界**：第 1～7 节描述当前 V1 实现；第二版目标以第 8 节为准。新模型和迁移已设计但尚未落地，实施状态只看 `progress.md`。
 
 - 阶段 3（`DB-01`/`DB-02`/`DB-03`）已实现：异步 Engine/Session（`backend/app/db/engine.py`、`session.py`）、PRAGMA（`foreign_keys`/`journal_mode=WAL`/`synchronous=NORMAL`/`busy_timeout`）、8 张业务表的 SQLAlchemy Model（`backend/app/models/`）、Alembic 初始迁移（`backend/alembic/versions/3f6f955b87bb_initial_schema.py`）、启动时迁移前备份/轮转（`backend/app/db/migrate.py`）均已落地，代码与测试为准，未使用 `create_all()` 代替迁移。
 - 下列表、约束、索引、事务与备份**规则**仍是权威契约来源；实现细节（如具体文件路径）以代码为准，本节只记录"哪些已经真实存在"，不重复描述设计意图。
@@ -246,3 +246,65 @@ users 1──N export_jobs
 - 唯一约束、CHECK、所有权过滤、乐观锁、事务回滚、数据库繁忙映射和迁移失败停止启动均有测试。
 - migration、Model、Repository 字段命名与本文件一致；任何偏差先形成显式设计决策。
 - 数据阶段通过 Ruff、mypy、pytest 后更新 `task.md`/`progress.md`，并单独创建 Conventional Commit。
+
+## 8. 第二版数据库目标契约
+
+### 8.1 表和关系
+
+```text
+users 1 --- n daily_report_days 1 --- n daily_reports
+                         |
+                         +--- n weekly_report_sources n --- 1 weekly_reports
+
+users 1 --- n admin_audit_events (actor 可 SET NULL，目标仅保存逻辑标识)
+```
+
+#### `daily_report_days`
+
+- 字段：`id` ULID PK、`user_id` FK RESTRICT、`work_date`、`status(open/archived)`、`archive_snapshot_json` nullable、`source_count` default 0、`archived_by` nullable FK RESTRICT、`archived_at` nullable、`version` default 1、时间戳。
+- 唯一约束：`UNIQUE(user_id, work_date)`。
+- 状态 CHECK：open 时正式快照/归档人/归档时间为空且来源数为 0；archived 时均完整且来源数大于 0。
+- 索引：`(user_id, work_date DESC, id DESC)`、`(user_id, status, work_date DESC)`。
+
+#### `daily_reports`
+
+- 删除 V1 的 `user_id/work_date` 与 `uq_daily_reports_user_work_date`；新增 `day_id` FK `daily_report_days.id` RESTRICT 和全局唯一 `client_request_id VARCHAR(64)`。
+- 保留条目 ID、三态、模板版本/快照、内容、乐观锁和时间戳。draft 的提交/归档时间均空；submitted 只有提交时间；archived 两者均有。
+- 索引：`(day_id, status, submitted_at, id)`。所有权查询必须 join 日期表并约束其 `user_id`。
+
+#### `weekly_report_sources`
+
+- `daily_report_id` 改为 `daily_report_day_id`，FK 指向日期表，主键为 `(weekly_report_id, daily_report_day_id)`；历史值保持不变。
+
+#### `admin_audit_events`
+
+- 字段：`id`、受 CHECK 限制的 `action`、`actor_user_id` nullable/SET NULL、`actor_username_snapshot`、`target_type`、`target_id`、`target_owner_id` nullable、`reason`、`metadata_json`、`created_at`。
+- 目标不建外键，保证被撤销条目随后作为草稿删除时，审计仍可保留；`metadata_json` 只能写白名单元数据，禁止正文和模板快照。
+
+#### 其他表
+
+- `users` 增加 `must_change_password BOOLEAN NOT NULL DEFAULT 0`。
+- 重建 `user_settings` 删除 `auto_archive_on_submit`，保留 `timezone`。
+- `weekly_reports` 的三份 JSON 升级为 `schema_version=2`，按日期包含来源条目数组。
+
+### 8.2 正式快照和事务
+
+`daily_report_days.archive_snapshot_json` 为不可变版本化 JSON：`schema_version/work_date/entries[]`；每个 entry 保存来源 ID、提交时间、模板版本、完整模板快照和内容。来源按 `submitted_at ASC, id ASC` 固化，不做跨来源字段压平。
+
+日期级归档事务必须锁定/条件触碰日期行，复查 open、无 draft 且至少一个 submitted；同一事务构造快照、把全部 submitted 改为 archived、写同一归档时间并关闭日期。更新行数不一致立即回滚。创建、保存、删除、提交和 admin 撤销也必须先锁定同一日期行，以协调与归档的竞态。
+
+### 8.3 V1 升级映射
+
+1. 每个旧日报创建 `daily_report_days.id=old_daily_report.id`；旧 archived 变为 archived 日期和单来源正式快照，旧 draft/submitted 变为 open 日期。
+2. 重建条目表，`day_id=old.id`、`client_request_id=old.id`，其余字段和字节内容保留。
+3. 周报来源列改名且值不变；逐行把旧周报 `days[]` 包成 `schema_version=2` 的单 entry 结构。
+4. 已有用户的强制改密标志为 false；重建设置表丢弃自动归档字段。
+5. 验证日期数=旧日报数、条目数/周报来源数不变、归档日期数=旧 archived 数、`PRAGMA foreign_key_check` 无错误后提交。
+
+downgrade 只有在每日期最多一条且周报快照可无损还原时允许；出现同日多条则明确拒绝，以升级前自动备份恢复，不得合并或删除用户数据。
+
+### 8.4 第二版删除与统计
+
+- 只允许物理删除 draft；删除最后条目后可在同事务清理空 open 日期行。submitted/archived 和 archived 日期均不可删除。
+- 用户物理删除前检查日报日期/条目、周报、导出及其他业务记录；有任一业务记录返回冲突，只能停用。外键 RESTRICT 是并发最终防线。
+- 月历、统计、周报和导出均按 `user_id + 日期范围` 收敛查询；完成日期只认 archived 日期，日报篇数按 submitted/archived 来源条目计数。

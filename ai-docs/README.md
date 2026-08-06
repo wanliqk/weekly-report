@@ -54,4 +54,4 @@
 
 ## 5. 当前阶段
 
-截至 2026-08-07，V1 规划的全部 9 个阶段均已完成并通过相应审查，阶段 9 已交付真实 Playwright E2E 套件、PyInstaller sidecar 与 Windows 安装包，并在本机完成安装/升级/卸载验证。CR-20260807-01 第二版增量需求已进入 `REQ-10=REVIEW`：需求与验收已整理，但同日多条目、日期级汇总归档、双账号初始化、管理员撤销和个人统计尚未设计或实现。具体事实与下一步以 `progress.md` 和 `task.md` 为准。
+截至 2026-08-07，V1 规划的全部 9 个阶段均已完成并通过相应审查，阶段 9 已交付真实 Playwright E2E 套件、PyInstaller sidecar 与 Windows 安装包，并在本机完成安装/升级/卸载验证。CR-20260807-01 当前为 `REQ-10=DONE`、`DESIGN-10=REVIEW`：第二版数据/API/权限/迁移和 Electron 交互方案已写完但尚未实现，等待用户确认后再启动 `BE-10A`。具体事实以 `progress.md`、任务依赖以 `task.md` 为准。

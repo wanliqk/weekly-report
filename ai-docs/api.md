@@ -1,12 +1,12 @@
 # API 接口规范
 
-> 状态：V1 API 已实现；第二版新增/变更契约待方案设计
+> 状态：V1 API 已实现；第二版 API 契约已设计、待用户确认、尚未实现
 > 更新日期：2026-08-07
 > 基础路径：`/api/v1`
 
 ## 0. 契约状态与当前实现
 
-> **CR-20260807-01 冲突**：第 4 节 bootstrap admin、第 5 节无删除用户、第 7 节六个单篇日报接口、第 9 节周报来源及第 10 节自动归档设置均为当前 V1 契约，不满足第二版目标。第二版需要日历聚合、草稿删除、管理员撤销、日期级归档、双账号初始化和统计接口；具体路径、请求、错误码与权限尚未评审，禁止创建临时接口。
+> **CR-20260807-01 事实边界**：第 1～12 节仍描述当前 V1 实现；第二版目标接口见第 13 节。目标契约待用户确认且尚未实现，联调只以当前代码和 `progress.md` 为准。
 
 本文件定义 V1 目标接口。接口出现在表格中不代表路由已经存在；联调和验收必须以当前代码、自动化测试与 `progress.md` 为准。
 
@@ -276,3 +276,68 @@ V1 不定义任何企业微信同步接口，点击占位入口只在前端显�
 - V1 内新增响应字段应保持向后兼容；删除/改名必须经过版本化评审。
 - Agent 不得自行创建“临时接口”；联调缺口记录到 `task.md`，由技术负责人定契约。
 - 每组接口完成后必须同时更新实现状态、契约测试和 `progress.md`；阶段质量门禁通过后创建独立 Conventional Commit，未获用户授权不得推送。
+
+## 13. 第二版 API 目标契约
+
+### 13.1 初始化、认证和用户
+
+| 方法 | 路径 | 权限 | 第二版语义 |
+|---|---|---|---|
+| GET | `/system/bootstrap-status` | 匿名 | 保持不变 |
+| POST | `/system/bootstrap` | 仅空系统 | 输入普通用户信息，原子创建普通用户和固定 admin |
+| GET | `/auth/me` | 登录 | 增加 `must_change_password` |
+| PUT | `/auth/password` | 登录 | 改密后清除强制标志并使旧 Token 失效 |
+| DELETE | `/users/{user_id}` | admin | `{confirm_username,reason}`；仅无业务账号可删 |
+
+移除 `/system/bootstrap-admin`。除 `/auth/me`、`PUT /auth/password`、`POST /auth/logout` 外，`must_change_password=true` 调用业务接口返回 `40303`。管理员重置密码后目标用户也进入强制改密状态。
+
+### 13.2 日报条目与日期
+
+| 方法 | 路径 | 权限 | 第二版语义 |
+|---|---|---|---|
+| GET | `/daily-reports` | 本人 | 按日期/状态分页列来源条目 |
+| POST | `/daily-reports` | 本人 | `{work_date,client_request_id}` 幂等创建草稿 |
+| GET | `/daily-reports/{report_id}` | 本人 | 条目和最近撤销信息 |
+| PATCH | `/daily-reports/{report_id}` | 本人 | `{version,content}` 保存草稿 |
+| DELETE | `/daily-reports/{report_id}` | 本人 | `{version}` 删除草稿 |
+| POST | `/daily-reports/{report_id}/submit` | 本人 | `{version}` 提交，不自动归档 |
+| GET | `/daily-report-days?month=YYYY-MM` | 本人 | 月历摘要 |
+| GET | `/daily-report-days/{work_date}` | 本人 | 日期计数、条目或正式快照 |
+| POST | `/daily-report-days/{work_date}/archive` | 本人 | `{confirm_archive:true}` 日期级归档 |
+
+删除单篇 `/daily-reports/{id}/archive`。月历摘要返回草稿/已提交/归档/总数、能否创建/归档及禁用原因；日期已归档时重复归档幂等返回已有正式结果，不改写归档时间。
+
+### 13.3 管理员日报与审计
+
+| 方法 | 路径 | 权限 | 第二版语义 |
+|---|---|---|---|
+| GET | `/admin/daily-reports/submitted` | admin | 待归档条目元数据，不返回正文/模板快照 |
+| POST | `/admin/daily-reports/{report_id}/revoke-submission` | admin | `{version,reason}` 撤销为草稿并审计 |
+| GET | `/admin/audit-events` | admin | 按动作/日期分页查白名单审计 |
+
+撤销只允许 open 日期下 submitted 条目；成功后清空提交时间、保留正文、版本加一，所有者详情返回最近撤销原因和时间。
+
+### 13.4 统计、设置、周报和导出
+
+| 方法 | 路径 | 权限 | 第二版语义 |
+|---|---|---|---|
+| GET | `/statistics/monthly?month=YYYY-MM` | 本人 | 月历、完成率、日报/周报篇数、当前连续天数 |
+| GET | `/settings/me` | 本人 | 固定时区/能力；删除自动归档字段 |
+| PATCH | `/settings/me` | 本人 | 第二版移除 |
+| GET/POST/PUT | `/weekly-reports...` | 本人 | 路径保持，来源改为日期级正式日报 |
+| POST | `/exports` | 本人 | 显式选择改为 `daily_report_day_ids`；筛选只选 archived 日期 |
+
+统计当前月分母截至 Asia/Shanghai 今天，历史月为整月，未来月分母 0 且完成率 null；完成日期只认 archived 日期，日报篇数为 submitted/archived 来源条目，周报按 `week_start` 月份，连续天数按今天/昨天规则。
+
+### 13.5 新错误码和幂等
+
+| code | HTTP | 含义 |
+|---:|---:|---|
+| 40303 | 403 | 必须先修改临时密码 |
+| 40905 | 409 | 日期已归档 |
+| 40906 | 409 | 日期仍有草稿 |
+| 40907 | 409 | 没有可归档条目 |
+| 40908 | 409 | 创建幂等键冲突 |
+| 40910 | 409 | 用户已有业务记录不能删除 |
+
+创建请求的 `client_request_id` 由 renderer 生成并在同一意图重试时复用；同键返回既有条目，不同键可创建同日新条目。现有 404 所有权隐藏、40902 状态冲突、40904 乐观锁和 50301 数据库繁忙继续使用。
