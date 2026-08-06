@@ -4,6 +4,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.backup_registry import BackupRegistry
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.db.session import get_db_session
@@ -21,6 +22,11 @@ def get_jwt_secret(request: Request) -> str:
 def get_app_settings(request: Request) -> Settings:
     settings: Settings = request.app.state.settings
     return settings
+
+
+def get_backup_registry(request: Request) -> BackupRegistry:
+    registry: BackupRegistry = request.app.state.backup_registry
+    return registry
 
 
 async def get_current_user(

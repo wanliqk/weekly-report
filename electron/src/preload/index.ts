@@ -3,6 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 
 import {
   IPC_CHANNELS,
+  type BackupSaveResult,
   type ExportSaveResult,
   type RuntimeApiConfig,
   type SecureTokenSnapshot,
@@ -38,6 +39,10 @@ const runtimeBridge = Object.freeze({
   exportFile: Object.freeze({
     save: (suggestedName: string, data: Uint8Array): Promise<ExportSaveResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXPORT_SAVE_FILE, { suggestedName, data })
+  }),
+  backupFile: Object.freeze({
+    save: (suggestedName: string, data: Uint8Array): Promise<BackupSaveResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BACKUP_SAVE_FILE, { suggestedName, data })
   })
 })
 

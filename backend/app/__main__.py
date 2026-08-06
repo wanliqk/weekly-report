@@ -11,6 +11,7 @@ from app.db.engine import create_engine as create_db_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
 from app.main import create_app
+from app.services.backup import cleanup_stale_manual_backups
 from app.services.export import ExportService
 
 
@@ -48,6 +49,7 @@ def main() -> None:
     settings = get_settings()
     ensure_runtime_directories(settings)
     run_startup_migrations(settings)
+    cleanup_stale_manual_backups(settings)
     asyncio.run(_cleanup_expired_exports(settings))
     application = create_app(settings)
     config = uvicorn.Config(

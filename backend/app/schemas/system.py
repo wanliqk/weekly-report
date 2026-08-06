@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.user import UserData
@@ -31,3 +33,9 @@ class BootstrapAdminRequest(BaseModel):
 
 class BootstrapAdminData(UserData):
     pass
+
+
+class BackupCreateData(BaseModel):
+    id: str
+    file_name: str
+    expires_at: datetime

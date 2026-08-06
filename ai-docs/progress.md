@@ -6,14 +6,15 @@
 
 ## 1. 总体状态
 
-- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存、阶段 7 周报闭环。
-- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）、`346b0ea`（周报闭环）。
-- 当前所在阶段：阶段 7 周报闭环已完成；阶段 8 设置、占位与备份界面收口尚未开始。
+- 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存、阶段 7 周报闭环、阶段 8 设置能力与受控备份。
+- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）、`346b0ea`（周报闭环）、`2584133`（关闭阶段 7 并回填提交号）；阶段 8（设置能力与受控备份）提交号待创建后回填。
+- 当前所在阶段：阶段 8 设置能力与受控备份已完成；阶段 9 质量与发布尚未开始。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
 - 阶段 4 实现状态：六项任务均已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
 - 阶段 5 实现状态：七项任务均已完成实现、自测、质量门禁、独立审查与提交 `1d965fe`，统一为 `DONE`。
 - 阶段 6 实现状态：五项任务（`EXPORT-01`/`EXPORT-02`/`DESK-04`/`FE-05`/`QA-06`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查）与提交 `d6ab86e`，统一为 `DONE`。
 - 阶段 7 实现状态：四项任务（`WEEKLY-01`/`WEEKLY-02`/`FE-06`/`QA-07`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
+- 阶段 8 实现状态：三项任务（`BACKUP-01`/`FE-07`/`QA-08`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
 - 当前阻塞：无业务/技术决策阻塞。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 
@@ -151,6 +152,20 @@
 - `electron/src/renderer/src/utils/weekly-report.ts`：`mondayOfWeek`/`weekEndFor` 使用 UTC 锚定的纯日期算术（不做真实时区换算，只做日历计算），避免本地时区在日期边界产生偏差；已用跨年周和闰周输入验证。
 - 真实 Electron 环境联调发现并修复一处显示缺陷：周报生成时间/更新时间最初直接展示服务端 UTC ISO 字符串（含 `+00:00`），未按 `Asia/Shanghai` 格式化；已改为复用日报页面已有的 `formatShanghaiTime`。
 
+### 手动整库备份后端（阶段 8，BACKUP-01）
+
+- `backend/app/core/config.py` 新增 `Settings.manual_backup_temp_dir`（默认 `.local-data/temp/manual-backups`，与迁移前自动备份的 `backup_dir` 是不同目录），随 `data_dir`/`log_dir`/`backup_dir`/`export_temp_dir` 一起被路径解析校验和 `ensure_runtime_directories` 创建。
+- `backend/app/core/backup_registry.py::BackupRegistry`：进程内 `dict[str, BackupRecord]`，按 `database.md` §6 明确要求"短期下载文件不登记业务表，使用进程内随机 ID 映射"；作为 `app.state.backup_registry` 单例随 `create_app()` 创建，通过 `get_backup_registry` 依赖注入到路由。
+- `backend/app/services/backup.py::BackupService`：`create()` 在 `asyncio.to_thread` 中执行 `PRAGMA wal_checkpoint(TRUNCATE)` 后用 `sqlite3.Connection.backup()` 生成一致性快照（与 `db/migrate.py::_backup_database` 同一序列，按需触发而非仅迁移前）；`sqlite3.Error` 转换为不泄露细节的 `BackupCreationFailedError`（`50001`），并会清理已创建但未写完的目标文件，避免中途失败留下残留（独立审查发现的真实缺陷，已修复并补充回归测试）。`get_download()` 校验 `owner_id` 与当前 admin 一致（不一致或不存在统一 `40401`，不用 `40301`/`40302` 区分以避免暴露备份是否存在）、15 分钟懒过期（过期即删除文件并移出注册表）、路径解析后确实落在 `manual_backup_temp_dir` 内。`create()` 每次调用都会先清理注册表中已过期的条目。
+- `cleanup_stale_manual_backups()`：应用启动时对 `manual_backup_temp_dir` 做目录级清理——由于注册表纯内存、进程重启即清空，任何仍在该目录下的 `*.db` 文件必然是上一次进程未走到 15 分钟过期就退出（如崩溃）留下的残留，可无条件删除；已接入 `backend/app/__main__.py::main()`，在 `run_startup_migrations` 之后执行。
+- `backend/app/api/v1/system.py` 新增 `POST /api/v1/system/backups`、`GET /api/v1/system/backups/{id}/file`，均要求 `get_current_admin`；创建响应只含 `id`/`file_name`/`expires_at`，不返回内部路径；下载响应 `media_type="application/vnd.sqlite3"` 并设置安全 `Content-Disposition` 文件名。
+
+### 设置与企业微信占位/整库备份界面（阶段 8，FE-07）
+
+- `electron/src/renderer/src/views/SettingsView.vue`（新路由 `/settings`，`AppLayout.vue` 导航新增"个人设置"入口，所有登录用户可见）：三张卡片——自动归档开关（复用既有 `/settings/me` API，切换后离开页面再返回会重新拉取并保持已保存状态）、企业微信占位（按钮点击只触发本地 `ElMessage`提示"企业微信同步功能暂未开放"，不调用任何企业微信相关接口或 `shell.openExternal`）、`v-if="authStore.isAdmin"` 的管理员整库备份区（`ElMessageBox.confirm` 醒目二次确认，文案明确"备份文件包含全体用户的账号、日报和周报数据"）。管理员分支的显示只是 UX 优化，服务端 `get_current_admin` 独立强制权限。
+- `electron/src/renderer/src/api/system.ts`：`createManualBackup()`/`downloadManualBackupFile()`，后者复用既有 `requestBinary()` 从 `Content-Disposition` 解析文件名。
+- `electron/src/main/backup/file-saver.ts::BackupFileSaver`：结构上镜像阶段 6 已审查的 `ExportFileSaver`，但保持独立的类和白名单（文件名正则要求 `.db` 后缀、单独的 100MB 字节上限），不与导出共享同一校验器，避免任一方放宽白名单时意外影响另一方。`electron/src/main/ipc/register-runtime-bridge.ts` 新增 `backup:save-file` IPC channel，与既有 channel 一样先校验 `event.senderFrame === window.webContents.mainFrame`；`electron/src/preload/index.ts` 暴露 `window.runtimeBridge.backupFile.save(suggestedName, data)`。实际写入路径始终取自系统"另存为"对话框自身返回值。
+
 ### 已记录的阶段验证
 
 工程基线（阶段 1）交付记录（历史）：`npm ci`、lint、typecheck、`npm test`（1 项前端测试）、`npm run build`、`uv sync --frozen`、`uv run ruff/mypy/pytest`（3 项后端测试）均已通过。
@@ -219,15 +234,27 @@
 - 独立安全专项审查（`security-review` 流程）：逐项核查所有权隔离（6 个接口的每条查询）、`replace_sources` 缺 owner 过滤但不可达越权路径、乐观锁 WHERE 条件是否同时锁定 `user_id`、`confirm_overwrite` 服务端强制校验、SQL 注入、XSS，未发现可利用漏洞。
 - 主 Agent 自审：无跨层访问、无临时接口、日志/异常未见密码/JWT/密钥/完整正文；独立审查完成，阶段 7 无未解决 P0/P1。
 
+阶段 8 设置能力与受控备份当前工作树实际执行并通过：
+
+- `uv run --directory backend ruff check .`、`ruff format --check .`：0 error，100 个文件格式合规。
+- `uv run --directory backend mypy`（strict，100 个源文件）：0 错误。
+- `uv run --directory backend pytest`：**184 项测试全部通过**（阶段 7 遗留 169 项 + 本阶段新增 15 项：`test_backup_service.py` 9 项——生成有效 SQLite 快照、跨管理员下载被拒、懒过期删除、未知/越权 ID 拒绝、路径边界拒绝、创建时清理已过期条目、目的目录缺失的类型化失败、备份复制中途失败时清理残留文件、启动残留清理；`test_system_backup_api.py` 5 项——创建并下载、响应不含内部路径、非管理员 403、跨管理员 404、匿名 401；另有 1 项 MIME 常量断言）。
+- `npm run lint`、`npm run typecheck`：通过。
+- `npm test`：**18 个文件 107 项测试全部通过**（阶段 7 遗留 91 项 + 本阶段新增 16 项：`BackupFileSaver` 白名单/大小校验 12 项、`register-runtime-bridge` 新增 `backup:save-file` 受信任帧与 payload 校验 4 项）。
+- `npm run test:integration --workspace electron`：真实后端进程 **2 项通过**，阶段 8 未破坏动态端口和退出清理链路。
+- `npm run build`：main/preload/renderer 生产构建通过；仅有 `@vueuse/core` 第三方 PURE 注释位置提示（ISS-007 继续跟踪）。
+- `git diff --check`：通过（仅常规 LF→CRLF 提示，无实际空白错误）。
+- 真实环境手动验证：由于本阶段无法用鼠标/键盘人工操作 GUI，改用 Playwright `_electron` 驱动 `npm run build` 产出的真实 Electron 二进制（`node_modules/electron/dist/electron.exe`，从 `electron/` 目录以 `electron .` 方式启动，复现 `npm run dev` 的开发期路径解析），并通过环境变量将 `WEEKLY_REPORT_DATA_DIR`/`WEEKLY_REPORT_MANUAL_BACKUP_TEMP_DIR` 等指向隔离的临时目录（全程未读写仓库 `.local-data/`）。完整走通：首次初始化→登录→`/settings` 渲染三张卡片→切换自动归档开关后导航离开再返回，服务端 `GET /settings/me` 确认状态已持久化→点击企业微信占位按钮，全程网络请求日志确认零非回环（127.0.0.1 以外）请求，只弹出本地提示→点击整库备份触发醒目敏感性确认对话框→确认后调用真实 `POST /system/backups` + `GET /system/backups/{id}/file`，把下载字节交给（桩接管原生对话框返回固定路径的）`backup:save-file` IPC，磁盘上写入的文件已用 Python `sqlite3` 打开校验并核对表结构、且头 16 字节匹配标准 SQLite 文件头→再次创建备份并让保存对话框返回"已取消"，确认前端展示"已取消保存"→新建非管理员账号并以其身份登录，确认 `/settings` 页不出现"整库手动备份"区块且导航不出现"用户管理"。
+- 独立安全专项审查（沙盒 Agent 全文审查 + 实际重跑质量门禁，不采信先前结果）：逐项核查管理员权限（`get_current_admin` 与既有末位管理员保护同一模式）、跨管理员越权隔离（40401 而非 40301/40302，避免暴露备份是否存在，与本文档其他资源的所有权隔离约定一致）、路径穿越（`backup_id` 从不参与文件路径拼接以外的用途，`_resolve_within_backup_dir` 提供纵深防御）、信息泄露（响应/日志均未出现内部路径、密钥或正文）、企业微信零外部请求（全文 grep 未发现任何网络请求或 `shell.openExternal` 路径）、Electron IPC 受信任帧校验和白名单契约。发现并修复一项真实问题：`BackupService.create()` 在 `sqlite3.Connection.backup()` 中途失败（如磁盘写满）时未清理已创建的目标文件，已加 `unlink(missing_ok=True)` 清理并补充回归测试（`test_create_removes_a_partially_written_file_when_the_backup_copy_fails`）；除此之外未发现可利用的 P0/P1。
+- 主 Agent 自审：无跨层访问（手动备份按 `database.md` §6 设计有意跳过 Repository 层，Router 本身不含原始 SQL 或直接文件 I/O）、无临时接口、日志/异常未见密码/JWT/密钥/完整正文；独立审查完成，阶段 8 无未解决 P0/P1。
+
 ## 3. 尚未实现
 
 以下均为设计目标，当前不得标记为完成：
 
 - 开发/生产 sidecar 路径解析中，生产分支的 PyInstaller `onedir` 产物本身（`PKG-01`，阶段 9）——`build/sidecar/` 仍是空占位目录。
-- 个人设置/企业微信占位/手动备份 UI 属于阶段 8 `FE-07`，尚未实现。
-- Playwright E2E、PyInstaller 和 Windows 安装/升级验证。
+- Playwright E2E、PyInstaller 和 Windows 安装/升级验证（阶段 9 `QA-09`/`PKG-01`/`PKG-02`/`REL-01`）。
 - Windows Job Object 级别的孤儿进程彻底防护（ISS-010，非阻塞）。
-- admin 手动整库备份 API（`BACKUP-01`，阶段 8）——DB-03 的自动迁移前备份机制与之相关但不是同一功能，手动备份走独立的短期下载文件流程。
 
 ## 4. 当前运行方式
 
@@ -283,3 +310,10 @@
 3. ✅ 周报列表、周范围选择与逐日可用性展示、生成、编辑保存、来源跳转到日报详情、重新生成醒目覆盖确认已实现。
 4. ✅ 后端 169 项、前端 91 项、真实 sidecar 集成 2 项及生产构建全部通过；真实 `npm run dev` 环境完成含生成/编辑/来源跳转/重新生成的全链路手动验证，过程中发现并修复时间显示未转换 `Asia/Shanghai` 的缺陷。
 5. ✅ 独立审查（含专项安全审查）完成，逐项核查所有权隔离、`replace_sources` 可达性、乐观锁、确认绕过、SQL 注入与 XSS，均未发现可利用漏洞；无未解决 P0/P1。实现提交 `346b0ea` 已创建，阶段 7 正式关闭。
+
+阶段 8 三项任务已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`：
+
+1. ✅ admin 手动整库备份：checkpoint（`PRAGMA wal_checkpoint(TRUNCATE)`）+ `sqlite3.Connection.backup()` 一致性快照、进程内随机 ID 注册表（不落业务表）、15 分钟懒过期加启动残留清理、仅创建者本人可下载（跨管理员 40401）已实现。
+2. ✅ `/settings` 页面：自动归档开关（持久化可复验）、企业微信占位（零外部请求，仅本地提示）、管理员整库备份创建与保存（醒目敏感性确认 + Electron 原生保存对话框白名单）已实现。
+3. ✅ 后端 184 项、前端 107 项、真实 sidecar 集成 2 项及生产构建全部通过；用 Playwright `_electron` 驱动真实构建产物（隔离临时数据目录）完成含权限隔离、持久化、零外部请求和备份文件有效性校验的全链路验证。
+4. ✅ 独立审查（含专项安全审查）完成，发现并修复备份复制中途失败遗留残留文件一项真实问题，已补充回归测试；无未解决 P0/P1。实现提交待创建，阶段 8 正式关闭。

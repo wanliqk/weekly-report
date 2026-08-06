@@ -19,6 +19,7 @@ vi.mock('electron', () => ({
 }))
 
 import { IPC_CHANNELS, type SidecarStatusSnapshot } from '../../../shared/contracts'
+import type { BackupFileSaver } from '../../backup/file-saver'
 import type { ExportFileSaver } from '../../export/file-saver'
 import type { SidecarManager } from '../../sidecar/manager'
 import type { SecureTokenStore } from '../../security/secure-token-store'
@@ -44,16 +45,22 @@ class FakeExportFileSaver {
   save = vi.fn().mockResolvedValue({ status: 'saved' })
 }
 
+class FakeBackupFileSaver {
+  save = vi.fn().mockResolvedValue({ status: 'saved' })
+}
+
 function register(
   manager: FakeManager,
   window: BrowserWindow,
-  exportFileSaver: FakeExportFileSaver = new FakeExportFileSaver()
+  exportFileSaver: FakeExportFileSaver = new FakeExportFileSaver(),
+  backupFileSaver: FakeBackupFileSaver = new FakeBackupFileSaver()
 ): () => void {
   return registerRuntimeBridge(
     manager as unknown as SidecarManager,
     window,
     new FakeTokenStore() as unknown as SecureTokenStore,
-    exportFileSaver as unknown as ExportFileSaver
+    exportFileSaver as unknown as ExportFileSaver,
+    backupFileSaver as unknown as BackupFileSaver
   )
 }
 
@@ -133,7 +140,8 @@ describe('registerRuntimeBridge', () => {
       manager as unknown as SidecarManager,
       window,
       tokenStore as unknown as SecureTokenStore,
-      new FakeExportFileSaver() as unknown as ExportFileSaver
+      new FakeExportFileSaver() as unknown as ExportFileSaver,
+      new FakeBackupFileSaver() as unknown as BackupFileSaver
     )
 
     const handler = handlers.get(IPC_CHANNELS.TOKEN_SET)
@@ -185,5 +193,65 @@ describe('registerRuntimeBridge', () => {
 
     expect(exportFileSaver.save).toHaveBeenCalledWith('report.xlsx', data)
     expect(result).toEqual({ status: 'saved' })
+  })
+
+  it('rejects backup save-file calls from an untrusted frame', async () => {
+    const mainFrame = {}
+    const { window } = createWindow(mainFrame)
+    const manager = new FakeManager()
+    const backupFileSaver = new FakeBackupFileSaver()
+    register(manager, window, new FakeExportFileSaver(), backupFileSaver)
+
+    const handler = handlers.get(IPC_CHANNELS.BACKUP_SAVE_FILE)
+    await expect(
+      handler?.({ senderFrame: {} } as IpcMainInvokeEvent, { suggestedName: 'a.db', data: {} })
+    ).rejects.toThrow()
+    expect(backupFileSaver.save).not.toHaveBeenCalled()
+  })
+
+  it('rejects backup save-file calls whose payload is not an object', async () => {
+    const mainFrame = {}
+    const { window } = createWindow(mainFrame)
+    const manager = new FakeManager()
+    const backupFileSaver = new FakeBackupFileSaver()
+    register(manager, window, new FakeExportFileSaver(), backupFileSaver)
+
+    const handler = handlers.get(IPC_CHANNELS.BACKUP_SAVE_FILE)
+    await expect(
+      handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, 'not-an-object')
+    ).rejects.toThrow()
+    expect(backupFileSaver.save).not.toHaveBeenCalled()
+  })
+
+  it('delegates a well-formed backup save-file call to the saver', async () => {
+    const mainFrame = {}
+    const { window } = createWindow(mainFrame)
+    const manager = new FakeManager()
+    const backupFileSaver = new FakeBackupFileSaver()
+    register(manager, window, new FakeExportFileSaver(), backupFileSaver)
+
+    const handler = handlers.get(IPC_CHANNELS.BACKUP_SAVE_FILE)
+    const data = new Uint8Array([1, 2, 3])
+    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, {
+      suggestedName: 'weekly-report-backup-20260806-120000.db',
+      data
+    })
+
+    expect(backupFileSaver.save).toHaveBeenCalledWith(
+      'weekly-report-backup-20260806-120000.db',
+      data
+    )
+    expect(result).toEqual({ status: 'saved' })
+  })
+
+  it('the disposer also removes the backup save-file handler', () => {
+    const mainFrame = {}
+    const { window } = createWindow(mainFrame)
+    const manager = new FakeManager()
+    const dispose = register(manager, window)
+
+    dispose()
+
+    expect(handlers.has(IPC_CHANNELS.BACKUP_SAVE_FILE)).toBe(false)
   })
 })

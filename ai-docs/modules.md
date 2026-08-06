@@ -24,9 +24,9 @@ weekly-report/
 
 ### 1.1 当前工程状态（2026-08-06）
 
-- `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局、用户管理、模板管理、日报工作台/动态表单页面、导出保存对话框白名单和周报列表/编辑/来源页面；设置页面尚未实现。
-- `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证、用户管理、模板、设置、日报、导出和周报的 API/Service/Repository 实现。
-- 阶段 4、阶段 5、阶段 6、阶段 7 均已完成并通过独立审查（阶段 6、阶段 7 含专项安全审查）；手动备份和设置/企业微信占位 UI 待阶段 8。
+- `electron/` 已有 main/preload/renderer、安全 Token 桥接、鉴权 Store/Router/API client、初始化/登录/应用布局、用户管理、模板管理、日报工作台/动态表单页面、导出保存对话框白名单、周报列表/编辑/来源页面和设置页面（自动归档、企业微信占位、管理员整库备份保存对话框白名单）。
+- `backend/` 已有 FastAPI 应用工厂、数据库/迁移、统一响应与异常、认证依赖，以及初始化、认证、用户管理、模板、设置、日报、导出、周报和手动整库备份的 API/Service 实现（手动备份因不落业务表，无独立 Repository 层，属 `database.md` §6 记录的既定例外）。
+- 阶段 4、阶段 5、阶段 6、阶段 7、阶段 8 均已完成并通过独立审查（阶段 6、阶段 7、阶段 8 含专项安全审查）。
 - `build/sidecar/` 仍为占位，尚未生成 PyInstaller 产物。
 
 ## 2. 目标业务与平台模块
@@ -57,7 +57,7 @@ weekly-report/
 |---|---|---|
 | M01 Desktop Bootstrap | 部分完成 | 已有单实例、安全窗口、sidecar 启停、动态端口、健康等待、退出清理（`taskkill /t /f`）、保存对话框白名单（`ExportFileSaver`，阶段 6 `DESK-04`）；缺生产运行期目录的实际落地验证（依赖阶段 9 `PKG-01` 产出真实二进制） |
 | M02 Runtime Bridge | 部分完成 | preload 已暴露受限 `runtimeBridge.{sidecar,api,token,exportFile}`；Token 由 Main `safeStorage` 加密持久化且不可用时不明文回退；导出下载保存白名单已实现（阶段 6 `DESK-04`），写入路径始终取自系统对话框返回值 |
-| M03 Persistence | 部分完成 | 已有异步 Engine/Session、PRAGMA（WAL/FK/busy_timeout/synchronous）、8 张表 ORM Model、Alembic 初始迁移、迁移前备份+轮转+路径边界校验；Repository 层已有首个落地（`user`/`user_settings`/`template`，随 `AUTH-01`）；缺其余模块 Repository 与手动整库备份 API（`BACKUP-01`，阶段 8） |
+| M03 Persistence | DONE | 已有异步 Engine/Session、PRAGMA（WAL/FK/busy_timeout/synchronous）、8 张表 ORM Model、Alembic 初始迁移、迁移前备份+轮转+路径边界校验；各业务模块 Repository 均已落地；手动整库备份（`BACKUP-01`，阶段 8）已实现，按设计不落业务表，改用进程内 `BackupRegistry` + 启动清理 |
 | M04 API Foundation | 部分完成 | 已有应用工厂、精确 CORS/Host、请求 ID、runtime secret、JWT/当前用户/admin 依赖、达标 `/health`、统一响应与异常；其余具体业务错误码随对应模块实现 |
 | M05 Auth | DONE | 初始化、24h JWT、持久化签名密钥、`token_version`、登录、当前用户、改密和退出均已实现、通过门禁和独立审查 |
 | M06 User Admin | DONE | 用户分页查询、创建、角色/状态修改、重置密码和末位有效管理员保护已实现、通过门禁和独立审查 |
@@ -70,7 +70,7 @@ weekly-report/
 | M13 Daily UI | DONE | 日报列表/筛选/创建、动态表单、草稿、提交/归档确认、冲突反馈及勾选/筛选导出交互已实现并通过独立审查 |
 | M14 Template UI | DONE | 模板字段编辑/排序/启停、类型组件和版本历史已实现并通过独立审查 |
 | M15 Weekly UI | DONE | 周范围选择、逐日可用性、生成、编辑保存、来源跳转和重新生成醒目确认已实现并通过独立审查 |
-| M16 Admin/Settings UI | 部分完成 | 用户管理已完成并通过独立审查；个人设置、企业微信占位和手动备份入口待阶段 8 `FE-07` |
+| M16 Admin/Settings UI | DONE | 用户管理、个人设置（自动归档开关、固定时区展示）、企业微信占位（零外部请求本地提示）和管理员整库备份创建/保存入口均已实现并通过独立审查（含专项安全审查） |
 | M17 Packaging/Release | 占位 | 有 electron-builder 配置和 sidecar 目录占位；无 PyInstaller/安装升级验证闭环 |
 
 ## 3. 后端模块内部契约

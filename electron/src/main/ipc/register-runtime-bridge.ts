@@ -4,11 +4,13 @@ import { ipcMain } from 'electron'
 import {
   IPC_CHANNELS,
   RUNTIME_SECRET_HEADER,
+  type BackupSaveResult,
   type ExportSaveResult,
   type RuntimeApiConfig,
   type SecureTokenSnapshot,
   type SidecarStatusSnapshot
 } from '../../shared/contracts'
+import type { BackupFileSaver } from '../backup/file-saver'
 import type { ExportFileSaver } from '../export/file-saver'
 import type { SecureTokenStore } from '../security/secure-token-store'
 import type { SidecarManager } from '../sidecar/manager'
@@ -28,7 +30,8 @@ export function registerRuntimeBridge(
   manager: SidecarManager,
   window: BrowserWindow,
   tokenStore: SecureTokenStore,
-  exportFileSaver: ExportFileSaver
+  exportFileSaver: ExportFileSaver,
+  backupFileSaver: BackupFileSaver
 ): () => void {
   ipcMain.handle(IPC_CHANNELS.SIDECAR_GET_STATUS, (event): SidecarStatusSnapshot => {
     assertTrustedSender(event, window)
@@ -86,6 +89,17 @@ export function registerRuntimeBridge(
     }
   )
 
+  ipcMain.handle(
+    IPC_CHANNELS.BACKUP_SAVE_FILE,
+    async (event, payload: unknown): Promise<BackupSaveResult> => {
+      assertTrustedSender(event, window)
+      if (!isRecord(payload)) {
+        throw new Error('rejected invalid backup save payload')
+      }
+      return backupFileSaver.save(payload.suggestedName, payload.data)
+    }
+  )
+
   const forwardStateChange = (snapshot: SidecarStatusSnapshot): void => {
     if (window.isDestroyed()) {
       return
@@ -102,6 +116,7 @@ export function registerRuntimeBridge(
     ipcMain.removeHandler(IPC_CHANNELS.TOKEN_SET)
     ipcMain.removeHandler(IPC_CHANNELS.TOKEN_CLEAR)
     ipcMain.removeHandler(IPC_CHANNELS.EXPORT_SAVE_FILE)
+    ipcMain.removeHandler(IPC_CHANNELS.BACKUP_SAVE_FILE)
     manager.off('state-changed', forwardStateChange)
   }
 }

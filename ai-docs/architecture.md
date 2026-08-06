@@ -33,13 +33,14 @@ Electron Main
 
 ### 1.1 当前实现快照（2026-08-06）
 
-已完成阶段 1 工程基线（提交 `3a9fdbc`）、阶段 2 Desktop Bootstrap（提交 `7386cae`）、阶段 3 数据基础与 API Foundation（提交 `8480515`）、阶段 4 认证与用户管理（提交 `1a50e75`）、阶段 5 模板、设置与日报闭环（提交 `1d965fe`）、阶段 6 查询导出与桌面保存（提交 `d6ab86e`）和阶段 7 周报闭环（独立审查完成，含专项安全审查）。手动备份、设置/企业微信占位 UI 和发布链路尚未实现：
+已完成阶段 1 工程基线（提交 `3a9fdbc`）、阶段 2 Desktop Bootstrap（提交 `7386cae`）、阶段 3 数据基础与 API Foundation（提交 `8480515`）、阶段 4 认证与用户管理（提交 `1a50e75`）、阶段 5 模板、设置与日报闭环（提交 `1d965fe`）、阶段 6 查询导出与桌面保存（提交 `d6ab86e`）、阶段 7 周报闭环（提交 `346b0ea`）和阶段 8 设置能力与受控备份（独立审查完成，含专项安全审查）。发布链路（PyInstaller/安装包）尚未实现：
 
 - 根目录已建立 npm workspace；`npm run dev` 现在只启动 electron-vite，Electron Main 在 `whenReady()` 中自行拉起并管理 FastAPI sidecar（开发模式直接 spawn `backend/.venv/Scripts/python.exe -m app`，不经过 `uv run`）。
 - Electron 已实现单实例、窗口安全选项、禁止新窗口和跨地址导航；已有 `electron/src/main/sidecar/` 子进程管理模块（动态端口获取、runtime secret 生成、健康检查轮询、Windows 下 `taskkill /pid /t /f` 进程树终止）和 `electron/src/main/ipc/register-runtime-bridge.ts`（5 个受信任 frame 校验的 IPC channel，含阶段 6 新增的导出保存）。
 - Preload 已有受限的 `window.runtimeBridge.{sidecar,api,token,exportFile}` 命名空间，未暴露通用 `ipcRenderer`；Token 由 Main 的 `safeStorage` 加密持久化，不可用时显式失败且无明文回退。文件保存对话框已在阶段 6 `DESK-04` 实现：`ExportFileSaver` 对文件名和字节内容双重校验后才调用系统级“另存为”，实际写入路径始终取自该对话框自身返回值，renderer 提供的名称只影响默认建议名。
 - FastAPI 已建立应用工厂、精确 CORS/Trusted Host（含 `expose_headers=["Content-Disposition"]`）、请求 ID 中间件、`RuntimeSecretMiddleware`（除 `/health`/`/docs`/`/openapi.json` 外强制校验 `X-Runtime-Secret`）、达到目标契约的 `GET /health`（含 `version` 字段和 `Cache-Control: no-store`），以及统一异常处理基础（`AppError`/Pydantic 422 归一化/`OperationalError`→50301/兜底 500，均不泄露堆栈）。
-- SQLAlchemy 异步 Engine/Session、SQLite PRAGMA、8 张业务表 ORM、Alembic 初始迁移和迁移前备份均已实现。认证、用户管理、模板、个人设置、日报、导出和周报均已落地 `API → Service → Repository → Model/DB` 链路；日报所有权、模板快照、条件状态转换、自动归档和乐观锁已由 Service/Repository 强制；导出的所有权/归档校验、跨模板动态列合并、xlsx 线程卸载生成、24 小时过期（懒清理 + 启动扫描）和路径边界校验均已实现并通过独立审查；周报的自然周校验、仅归档来源、同周唯一（含并发）、来源快照、人工编辑不反写日报和确认后原子重生成均已实现并通过独立审查（含专项安全审查），手动备份仍待阶段 8。
+- SQLAlchemy 异步 Engine/Session、SQLite PRAGMA、8 张业务表 ORM、Alembic 初始迁移和迁移前备份均已实现。认证、用户管理、模板、个人设置、日报、导出和周报均已落地 `API → Service → Repository → Model/DB` 链路；日报所有权、模板快照、条件状态转换、自动归档和乐观锁已由 Service/Repository 强制；导出的所有权/归档校验、跨模板动态列合并、xlsx 线程卸载生成、24 小时过期（懒清理 + 启动扫描）和路径边界校验均已实现并通过独立审查；周报的自然周校验、仅归档来源、同周唯一（含并发）、来源快照、人工编辑不反写日报和确认后原子重生成均已实现并通过独立审查（含专项安全审查）。
+- 手动整库备份（`BACKUP-01`）已实现：admin 触发 `PRAGMA wal_checkpoint(TRUNCATE)` + `sqlite3.Connection.backup()` 生成一致性快照，用进程内 `BackupRegistry`（不落业务表）以随机 ULID 映射文件路径/创建者/过期时间，15 分钟懒过期加启动残留清理，仅创建该备份的 admin 本人可下载。`/settings` 页面（`FE-07`）已实现自动归档开关、固定时区展示、企业微信占位（零外部请求）和管理员整库备份创建/保存交互，复用阶段 6 已审查的 Electron 保存对话框白名单模式（新增独立的 `.db` 文件名/大小校验器，不与导出共享白名单以避免互相放宽）。
 - `build/sidecar/` 当前只有占位说明；PyInstaller sidecar、`extraResources` 可用性和安装包流程仍未完成（阶段 9 `PKG-01`）。生产环境的可执行文件路径解析逻辑已就绪（见 §8 命名约定），文件不存在时会走类型化失败态而非崩溃。
 
 后续实现必须逐阶段把真实进度更新到 `progress.md`；本节只用于防止将目标架构误读为现状。

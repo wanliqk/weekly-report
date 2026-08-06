@@ -617,6 +617,15 @@
   margin-bottom: 24px;
 }
 
+.settings-sections {
+  display: grid;
+  gap: 20px;
+}
+
+.settings-sections .editor-card .el-alert {
+  margin-bottom: 14px;
+}
+
 .dynamic-report-form {
   display: grid;
   gap: 4px;

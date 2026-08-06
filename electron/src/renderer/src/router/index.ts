@@ -8,6 +8,7 @@ import DailyDetailView from '@renderer/views/DailyDetailView.vue'
 import DailyListView from '@renderer/views/DailyListView.vue'
 import HomeView from '@renderer/views/HomeView.vue'
 import LoginView from '@renderer/views/LoginView.vue'
+import SettingsView from '@renderer/views/SettingsView.vue'
 import SetupView from '@renderer/views/SetupView.vue'
 import TemplatesView from '@renderer/views/TemplatesView.vue'
 import UsersView from '@renderer/views/UsersView.vue'
@@ -40,6 +41,7 @@ export const router = createRouter({
         { path: 'weekly', name: 'weekly', component: WeeklyListView },
         { path: 'weekly/:id', name: 'weekly-detail', component: WeeklyDetailView },
         { path: 'templates', name: 'templates', component: TemplatesView },
+        { path: 'settings', name: 'settings', component: SettingsView },
         {
           path: 'admin/users',
           name: 'users',

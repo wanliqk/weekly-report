@@ -1,4 +1,5 @@
 import type {
+  BackupSaveResult,
   ExportSaveResult,
   RuntimeApiConfig,
   SecureTokenSnapshot,
@@ -26,6 +27,9 @@ declare global {
       }
       readonly exportFile: {
         readonly save: (suggestedName: string, data: Uint8Array) => Promise<ExportSaveResult>
+      }
+      readonly backupFile: {
+        readonly save: (suggestedName: string, data: Uint8Array) => Promise<BackupSaveResult>
       }
     }
   }

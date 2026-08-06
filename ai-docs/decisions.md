@@ -34,6 +34,7 @@
 | PROD-007 | 导出动态列按 `field_key` 首次出现顺序排列，表头取该字段最近一次出现的标签文本 | Accepted for V1 | `EXPORT-01` 实现（`requirements.md` 4.4 只给出“按稳定 `field_key` 合并、同名标签追加短标识”的原则，未定义具体排序/取值算法） | 历史新增字段追加在已见字段之后；`field_key` 不变时标签变化不拆列；两个不同 `field_key` 恰好得到相同表头文本才追加 `field_key` 后缀消歧 |
 | PROD-008 | 导出文件内的 `Asia/Shanghai` 时间展示使用固定 UTC+8 偏移而非 `zoneinfo` | Accepted for V1 | `EXPORT-02` 实现 | 中国大陆自 1991 年后不施行夏令时，固定偏移在数值上等价且避免生产环境依赖可选的 `tzdata` 包（Windows 默认不含 IANA 时区数据库）；若产品未来需要真实多时区支持需新 ADR |
 | PROD-009 | 周报 `PUT` 只接受并覆盖 `supplement`/`next_week_plan`/`risks` 三个自由文本字段，`content.days` 由服务端固定为生成/重生成时的快照，不做逐字段编辑 | Accepted for V1 | `WEEKLY-02` 实现（`requirements.md` 4.3.4/4.3.5 只描述"自动内容"与"编辑区"两部分，未定义 `PUT` 的字段粒度） | 从机制上保证"人工编辑不反写日报"且不会让用户绕过重新生成来局部篡改来源摘要；若未来需要允许编辑单日摘要文本需新 ADR |
+| PROD-010 | 手动整库备份不落业务表，改用进程内 `BackupRegistry`（随机 ULID -> 记录），15 分钟懒过期 + `create()` 时序清理 + 启动时目录级清理三重机制共同保证残留可控 | Accepted for V1 | `BACKUP-01` 实现（`database.md` §6 已给出"不登记业务表、进程内随机 ID 映射、15 分钟过期、启动清理"的原则，未定义具体触发时机的组合） | 进程重启即清空注册表，因此启动清理可以对目录下的 `*.db` 文件做无条件删除而无需比对任何持久状态；若未来需要备份跨进程重启仍可查询，需改为持久化记录并新增 ADR |
 | SEC-001 | JWT 持久化使用 Electron safeStorage | Accepted | `architecture.md`、`AGENTS.md` | renderer 不写 `localStorage`/`sessionStorage`；不可用时必须显式失败或提示 |
 | SEC-002 | 所有业务 API 同时校验 JWT 与 `X-Runtime-Secret` | Accepted | `architecture.md`、`api.md` | `/health` 是唯一例外；Main 随机生成，renderer API 客户端仅在内存持有，不得进入 Vite 变量、持久化存储或日志 |
 | SEC-003 | V1 不做 SQLite 整库加密 | Accepted for V1 | `requirements.md`、`architecture.md` | 密码使用 Argon2id、Token safeStorage；若要求磁盘泄露防护需新 ADR |
@@ -41,6 +42,8 @@
 | SEC-005 | JWT HS256 签名密钥由后端首次启动随机生成并持久化于数据目录 | Accepted for V1 | `AUTH-02` 实现 | 使用 256-bit 随机密钥和独占创建；重启后复用，格式损坏时拒绝启动；不得硬编码、记录日志或经 renderer 暴露 |
 | SEC-006 | 导出 xlsx 对以 `=` 开头的字符串单元格加前缀单引号转义，防止 Excel 公式注入 | Accepted for V1 | `EXPORT-02` 实现，专项安全审查发现 | 仅处理 `=` 前缀（openpyxl 只会把该前缀提升为公式）；不处理 `+`/`-`/`@`，避免破坏中文报告中常见的列表符号 |
 | SEC-007 | CORS 响应头显式 `expose_headers=["Content-Disposition"]` | Accepted for V1 | `EXPORT-02` 实现，真实 Electron 联调发现 | 仅新增这一个响应头的跨域可见性；`allow_origins` 固定白名单、`allow_credentials=False` 不变，不构成新的跨域数据泄露面 |
+| SEC-008 | Electron 侧新增独立的 `BackupFileSaver`（`.db` 文件名白名单、100MB 字节上限），不与阶段 6 已审查的 `ExportFileSaver`（`.xlsx`、25MB）共享同一校验器实例 | Accepted for V1 | `BACKUP-01`/`FE-07` 实现 | 两个白名单结构相同但刻意不合并，避免任一方将来放宽后缀/大小限制时意外影响另一方；`backup:save-file` 与 `export:save-file` 是两个独立 IPC channel，均校验 `event.senderFrame` |
+| SEC-009 | 手动备份跨管理员下载统一返回 `40401`（不区分"不存在"与"非本人创建"），与其余资源的所有权隔离约定一致 | Accepted for V1 | `BACKUP-01` 实现，`api.md` §1 既定原则的延伸 | 避免让任意 admin 通过响应差异枚举出其他 admin 是否创建过备份；创建者本人与非创建者的 404 响应体完全相同 |
 
 ## 3. 工程协作决策
 
