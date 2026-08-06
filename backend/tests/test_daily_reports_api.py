@@ -204,16 +204,16 @@ def test_manual_submit_and_archive_follow_the_state_machine(
     assert invalid_save.json()["code"] == 40902
 
 
-def test_auto_archive_completes_submit_and_archive_in_one_transition(
+def test_removed_auto_archive_setting_cannot_change_submit_transition(
     stage5_context: tuple[TestClient, dict[str, str], Settings],
 ) -> None:
     client, headers, _settings = stage5_context
-    settings = client.patch(
+    removed_setting = client.patch(
         "/api/v1/settings/me",
         headers=headers,
         json={"auto_archive_on_submit": True},
     )
-    assert settings.status_code == 200
+    assert removed_setting.status_code == 405
     report = _create(client, headers)
     report = _save(client, headers, report, _default_content(report))
 
@@ -222,10 +222,11 @@ def test_auto_archive_completes_submit_and_archive_in_one_transition(
         headers=headers,
         json={"version": report["version"]},
     )
-    archived = response.json()["data"]
+    submitted = response.json()["data"]
 
-    assert archived["status"] == "archived"
-    assert archived["submitted_at"] == archived["archived_at"]
+    assert submitted["status"] == "submitted"
+    assert submitted["submitted_at"] is not None
+    assert submitted["archived_at"] is None
 
 
 def test_stale_version_cannot_overwrite_newer_draft_content(

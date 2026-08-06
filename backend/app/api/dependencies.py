@@ -29,7 +29,7 @@ def get_backup_registry(request: Request) -> BackupRegistry:
     return registry
 
 
-async def get_current_user(
+async def get_authenticated_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
     jwt_secret: Annotated[str, Depends(get_jwt_secret)],
@@ -39,6 +39,14 @@ async def get_current_user(
     return await AuthService(session, jwt_secret=jwt_secret).authenticate_token(
         credentials.credentials
     )
+
+
+async def get_current_user(
+    current_user: Annotated[User, Depends(get_authenticated_user)],
+) -> User:
+    if current_user.must_change_password:
+        raise AppError(code=40303, http_status=403, message="请先修改临时密码")
+    return current_user
 
 
 async def get_current_admin(

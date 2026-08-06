@@ -15,6 +15,7 @@ RUNTIME_SECRET = "r" * 32
 JWT_SECRET = "j" * 64
 RUNTIME_HEADERS = {"X-Runtime-Secret": RUNTIME_SECRET}
 ADMIN_PASSWORD = "correct horse battery staple"
+CHANGED_ADMIN_PASSWORD = "changed admin password"
 
 
 @pytest.fixture
@@ -38,9 +39,9 @@ def client(settings: Settings) -> Iterator[TestClient]:
 
 def _bootstrap(client: TestClient) -> None:
     response = client.post(
-        "/api/v1/system/bootstrap-admin",
+        "/api/v1/system/bootstrap",
         headers=RUNTIME_HEADERS,
-        json={"username": "admin", "password": ADMIN_PASSWORD, "display_name": "Admin"},
+        json={"username": "owner", "password": ADMIN_PASSWORD, "display_name": "Owner"},
     )
     assert response.status_code == 200
 
@@ -60,7 +61,17 @@ def _auth_headers(token: str) -> dict[str, str]:
 
 
 def _admin_headers(client: TestClient) -> dict[str, str]:
-    return _auth_headers(_login(client, "admin", ADMIN_PASSWORD))
+    initial_headers = _auth_headers(_login(client, "admin", ADMIN_PASSWORD))
+    changed = client.put(
+        "/api/v1/auth/password",
+        headers=initial_headers,
+        json={
+            "current_password": ADMIN_PASSWORD,
+            "new_password": CHANGED_ADMIN_PASSWORD,
+        },
+    )
+    assert changed.status_code == 200
+    return _auth_headers(_login(client, "admin", CHANGED_ADMIN_PASSWORD))
 
 
 def _create_user(
@@ -99,7 +110,7 @@ def test_admin_can_create_list_and_read_user_metadata_with_default_resources(
     list_data = listed.json()["data"]
     assert list_data["page"] == 1
     assert list_data["page_size"] == 1
-    assert list_data["total"] == 2
+    assert list_data["total"] == 3
     assert len(list_data["items"]) == 1
     assert detailed.status_code == 200
     assert detailed.json()["data"]["username"] == "alice"
@@ -139,9 +150,9 @@ def test_duplicate_username_is_rejected_after_trim_and_casefold_without_partial_
     assert duplicate.status_code == 400
     assert duplicate.json()["code"] == 40001
     with sqlite3.connect(settings.database_path) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM users").fetchone() == (2,)
-        assert connection.execute("SELECT COUNT(*) FROM user_settings").fetchone() == (2,)
-        assert connection.execute("SELECT COUNT(*) FROM report_templates").fetchone() == (2,)
+        assert connection.execute("SELECT COUNT(*) FROM users").fetchone() == (3,)
+        assert connection.execute("SELECT COUNT(*) FROM user_settings").fetchone() == (3,)
+        assert connection.execute("SELECT COUNT(*) FROM report_templates").fetchone() == (3,)
 
 
 def test_user_creation_validates_username_length_after_trimming(client: TestClient) -> None:
@@ -238,7 +249,25 @@ def test_password_reset_invalidates_user_token_and_replaces_credentials(client: 
         json={"username": "alice", "password": "alice secure password"},
     )
     assert old_login.json()["code"] == 40101
-    assert _login(client, "alice", "replacement password")
+    reset_token = _login(client, "alice", "replacement password")
+    reset_headers = _auth_headers(reset_token)
+    assert (
+        client.get("/api/v1/auth/me", headers=reset_headers).json()["data"]["must_change_password"]
+        is True
+    )
+    blocked = client.get("/api/v1/settings/me", headers=reset_headers)
+    assert blocked.status_code == 403
+    assert blocked.json()["code"] == 40303
+
+    changed = client.put(
+        "/api/v1/auth/password",
+        headers=reset_headers,
+        json={
+            "current_password": "replacement password",
+            "new_password": "owner chosen password",
+        },
+    )
+    assert changed.status_code == 200
 
 
 def test_unknown_user_returns_404_without_account_details(client: TestClient) -> None:

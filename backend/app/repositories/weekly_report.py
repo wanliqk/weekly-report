@@ -129,7 +129,7 @@ class WeeklyReportRepository:
             self._session.add(
                 WeeklyReportSource(
                     weekly_report_id=weekly_report_id,
-                    daily_report_id=source.daily_report_id,
+                    daily_report_day_id=source.daily_report_id,
                     work_date=source.work_date,
                     included_at=source.included_at,
                 )

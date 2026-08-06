@@ -82,6 +82,7 @@ class UserRepository:
         *,
         password_hash: str,
         password_changed_at: datetime,
+        must_change_password: bool,
     ) -> bool:
         result = await self._session.execute(
             update(User)
@@ -91,11 +92,12 @@ class UserRepository:
                 password_changed_at=password_changed_at,
                 updated_at=password_changed_at,
                 token_version=User.token_version + 1,
+                must_change_password=must_change_password,
             )
         )
         return bool(result.rowcount == 1)
 
-    async def create_if_no_users_exist(self, user: User) -> bool:
+    async def create_first_user_if_empty(self, user: User) -> bool:
         """Insert `user` iff the `users` table is currently empty, atomically.
 
         A plain "check row count, then insert" is racy: two concurrent
@@ -117,6 +119,7 @@ class UserRepository:
                 "display_name",
                 "password_hash",
                 "role",
+                "must_change_password",
                 "password_changed_at",
             ],
             select(
@@ -126,6 +129,7 @@ class UserRepository:
                 literal(user.display_name),
                 literal(user.password_hash),
                 literal(user.role),
+                literal(user.must_change_password),
                 literal(user.password_changed_at),
             ).where(~select(User.id).exists()),
         )

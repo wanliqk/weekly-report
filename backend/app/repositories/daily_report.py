@@ -3,7 +3,7 @@ from datetime import date, datetime
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DailyReport
+from app.models import DailyReport, DailyReportDay
 
 
 class DailyReportRepository:
@@ -16,33 +16,39 @@ class DailyReportRepository:
 
     async def get_for_owner(self, report_id: str, owner_id: str) -> DailyReport | None:
         result = await self._session.execute(
-            select(DailyReport).where(
+            select(DailyReport)
+            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
+            .where(
                 DailyReport.id == report_id,
-                DailyReport.user_id == owner_id,
+                DailyReportDay.user_id == owner_id,
             )
         )
         return result.scalar_one_or_none()
 
     async def get_by_work_date(self, owner_id: str, work_date: date) -> DailyReport | None:
         result = await self._session.execute(
-            select(DailyReport).where(
-                DailyReport.user_id == owner_id,
-                DailyReport.work_date == work_date,
+            select(DailyReport)
+            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
+            .where(
+                DailyReportDay.user_id == owner_id,
+                DailyReportDay.work_date == work_date,
             )
+            .order_by(DailyReport.id.asc())
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def list_owned_archived_by_ids(
         self, owner_id: str, report_ids: list[str]
     ) -> list[DailyReport]:
         result = await self._session.execute(
             select(DailyReport)
+            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
             .where(
-                DailyReport.user_id == owner_id,
+                DailyReportDay.user_id == owner_id,
                 DailyReport.status == "archived",
                 DailyReport.id.in_(report_ids),
             )
-            .order_by(DailyReport.work_date.asc(), DailyReport.id.asc())
+            .order_by(DailyReportDay.work_date.asc(), DailyReport.id.asc())
         )
         return list(result.scalars())
 
@@ -53,15 +59,16 @@ class DailyReportRepository:
         date_from: date | None,
         date_to: date | None,
     ) -> list[DailyReport]:
-        filters = [DailyReport.user_id == owner_id, DailyReport.status == "archived"]
+        filters = [DailyReportDay.user_id == owner_id, DailyReport.status == "archived"]
         if date_from is not None:
-            filters.append(DailyReport.work_date >= date_from)
+            filters.append(DailyReportDay.work_date >= date_from)
         if date_to is not None:
-            filters.append(DailyReport.work_date <= date_to)
+            filters.append(DailyReportDay.work_date <= date_to)
         result = await self._session.execute(
             select(DailyReport)
+            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
             .where(*filters)
-            .order_by(DailyReport.work_date.asc(), DailyReport.id.asc())
+            .order_by(DailyReportDay.work_date.asc(), DailyReport.id.asc())
         )
         return list(result.scalars())
 
@@ -70,12 +77,13 @@ class DailyReportRepository:
     ) -> list[DailyReport]:
         result = await self._session.execute(
             select(DailyReport)
+            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
             .where(
-                DailyReport.user_id == owner_id,
-                DailyReport.work_date >= date_from,
-                DailyReport.work_date <= date_to,
+                DailyReportDay.user_id == owner_id,
+                DailyReportDay.work_date >= date_from,
+                DailyReportDay.work_date <= date_to,
             )
-            .order_by(DailyReport.work_date.asc(), DailyReport.id.asc())
+            .order_by(DailyReportDay.work_date.asc(), DailyReport.id.asc())
         )
         return list(result.scalars())
 
@@ -89,20 +97,24 @@ class DailyReportRepository:
         page: int,
         page_size: int,
     ) -> tuple[list[DailyReport], int]:
-        filters = [DailyReport.user_id == owner_id]
+        filters = [DailyReportDay.user_id == owner_id]
         if date_from is not None:
-            filters.append(DailyReport.work_date >= date_from)
+            filters.append(DailyReportDay.work_date >= date_from)
         if date_to is not None:
-            filters.append(DailyReport.work_date <= date_to)
+            filters.append(DailyReportDay.work_date <= date_to)
         if status is not None:
             filters.append(DailyReport.status == status)
         total_result = await self._session.execute(
-            select(func.count()).select_from(DailyReport).where(*filters)
+            select(func.count())
+            .select_from(DailyReport)
+            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
+            .where(*filters)
         )
         items_result = await self._session.execute(
             select(DailyReport)
+            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
             .where(*filters)
-            .order_by(DailyReport.work_date.desc(), DailyReport.id.desc())
+            .order_by(DailyReportDay.work_date.desc(), DailyReport.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -121,7 +133,9 @@ class DailyReportRepository:
             update(DailyReport)
             .where(
                 DailyReport.id == report_id,
-                DailyReport.user_id == owner_id,
+                DailyReport.day_id.in_(
+                    select(DailyReportDay.id).where(DailyReportDay.user_id == owner_id)
+                ),
                 DailyReport.status == "draft",
                 DailyReport.version == expected_version,
             )
@@ -140,25 +154,23 @@ class DailyReportRepository:
         owner_id: str,
         expected_version: int,
         submitted_at: datetime,
-        auto_archive: bool,
     ) -> bool:
-        values: dict[str, object] = {
-            "status": "archived" if auto_archive else "submitted",
-            "submitted_at": submitted_at,
-            "updated_at": submitted_at,
-            "version": DailyReport.version + 1,
-        }
-        if auto_archive:
-            values["archived_at"] = submitted_at
         result = await self._session.execute(
             update(DailyReport)
             .where(
                 DailyReport.id == report_id,
-                DailyReport.user_id == owner_id,
+                DailyReport.day_id.in_(
+                    select(DailyReportDay.id).where(DailyReportDay.user_id == owner_id)
+                ),
                 DailyReport.status == "draft",
                 DailyReport.version == expected_version,
             )
-            .values(**values)
+            .values(
+                status="submitted",
+                submitted_at=submitted_at,
+                updated_at=submitted_at,
+                version=DailyReport.version + 1,
+            )
         )
         return bool(result.rowcount == 1)
 
@@ -174,7 +186,9 @@ class DailyReportRepository:
             update(DailyReport)
             .where(
                 DailyReport.id == report_id,
-                DailyReport.user_id == owner_id,
+                DailyReport.day_id.in_(
+                    select(DailyReportDay.id).where(DailyReportDay.user_id == owner_id)
+                ),
                 DailyReport.status == "submitted",
                 DailyReport.version == expected_version,
             )
@@ -183,6 +197,33 @@ class DailyReportRepository:
                 archived_at=archived_at,
                 updated_at=archived_at,
                 version=DailyReport.version + 1,
+            )
+        )
+        return bool(result.rowcount == 1)
+
+    async def archive_day(
+        self,
+        *,
+        day_id: str,
+        owner_id: str,
+        archive_snapshot_json: str,
+        archived_at: datetime,
+    ) -> bool:
+        result = await self._session.execute(
+            update(DailyReportDay)
+            .where(
+                DailyReportDay.id == day_id,
+                DailyReportDay.user_id == owner_id,
+                DailyReportDay.status == "open",
+            )
+            .values(
+                status="archived",
+                archive_snapshot_json=archive_snapshot_json,
+                source_count=1,
+                archived_by=owner_id,
+                archived_at=archived_at,
+                updated_at=archived_at,
+                version=DailyReportDay.version + 1,
             )
         )
         return bool(result.rowcount == 1)

@@ -10,10 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
+from app.core.ulid import generate_ulid
 from app.db.engine import create_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
-from app.models import DailyReport, ReportTemplate, TemplateVersion, User
+from app.models import (
+    AdminAuditEvent,
+    DailyReport,
+    DailyReportDay,
+    ReportTemplate,
+    TemplateVersion,
+    User,
+)
 
 
 @pytest.fixture
@@ -103,9 +111,18 @@ async def test_optimistic_lock_update_affects_no_rows_on_a_stale_version(
         )
         session.add(version)
         await session.flush()
-        report = DailyReport(
+        day = DailyReportDay(
             user_id=user.id,
             work_date=datetime.now(UTC).date(),
+            status="open",
+        )
+        session.add(day)
+        await session.flush()
+        report_id = generate_ulid()
+        report = DailyReport(
+            id=report_id,
+            day_id=day.id,
+            client_request_id=report_id,
             status="draft",
             template_version_id=version.id,
             template_snapshot_json="[]",
@@ -126,6 +143,71 @@ async def test_optimistic_lock_update_affects_no_rows_on_a_stale_version(
         await session.commit()
 
     assert result.rowcount == 0
+
+
+async def test_daily_report_day_is_unique_per_owner_and_work_date(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        user = _new_user()
+        session.add(user)
+        await session.flush()
+        work_date = datetime.now(UTC).date()
+        session.add(DailyReportDay(user_id=user.id, work_date=work_date, status="open"))
+        await session.commit()
+
+    async with session_factory() as session:
+        session.add(DailyReportDay(user_id=user.id, work_date=work_date, status="open"))
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
+
+async def test_archived_day_requires_a_complete_immutable_snapshot_state(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        user = _new_user()
+        session.add(user)
+        await session.flush()
+        session.add(
+            DailyReportDay(
+                user_id=user.id,
+                work_date=datetime.now(UTC).date(),
+                status="archived",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
+
+@pytest.mark.parametrize(
+    ("action", "reason"),
+    [("unknown_action", "valid reason"), ("user_deleted", "   ")],
+)
+async def test_admin_audit_events_reject_unknown_actions_and_blank_reasons(
+    session_factory: async_sessionmaker[AsyncSession],
+    action: str,
+    reason: str,
+) -> None:
+    async with session_factory() as session:
+        admin = _new_user(role="admin")
+        session.add(admin)
+        await session.flush()
+        session.add(
+            AdminAuditEvent(
+                action=action,
+                actor_user_id=admin.id,
+                actor_username_snapshot=admin.username,
+                target_type="user",
+                target_id="target",
+                target_owner_id=None,
+                reason=reason,
+                metadata_json="{}",
+                created_at=datetime.now(UTC),
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
 
 
 async def test_transaction_rollback_discards_all_changes_on_failure(

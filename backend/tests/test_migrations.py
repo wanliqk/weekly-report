@@ -12,10 +12,12 @@ _EXPECTED_TABLES = {
     "user_settings",
     "report_templates",
     "template_versions",
+    "daily_report_days",
     "daily_reports",
     "weekly_reports",
     "weekly_report_sources",
     "export_jobs",
+    "admin_audit_events",
 }
 
 

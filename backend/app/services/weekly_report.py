@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import cast
 
 from sqlalchemy.exc import IntegrityError
@@ -62,8 +62,125 @@ def week_end_for(week_start: date) -> date:
     return week_start + WEEK_LENGTH
 
 
+def _utc_iso(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
 def parse_weekly_content(content_json: str) -> WeeklyContent:
-    return WeeklyContent.model_validate_json(content_json)
+    raw = json.loads(content_json)
+    if not isinstance(raw, dict):
+        raise RuntimeError("stored weekly content is invalid")
+    schema_version = raw.get("schema_version")
+    if schema_version is None:
+        return WeeklyContent.model_validate(raw)
+    if schema_version != 2 or not isinstance(raw.get("days"), list):
+        raise RuntimeError("stored weekly content has an unsupported schema version")
+
+    days: list[WeeklyDay] = []
+    for day in raw["days"]:
+        if not isinstance(day, dict) or not isinstance(day.get("entries"), list):
+            raise RuntimeError("stored weekly content contains an invalid day")
+        entries = day["entries"]
+        if day.get("source_count") != len(entries):
+            raise RuntimeError("stored weekly content source count does not match entries")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise RuntimeError("stored weekly content contains an invalid entry")
+            days.append(
+                WeeklyDay(
+                    work_date=day.get("work_date"),
+                    daily_report_id=entry.get("daily_report_id"),
+                    fields=entry.get("fields"),
+                )
+            )
+    return WeeklyContent(
+        days=days,
+        supplement=raw.get("supplement", ""),
+        next_week_plan=raw.get("next_week_plan", ""),
+        risks=raw.get("risks", ""),
+    )
+
+
+def _serialize_weekly_content_v2(content: WeeklyContent, reports: list[DailyReport]) -> str:
+    report_by_id = {report.id: report for report in reports}
+    days: list[dict[str, object]] = []
+    for day in content.days:
+        report = report_by_id.get(day.daily_report_id)
+        if report is None or report.submitted_at is None:
+            raise RuntimeError("weekly content source report is missing")
+        days.append(
+            {
+                "work_date": day.work_date.isoformat(),
+                "daily_report_day_id": report.day_id,
+                "source_count": 1,
+                "entries": [
+                    {
+                        "daily_report_id": report.id,
+                        "submitted_at": _utc_iso(report.submitted_at),
+                        "fields": [field.model_dump(mode="json") for field in day.fields],
+                    }
+                ],
+            }
+        )
+    return json.dumps(
+        {
+            "schema_version": 2,
+            "days": days,
+            "supplement": content.supplement,
+            "next_week_plan": content.next_week_plan,
+            "risks": content.risks,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _serialize_weekly_source_snapshot_v2(reports: list[DailyReport]) -> str:
+    days: list[dict[str, object]] = []
+    for report in reports:
+        if report.submitted_at is None:
+            raise RuntimeError("weekly source report is missing submitted_at")
+        days.append(
+            {
+                "work_date": report.work_date.isoformat(),
+                "daily_report_day_id": report.day_id,
+                "source_count": 1,
+                "entries": [
+                    {
+                        "daily_report_id": report.id,
+                        "submitted_at": _utc_iso(report.submitted_at),
+                    }
+                ],
+            }
+        )
+    return json.dumps(
+        {"schema_version": 2, "days": days},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _replace_weekly_free_text(
+    content_json: str, *, supplement: str, next_week_plan: str, risks: str
+) -> str:
+    raw = json.loads(content_json)
+    if isinstance(raw, dict) and raw.get("schema_version") == 2:
+        raw["supplement"] = supplement
+        raw["next_week_plan"] = next_week_plan
+        raw["risks"] = risks
+        serialized = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+        parse_weekly_content(serialized)
+        return serialized
+    current = parse_weekly_content(content_json)
+    return current.model_copy(
+        update={
+            "supplement": supplement,
+            "next_week_plan": next_week_plan,
+            "risks": risks,
+        }
+    ).model_dump_json()
 
 
 def build_weekly_content(
@@ -161,7 +278,7 @@ class WeeklyReportService:
         )
         now = self._clock()
         content = build_weekly_content(archived)
-        content_json = content.model_dump_json()
+        content_json = _serialize_weekly_content_v2(content, archived)
         report = WeeklyReport(
             id=generate_ulid(),
             user_id=owner_id,
@@ -169,10 +286,7 @@ class WeeklyReportService:
             week_end=week_end,
             generated_content_json=content_json,
             content_json=content_json,
-            source_snapshot_json=json.dumps(
-                [{"daily_report_id": r.id, "work_date": r.work_date.isoformat()} for r in archived],
-                ensure_ascii=False,
-            ),
+            source_snapshot_json=_serialize_weekly_source_snapshot_v2(archived),
             generated_at=now,
             version=1,
         )
@@ -199,15 +313,17 @@ class WeeklyReportService:
         risks: str,
     ) -> WeeklyReport:
         report = await self.get(owner_id, report_id)
-        current = parse_weekly_content(report.content_json)
-        next_content = current.model_copy(
-            update={"supplement": supplement, "next_week_plan": next_week_plan, "risks": risks}
+        next_content_json = _replace_weekly_free_text(
+            report.content_json,
+            supplement=supplement,
+            next_week_plan=next_week_plan,
+            risks=risks,
         )
         updated = await self._reports.save_content(
             report_id=report_id,
             owner_id=owner_id,
             expected_version=expected_version,
-            content_json=next_content.model_dump_json(),
+            content_json=next_content_json,
             updated_at=self._clock(),
         )
         if not updated:
@@ -232,7 +348,7 @@ class WeeklyReportService:
             owner_id, date_from=report.week_start, date_to=week_end
         )
         now = self._clock()
-        content_json = build_weekly_content(archived).model_dump_json()
+        content_json = _serialize_weekly_content_v2(build_weekly_content(archived), archived)
         updated = await self._reports.replace_on_regenerate(
             report_id=report_id,
             owner_id=owner_id,
@@ -261,6 +377,10 @@ def _each_day(week_start: date, week_end: date) -> list[date]:
 
 def _sources_for(reports: list[DailyReport], included_at: datetime) -> list[WeeklySource]:
     return [
-        WeeklySource(daily_report_id=r.id, work_date=r.work_date, included_at=included_at)
+        WeeklySource(
+            daily_report_id=r.day_id,
+            work_date=r.work_date,
+            included_at=included_at,
+        )
         for r in reports
     ]

@@ -1,6 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.clock import Clock, utc_now
 from app.core.errors import AppError
 from app.models import UserSettings
 from app.repositories.user_settings import UserSettingsRepository
@@ -12,9 +11,7 @@ class SettingsNotFoundError(AppError):
 
 
 class SettingsService:
-    def __init__(self, session: AsyncSession, *, clock: Clock = utc_now) -> None:
-        self._session = session
-        self._clock = clock
+    def __init__(self, session: AsyncSession) -> None:
         self._settings = UserSettingsRepository(session)
 
     async def get(self, owner_id: str) -> UserSettings:
@@ -22,12 +19,3 @@ class SettingsService:
         if settings is None:
             raise SettingsNotFoundError()
         return settings
-
-    async def update_auto_archive(self, owner_id: str, *, enabled: bool) -> UserSettings:
-        updated = await self._settings.update_auto_archive(
-            owner_id, enabled=enabled, updated_at=self._clock()
-        )
-        if not updated:
-            raise SettingsNotFoundError()
-        await self._session.commit()
-        return await self.get(owner_id)

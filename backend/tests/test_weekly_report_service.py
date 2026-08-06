@@ -15,7 +15,7 @@ from app.core.ulid import generate_ulid
 from app.db.engine import create_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
-from app.models import DailyReport, User, WeeklyReport, WeeklyReportSource
+from app.models import DailyReport, DailyReportDay, User, WeeklyReport, WeeklyReportSource
 from app.repositories.daily_report import DailyReportRepository
 from app.repositories.template import TemplateRepository
 from app.services.bootstrap import BootstrapService
@@ -67,10 +67,22 @@ async def _report(
     status: str,
     content: dict[str, str] | None = None,
 ) -> DailyReport:
+    report_id = generate_ulid()
+    is_archived = status == "archived"
     report = DailyReport(
-        id=generate_ulid(),
-        user_id=owner_id,
-        work_date=work_date,
+        id=report_id,
+        day_id=report_id,
+        client_request_id=report_id,
+        day=DailyReportDay(
+            id=report_id,
+            user_id=owner_id,
+            work_date=work_date,
+            status="archived" if is_archived else "open",
+            archive_snapshot_json="{}" if is_archived else None,
+            source_count=1 if is_archived else 0,
+            archived_by=owner_id if is_archived else None,
+            archived_at=_FIXED_NOW if is_archived else None,
+        ),
         status=status,
         template_version_id=await _default_template_version_id(session, owner_id),
         template_snapshot_json="[]",
@@ -85,8 +97,8 @@ async def _report(
 
 
 async def _bootstrap_user(session: AsyncSession) -> User:
-    return await BootstrapService(session).bootstrap_admin(
-        username="admin", password=STAGE5_PASSWORD, display_name="Admin"
+    return await BootstrapService(session).bootstrap(
+        username="owner", password=STAGE5_PASSWORD, display_name="Owner"
     )
 
 

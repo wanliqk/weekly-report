@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user, get_jwt_secret
+from app.api.dependencies import get_authenticated_user, get_jwt_secret
 from app.db.session import get_db_session
 from app.models import User
 from app.schemas.auth import (
@@ -34,14 +34,16 @@ async def login(
 
 
 @router.get("/me", response_model=ApiResponse[MeData])
-async def me(current_user: Annotated[User, Depends(get_current_user)]) -> ApiResponse[MeData]:
+async def me(
+    current_user: Annotated[User, Depends(get_authenticated_user)],
+) -> ApiResponse[MeData]:
     return ApiResponse(data=MeData.model_validate(current_user))
 
 
 @router.put("/password", response_model=ApiResponse[EmptyData])
 async def change_password(
     payload: ChangePasswordRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_authenticated_user)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
     jwt_secret: Annotated[str, Depends(get_jwt_secret)],
 ) -> ApiResponse[EmptyData]:
@@ -55,6 +57,6 @@ async def change_password(
 
 @router.post("/logout", response_model=ApiResponse[EmptyData])
 async def logout(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    _current_user: Annotated[User, Depends(get_authenticated_user)],
 ) -> ApiResponse[EmptyData]:
     return ApiResponse(data=EmptyData())

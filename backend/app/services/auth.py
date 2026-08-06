@@ -95,5 +95,6 @@ class AuthService:
             user.id,
             password_hash=hash_password(new_password),
             password_changed_at=self._clock(),
+            must_change_password=False,
         )
         await self._session.commit()

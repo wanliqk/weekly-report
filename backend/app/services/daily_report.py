@@ -1,7 +1,7 @@
 import json
 import math
 from collections.abc import Mapping
-from datetime import date
+from datetime import UTC, date, datetime
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -10,11 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import Clock, utc_now
 from app.core.errors import AppError
 from app.core.ulid import generate_ulid
-from app.models import DailyReport
+from app.models import DailyReport, DailyReportDay
 from app.repositories.daily_report import DailyReportRepository
 from app.schemas.daily_report import DailyContent, DailyInputContent
 from app.schemas.template import TemplateFieldData
-from app.services.settings import SettingsService
 from app.services.template import TemplateService, parse_template_fields
 
 _CONTENT_ADAPTER: TypeAdapter[DailyContent] = TypeAdapter(DailyContent)
@@ -60,6 +59,31 @@ def parse_daily_content(content_json: str) -> DailyContent:
         return _CONTENT_ADAPTER.validate_json(content_json)
     except ValidationError as error:
         raise RuntimeError("stored daily content is invalid") from error
+
+
+def _utc_iso(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
+def build_single_entry_archive_snapshot(report: DailyReport) -> str:
+    if report.submitted_at is None:
+        raise RuntimeError("submitted daily report is missing submitted_at")
+    snapshot = {
+        "schema_version": 2,
+        "work_date": report.work_date.isoformat(),
+        "entries": [
+            {
+                "daily_report_id": report.id,
+                "submitted_at": _utc_iso(report.submitted_at),
+                "template_version_id": report.template_version_id,
+                "template_snapshot": json.loads(report.template_snapshot_json),
+                "content": json.loads(report.content_json),
+            }
+        ],
+    }
+    return json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
 
 
 def _value_error(field: TemplateFieldData, value: object) -> str | None:
@@ -157,10 +181,19 @@ class DailyReportService:
 
     async def create(self, owner_id: str, *, work_date: date) -> DailyReport:
         _template, version, fields = await TemplateService(self._session).get_current(owner_id)
-        report = DailyReport(
-            id=generate_ulid(),
+        report_id = generate_ulid()
+        day = DailyReportDay(
+            id=report_id,
             user_id=owner_id,
             work_date=work_date,
+            status="open",
+            source_count=0,
+            version=1,
+        )
+        report = DailyReport(
+            id=report_id,
+            day_id=day.id,
+            client_request_id=report_id,
             status="draft",
             template_version_id=version.id,
             template_snapshot_json=json.dumps(
@@ -170,6 +203,7 @@ class DailyReportService:
             ),
             content_json="{}",
             version=1,
+            day=day,
         )
         try:
             await self._reports.add(report)
@@ -217,14 +251,12 @@ class DailyReportService:
             parse_daily_content(report.content_json),
             require_required=True,
         )
-        settings = await SettingsService(self._session).get(owner_id)
         now = self._clock()
         updated = await self._reports.submit_draft(
             report_id=report_id,
             owner_id=owner_id,
             expected_version=expected_version,
             submitted_at=now,
-            auto_archive=settings.auto_archive_on_submit,
         )
         if not updated:
             await self._raise_after_failed_update(owner_id, report_id, required_state="draft")
@@ -236,14 +268,24 @@ class DailyReportService:
         self._require_state_and_version(
             report, state="submitted", expected_version=expected_version
         )
+        now = self._clock()
         updated = await self._reports.archive_submitted(
             report_id=report_id,
             owner_id=owner_id,
             expected_version=expected_version,
-            archived_at=self._clock(),
+            archived_at=now,
         )
         if not updated:
             await self._raise_after_failed_update(owner_id, report_id, required_state="submitted")
+        day_updated = await self._reports.archive_day(
+            day_id=report.day_id,
+            owner_id=owner_id,
+            archive_snapshot_json=build_single_entry_archive_snapshot(report),
+            archived_at=now,
+        )
+        if not day_updated:
+            await self._session.rollback()
+            raise DailyReportStateError("日报日期已关闭")
         await self._session.commit()
         return await self.get(owner_id, report_id)
 

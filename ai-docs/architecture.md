@@ -1,6 +1,6 @@
 # 系统架构基线
 
-> 状态：V1 架构已实现；第二版 CR-20260807-01 方案已完成、待用户确认、尚未实现
+> 状态：V1 架构已实现；第二版方案已确认，BE-10A 数据与认证基线已实现
 > 更新日期：2026-08-07
 > 原始方案：`docs/方案设计.md`
 
@@ -41,7 +41,7 @@ Electron Main
 - Electron 已实现单实例、窗口安全选项、禁止新窗口和跨地址导航；已有 `electron/src/main/sidecar/` 子进程管理模块（动态端口获取、runtime secret 生成、健康检查轮询、Windows 下 `taskkill /pid /t /f` 进程树终止）和 `electron/src/main/ipc/register-runtime-bridge.ts`（5 个受信任 frame 校验的 IPC channel，含阶段 6 新增的导出保存）。
 - Preload 已有受限的 `window.runtimeBridge.{sidecar,api,token,exportFile}` 命名空间，未暴露通用 `ipcRenderer`；Token 由 Main 的 `safeStorage` 加密持久化，不可用时显式失败且无明文回退。文件保存对话框已在阶段 6 `DESK-04` 实现：`ExportFileSaver` 对文件名和字节内容双重校验后才调用系统级“另存为”，实际写入路径始终取自该对话框自身返回值，renderer 提供的名称只影响默认建议名。
 - FastAPI 已建立应用工厂、精确 CORS/Trusted Host（含 `expose_headers=["Content-Disposition"]`）、请求 ID 中间件、`RuntimeSecretMiddleware`（除 `/health`/`/docs`/`/openapi.json` 外强制校验 `X-Runtime-Secret`）、达到目标契约的 `GET /health`（含 `version` 字段和 `Cache-Control: no-store`），以及统一异常处理基础（`AppError`/Pydantic 422 归一化/`OperationalError`→50301/兜底 500，均不泄露堆栈）。
-- SQLAlchemy 异步 Engine/Session、SQLite PRAGMA、8 张业务表 ORM、Alembic 初始迁移和迁移前备份均已实现。认证、用户管理、模板、个人设置、日报、导出和周报均已落地 `API → Service → Repository → Model/DB` 链路；日报所有权、模板快照、条件状态转换、自动归档和乐观锁已由 Service/Repository 强制；导出的所有权/归档校验、跨模板动态列合并、xlsx 线程卸载生成、24 小时过期（懒清理 + 启动扫描）和路径边界校验均已实现并通过独立审查；周报的自然周校验、仅归档来源、同周唯一（含并发）、来源快照、人工编辑不反写日报和确认后原子重生成均已实现并通过独立审查（含专项安全审查）。
+- SQLAlchemy 异步 Engine/Session、SQLite PRAGMA、10 张业务表 ORM、V1 初始迁移与 BE-10A V2 迁移、迁移前备份均已实现。V2 已增加日期容器/管理员审计和强制改密字段，移除自动归档设置，并将旧日报与周报快照无损升级；日报多条目/撤销/日期归档、下游聚合和 Electron 页面仍按 10B～10D 分阶段实现。
 - 手动整库备份（`BACKUP-01`）已实现：admin 触发 `PRAGMA wal_checkpoint(TRUNCATE)` + `sqlite3.Connection.backup()` 生成一致性快照，用进程内 `BackupRegistry`（不落业务表）以随机 ULID 映射文件路径/创建者/过期时间，15 分钟懒过期加启动残留清理，仅创建该备份的 admin 本人可下载。`/settings` 页面（`FE-07`）已实现自动归档开关、固定时区展示、企业微信占位（零外部请求）和管理员整库备份创建/保存交互，复用阶段 6 已审查的 Electron 保存对话框白名单模式（新增独立的 `.db` 文件名/大小校验器，不与导出共享白名单以避免互相放宽）。
 - `build/sidecar/weekly-report-backend.exe` 已由真实 PyInstaller `onedir` 构建产出（42.69 MB/148 文件），在剥离 PATH（无 Python/uv）的隔离环境下验证可独立启动、通过 `/health`、正确建表。`electron-builder.yml` 的 `extraResources` 已把它放入打包产物的 `resources/sidecar/`（不进 ASAR）；生产模式下 Electron 会向 sidecar 子进程注入指向 `app.getPath('userData')` 的数据目录环境变量（阶段 9 新增，此前从未被验证过，见 `issues.md` ISS-014）。真实 NSIS 安装包已产出并在本机完成安装/升级/卸载验证（阶段 9 `PKG-02`/`REL-01`，未使用独立干净虚拟机，该限制已与用户确认），过程中另发现并修复两个真实打包缺陷（`issues.md` ISS-015 主进程模块打包遗漏、ISS-016 npm workspace 作用域包名导致安装产物异常）。Playwright E2E 套件（阶段 9 `QA-09`）已交付并纳入 `npm run test:e2e`，覆盖初始化→登录→模板→日报→导出→周报主链路及四条失败路径。
 

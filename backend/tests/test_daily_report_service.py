@@ -42,8 +42,8 @@ async def test_concurrent_same_day_creation_produces_one_report(
 ) -> None:
     session_factory = create_session_factory(daily_engine)
     async with session_factory() as session:
-        user = await BootstrapService(session).bootstrap_admin(
-            username="admin", password=STAGE5_PASSWORD, display_name="Admin"
+        user = await BootstrapService(session).bootstrap(
+            username="owner", password=STAGE5_PASSWORD, display_name="Owner"
         )
 
     async def _create() -> DailyReport | DailyReportAlreadyExistsError:

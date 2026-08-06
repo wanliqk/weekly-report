@@ -7,7 +7,7 @@ from app.api.dependencies import get_current_user
 from app.db.session import get_db_session
 from app.models import User
 from app.schemas.common import ApiResponse
-from app.schemas.settings import CapabilitiesData, SettingsData, SettingsUpdateRequest
+from app.schemas.settings import CapabilitiesData, SettingsData
 from app.services.settings import SettingsService
 
 router = APIRouter(tags=["settings"])
@@ -19,29 +19,7 @@ async def get_my_settings(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ApiResponse[SettingsData]:
     settings = await SettingsService(session).get(current_user.id)
-    return ApiResponse(
-        data=SettingsData(
-            auto_archive_on_submit=settings.auto_archive_on_submit,
-            timezone=settings.timezone,
-        )
-    )
-
-
-@router.patch("/api/v1/settings/me", response_model=ApiResponse[SettingsData])
-async def update_my_settings(
-    payload: SettingsUpdateRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> ApiResponse[SettingsData]:
-    settings = await SettingsService(session).update_auto_archive(
-        current_user.id, enabled=payload.auto_archive_on_submit
-    )
-    return ApiResponse(
-        data=SettingsData(
-            auto_archive_on_submit=settings.auto_archive_on_submit,
-            timezone=settings.timezone,
-        )
-    )
+    return ApiResponse(data=SettingsData(timezone=settings.timezone))
 
 
 @router.get("/api/v1/capabilities", response_model=ApiResponse[CapabilitiesData])

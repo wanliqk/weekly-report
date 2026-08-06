@@ -1,16 +1,16 @@
 # 数据库设计
 
-> 状态：V1 数据库契约已实现；第二版数据模型与迁移已设计、待用户确认、尚未实现
+> 状态：第二版 BE-10A 数据模型与 V1→V2 迁移已实现；日期聚合和下游查询待 BE-10B/BE-10C
 > 更新日期：2026-08-07
 > 数据库：SQLite（SQLAlchemy 2.x + Alembic）
 
 ## 0. 当前实现状态
 
-> **CR-20260807-01 事实边界**：第 1～7 节描述当前 V1 实现；第二版目标以第 8 节为准。新模型和迁移已设计但尚未落地，实施状态只看 `progress.md`。
+> **CR-20260807-01 事实边界**：第 1～7 节保留 V1 历史结构；第 8 节是当前 V2 数据契约。BE-10A 已落地 8.1、8.3 与认证/设置字段，8.2 的完整多条目事务和 8.4 仍待后续阶段。
 
-- 阶段 3（`DB-01`/`DB-02`/`DB-03`）已实现：异步 Engine/Session（`backend/app/db/engine.py`、`session.py`）、PRAGMA（`foreign_keys`/`journal_mode=WAL`/`synchronous=NORMAL`/`busy_timeout`）、8 张业务表的 SQLAlchemy Model（`backend/app/models/`）、Alembic 初始迁移（`backend/alembic/versions/3f6f955b87bb_initial_schema.py`）、启动时迁移前备份/轮转（`backend/app/db/migrate.py`）均已落地，代码与测试为准，未使用 `create_all()` 代替迁移。
+- 当前共有 10 张业务表的 SQLAlchemy Model；Alembic 初始迁移 `3f6f955b87bb` 与 V2 迁移 `8b1d4e6f2a90` 均已落地，启动时迁移前备份/轮转保持不变，未使用 `create_all()` 代替迁移。
 - 下列表、约束、索引、事务与备份**规则**仍是权威契约来源；实现细节（如具体文件路径）以代码为准，本节只记录"哪些已经真实存在"，不重复描述设计意图。
-- Repository、Service 层（`backend/app/repositories/`、`app/services/`）已随阶段 4/5/6/7 逐步落地：`user.py`/`user_settings.py`/`template.py`/`daily_report.py`/`export_job.py`/`weekly_report.py` repository 及对应 Service 均已实现所有权过滤查询和/或乐观锁条件更新，全部 8 张业务表均有真实业务代码强制执行本文件的访问模式（不再仅存在于 `backend/tests/test_model_constraints.py` 的 ORM 直接验证）。
+- 现有 Repository/Service 已适配日期容器所有权连接和周报日期来源 FK；`admin_audit_events` 仅完成模型/迁移，写入事务属于 BE-10B。
 - 迁移与备份基础设施验证方式：`backend/tests/test_migrations.py`（空库 upgrade/降级/幂等）、`backend/tests/test_migrate_backup.py`（备份触发条件、轮转、路径边界、失败停止启动）、`backend/tests/test_db_engine.py`（PRAGMA 实际连接值）。
 - 实现后以 migration、Model、自动化测试和 `progress.md` 共同证明状态；若代码与本文冲突，先修正文档或请求确认。
 
@@ -247,7 +247,7 @@ users 1──N export_jobs
 - migration、Model、Repository 字段命名与本文件一致；任何偏差先形成显式设计决策。
 - 数据阶段通过 Ruff、mypy、pytest 后更新 `task.md`/`progress.md`，并单独创建 Conventional Commit。
 
-## 8. 第二版数据库目标契约
+## 8. 第二版数据库契约
 
 ### 8.1 表和关系
 

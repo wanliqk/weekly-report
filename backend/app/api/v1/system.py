@@ -12,8 +12,8 @@ from app.models import User
 from app.schemas.common import ApiResponse
 from app.schemas.system import (
     BackupCreateData,
-    BootstrapAdminData,
-    BootstrapAdminRequest,
+    BootstrapData,
+    BootstrapRequest,
     BootstrapStatusData,
 )
 from app.services.backup import BACKUP_MEDIA_TYPE, BackupService
@@ -31,18 +31,18 @@ async def get_bootstrap_status(
     return ApiResponse(data=BootstrapStatusData(initialized=initialized))
 
 
-@router.post("/bootstrap-admin", response_model=ApiResponse[BootstrapAdminData])
-async def bootstrap_admin(
-    payload: BootstrapAdminRequest,
+@router.post("/bootstrap", response_model=ApiResponse[BootstrapData])
+async def bootstrap(
+    payload: BootstrapRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> ApiResponse[BootstrapAdminData]:
+) -> ApiResponse[BootstrapData]:
     service = BootstrapService(session)
-    user = await service.bootstrap_admin(
+    user = await service.bootstrap(
         username=payload.username,
         password=payload.password,
         display_name=payload.display_name,
     )
-    return ApiResponse(data=BootstrapAdminData.model_validate(user))
+    return ApiResponse(data=BootstrapData.model_validate(user))
 
 
 @router.post("/backups", response_model=ApiResponse[BackupCreateData])

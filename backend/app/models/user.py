@@ -37,6 +37,9 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1"
     )
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     password_changed_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False)
 
 
@@ -45,9 +48,6 @@ class UserSettings(TimestampMixin, Base):
 
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True
-    )
-    auto_archive_on_submit: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
     )
     timezone: Mapped[str] = mapped_column(
         String(64), nullable=False, default="Asia/Shanghai", server_default="Asia/Shanghai"

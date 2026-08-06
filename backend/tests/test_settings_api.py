@@ -3,29 +3,21 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 
 
-def test_settings_default_update_and_capabilities(
+def test_settings_are_read_only_and_capabilities_remain_available(
     stage5_context: tuple[TestClient, dict[str, str], Settings],
 ) -> None:
     client, headers, _settings = stage5_context
 
     initial = client.get("/api/v1/settings/me", headers=headers)
-    updated = client.patch(
+    removed_update = client.patch(
         "/api/v1/settings/me",
         headers=headers,
         json={"auto_archive_on_submit": True},
     )
-    restored = client.get("/api/v1/settings/me", headers=headers)
     capabilities = client.get("/api/v1/capabilities", headers=headers)
 
-    assert initial.json()["data"] == {
-        "auto_archive_on_submit": False,
-        "timezone": "Asia/Shanghai",
-    }
-    assert updated.json()["data"] == {
-        "auto_archive_on_submit": True,
-        "timezone": "Asia/Shanghai",
-    }
-    assert restored.json()["data"] == updated.json()["data"]
+    assert initial.json()["data"] == {"timezone": "Asia/Shanghai"}
+    assert removed_update.status_code == 405
     assert capabilities.json()["data"] == {"wecom_sync": False}
 
 

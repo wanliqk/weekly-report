@@ -14,6 +14,7 @@ from app.main import create_app
 
 RUNTIME_SECRET = "r" * 32
 JWT_SECRET = "j" * 64
+INITIAL_PASSWORD = "correct horse battery staple"
 RUNTIME_HEADERS = {"X-Runtime-Secret": RUNTIME_SECRET}
 
 
@@ -33,12 +34,12 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 
 def _bootstrap(client: TestClient) -> None:
     response = client.post(
-        "/api/v1/system/bootstrap-admin",
+        "/api/v1/system/bootstrap",
         headers=RUNTIME_HEADERS,
         json={
-            "username": "admin",
-            "password": "correct horse battery staple",
-            "display_name": "Admin",
+            "username": "alice",
+            "password": INITIAL_PASSWORD,
+            "display_name": "Alice",
         },
     )
     assert response.status_code == 200
@@ -47,8 +48,8 @@ def _bootstrap(client: TestClient) -> None:
 def _login(
     client: TestClient,
     *,
-    username: str = "admin",
-    password: str = "correct horse battery staple",
+    username: str = "alice",
+    password: str = INITIAL_PASSWORD,
 ) -> str:
     response = client.post(
         "/api/v1/auth/login",
@@ -66,14 +67,15 @@ def _auth_headers(token: str) -> dict[str, str]:
 def test_login_and_me_return_only_safe_account_metadata(client: TestClient) -> None:
     _bootstrap(client)
 
-    token = _login(client, username=" ADMIN ")
+    token = _login(client, username=" ALICE ")
     response = client.get("/api/v1/auth/me", headers=_auth_headers(token))
 
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
     data = response.json()["data"]
-    assert data["username"] == "admin"
-    assert data["role"] == "admin"
+    assert data["username"] == "alice"
+    assert data["role"] == "user"
+    assert data["must_change_password"] is False
     assert data["created_at"].endswith("+00:00")
     assert "password" not in data
     assert "password_hash" not in data
@@ -84,7 +86,7 @@ def test_login_and_me_return_only_safe_account_metadata(client: TestClient) -> N
     ("username", "password"),
     [
         ("missing", "correct horse battery staple"),
-        ("admin", "wrong password"),
+        ("alice", "wrong password"),
     ],
 )
 def test_login_uses_the_same_public_error_for_unknown_user_and_wrong_password(
@@ -120,7 +122,7 @@ def test_expired_and_tampered_tokens_map_to_40102(client: TestClient) -> None:
     replacement = "a" if valid_token[-1] != "a" else "b"
     expired_token = encode_access_token(
         user_id="01K000000000000000000000",
-        role="admin",
+        role="user",
         token_version=1,
         secret=JWT_SECRET,
         clock=lambda: datetime.now(UTC) - timedelta(days=2),
@@ -161,10 +163,47 @@ def test_change_password_invalidates_the_current_token_and_old_password(
     old_login = client.post(
         "/api/v1/auth/login",
         headers=RUNTIME_HEADERS,
-        json={"username": "admin", "password": "correct horse battery staple"},
+        json={"username": "alice", "password": INITIAL_PASSWORD},
     )
     assert old_login.json()["code"] == 40101
     assert _login(client, password="new strong password")
+
+
+def test_initial_admin_must_change_password_before_business_requests(
+    client: TestClient,
+) -> None:
+    _bootstrap(client)
+    token = _login(client, username="admin")
+    headers = _auth_headers(token)
+
+    me = client.get("/api/v1/auth/me", headers=headers)
+    blocked = client.get("/api/v1/settings/me", headers=headers)
+    logout = client.post("/api/v1/auth/logout", headers=headers)
+
+    assert me.status_code == 200
+    assert me.json()["data"]["must_change_password"] is True
+    assert blocked.status_code == 403
+    assert blocked.json()["code"] == 40303
+    assert logout.status_code == 200
+
+    changed = client.put(
+        "/api/v1/auth/password",
+        headers=headers,
+        json={
+            "current_password": INITIAL_PASSWORD,
+            "new_password": "new admin password",
+        },
+    )
+    assert changed.status_code == 200
+    assert client.get("/api/v1/auth/me", headers=headers).json()["code"] == 40102
+
+    new_token = _login(client, username="admin", password="new admin password")
+    new_headers = _auth_headers(new_token)
+    assert (
+        client.get("/api/v1/auth/me", headers=new_headers).json()["data"]["must_change_password"]
+        is False
+    )
+    assert client.get("/api/v1/settings/me", headers=new_headers).status_code == 200
 
 
 def test_logout_is_client_side_only_and_does_not_blacklist_the_token(client: TestClient) -> None:

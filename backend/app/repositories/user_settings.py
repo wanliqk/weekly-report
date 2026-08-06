@@ -1,6 +1,4 @@
-from datetime import datetime
-
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import UserSettings
@@ -19,13 +17,3 @@ class UserSettingsRepository:
             select(UserSettings).where(UserSettings.user_id == owner_id)
         )
         return result.scalar_one_or_none()
-
-    async def update_auto_archive(
-        self, owner_id: str, *, enabled: bool, updated_at: datetime
-    ) -> bool:
-        result = await self._session.execute(
-            update(UserSettings)
-            .where(UserSettings.user_id == owner_id)
-            .values(auto_archive_on_submit=enabled, updated_at=updated_at)
-        )
-        return bool(result.rowcount == 1)

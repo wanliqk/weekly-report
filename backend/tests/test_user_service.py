@@ -44,9 +44,12 @@ async def test_concurrent_admin_disables_preserve_one_active_admin(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     async with session_factory() as session:
-        first = await BootstrapService(session).bootstrap_admin(
-            username="admin-one", password="first admin password", display_name="Admin One"
+        await BootstrapService(session).bootstrap(
+            username="owner", password="first admin password", display_name="Owner"
         )
+        first = (
+            await session.execute(select(User).where(User.username_normalized == "admin"))
+        ).scalar_one()
     async with session_factory() as session:
         second = await UserService(session).create_user(
             username="admin-two",

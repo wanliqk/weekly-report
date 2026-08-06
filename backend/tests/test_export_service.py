@@ -14,7 +14,7 @@ from app.core.ulid import generate_ulid
 from app.db.engine import create_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
-from app.models import DailyReport, ExportJob, User
+from app.models import DailyReport, DailyReportDay, ExportJob, User
 from app.repositories.daily_report import DailyReportRepository
 from app.repositories.template import TemplateRepository
 from app.schemas.export import ExportFilter
@@ -92,10 +92,21 @@ async def _archived_report(
     fields: list[dict[str, object]],
     content: dict[str, str],
 ) -> DailyReport:
+    report_id = generate_ulid()
     report = DailyReport(
-        id=generate_ulid(),
-        user_id=owner_id,
-        work_date=work_date,
+        id=report_id,
+        day_id=report_id,
+        client_request_id=report_id,
+        day=DailyReportDay(
+            id=report_id,
+            user_id=owner_id,
+            work_date=work_date,
+            status="archived",
+            archive_snapshot_json="{}",
+            source_count=1,
+            archived_by=owner_id,
+            archived_at=_FIXED_NOW,
+        ),
         status="archived",
         template_version_id=await _default_template_version_id(session, owner_id),
         template_snapshot_json=json.dumps(fields, ensure_ascii=False),
@@ -110,10 +121,17 @@ async def _archived_report(
 
 
 async def _draft_report(session: AsyncSession, *, owner_id: str, work_date: date) -> DailyReport:
+    report_id = generate_ulid()
     report = DailyReport(
-        id=generate_ulid(),
-        user_id=owner_id,
-        work_date=work_date,
+        id=report_id,
+        day_id=report_id,
+        client_request_id=report_id,
+        day=DailyReportDay(
+            id=report_id,
+            user_id=owner_id,
+            work_date=work_date,
+            status="open",
+        ),
         status="draft",
         template_version_id=await _default_template_version_id(session, owner_id),
         template_snapshot_json="[]",
@@ -126,8 +144,8 @@ async def _draft_report(session: AsyncSession, *, owner_id: str, work_date: date
 
 
 async def _bootstrap_user(session: AsyncSession) -> User:
-    return await BootstrapService(session).bootstrap_admin(
-        username="admin", password=STAGE5_PASSWORD, display_name="Admin"
+    return await BootstrapService(session).bootstrap(
+        username="owner", password=STAGE5_PASSWORD, display_name="Owner"
     )
 
 

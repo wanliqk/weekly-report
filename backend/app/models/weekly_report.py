@@ -39,13 +39,13 @@ class WeeklyReport(TimestampMixin, Base):
 
 class WeeklyReportSource(Base):
     __tablename__ = "weekly_report_sources"
-    __table_args__ = (Index("ix_weekly_sources_daily", "daily_report_id"),)
+    __table_args__ = (Index("ix_weekly_sources_daily_day", "daily_report_day_id"),)
 
     weekly_report_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("weekly_reports.id", ondelete="RESTRICT"), primary_key=True
     )
-    daily_report_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("daily_reports.id", ondelete="RESTRICT"), primary_key=True
+    daily_report_day_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("daily_report_days.id", ondelete="RESTRICT"), primary_key=True
     )
     work_date: Mapped[date] = mapped_column(Date(), nullable=False)
     included_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False)

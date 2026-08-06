@@ -152,6 +152,7 @@ class UserService:
             user_id,
             password_hash=hash_password(new_password),
             password_changed_at=changed_at,
+            must_change_password=True,
         )
         if not updated:
             raise UserNotFoundError()

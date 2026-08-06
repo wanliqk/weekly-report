@@ -11,6 +11,7 @@ from app.main import create_app
 
 RUNTIME_SECRET = "a" * 32
 HEADERS = {"X-Runtime-Secret": RUNTIME_SECRET}
+PASSWORD = "correct horse battery staple"
 
 
 @pytest.fixture
@@ -30,6 +31,12 @@ def migrated_settings(tmp_path: Path) -> Settings:
 def client(migrated_settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(migrated_settings)) as test_client:
         yield test_client
+
+
+def _payload(**overrides: str) -> dict[str, str]:
+    payload = {"username": "alice", "password": PASSWORD, "display_name": "Alice"}
+    payload.update(overrides)
+    return payload
 
 
 def test_bootstrap_status_reports_not_initialized_on_an_empty_database(
@@ -52,88 +59,70 @@ def test_bootstrap_status_requires_the_runtime_secret(client: TestClient) -> Non
     assert response.json()["code"] == 40103
 
 
-def test_bootstrap_admin_creates_the_first_admin_and_flips_bootstrap_status(
-    client: TestClient,
-) -> None:
-    response = client.post(
-        "/api/v1/system/bootstrap-admin",
-        headers=HEADERS,
-        json={
-            "username": "admin",
-            "password": "correct horse battery staple",
-            "display_name": "Admin",
-        },
-    )
+def test_bootstrap_creates_the_first_user_and_fixed_admin(client: TestClient) -> None:
+    response = client.post("/api/v1/system/bootstrap", headers=HEADERS, json=_payload())
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["code"] == 0
-    data = body["data"]
-    assert data["username"] == "admin"
-    assert data["display_name"] == "Admin"
-    assert data["role"] == "admin"
+    data = response.json()["data"]
+    assert data["username"] == "alice"
+    assert data["display_name"] == "Alice"
+    assert data["role"] == "user"
     assert data["is_active"] is True
     assert "password" not in data
     assert "password_hash" not in data
 
-    status_response = client.get("/api/v1/system/bootstrap-status", headers=HEADERS)
-    assert status_response.json()["data"]["initialized"] is True
-
-
-def test_bootstrap_admin_twice_rejects_the_second_call(client: TestClient) -> None:
-    payload = {
-        "username": "admin",
-        "password": "correct horse battery staple",
-        "display_name": "Admin",
+    user_login = client.post(
+        "/api/v1/auth/login",
+        headers=HEADERS,
+        json={"username": "alice", "password": PASSWORD},
+    )
+    admin_login = client.post(
+        "/api/v1/auth/login",
+        headers=HEADERS,
+        json={"username": "admin", "password": PASSWORD},
+    )
+    assert user_login.status_code == 200
+    assert admin_login.status_code == 200
+    assert client.get("/api/v1/system/bootstrap-status", headers=HEADERS).json()["data"] == {
+        "initialized": True
     }
-    first = client.post("/api/v1/system/bootstrap-admin", headers=HEADERS, json=payload)
+
+
+def test_removed_bootstrap_admin_route_is_not_available(client: TestClient) -> None:
+    response = client.post("/api/v1/system/bootstrap-admin", headers=HEADERS, json=_payload())
+    assert response.status_code == 404
+
+
+def test_bootstrap_twice_rejects_the_second_call(client: TestClient) -> None:
+    first = client.post("/api/v1/system/bootstrap", headers=HEADERS, json=_payload())
     assert first.status_code == 200
 
     second = client.post(
-        "/api/v1/system/bootstrap-admin",
+        "/api/v1/system/bootstrap",
         headers=HEADERS,
-        json={**payload, "username": "someone-else"},
+        json=_payload(username="someone-else"),
     )
 
     assert second.status_code == 400
     assert second.json()["code"] == 40001
 
 
-def test_bootstrap_admin_rejects_a_short_password(client: TestClient) -> None:
-    response = client.post(
-        "/api/v1/system/bootstrap-admin",
-        headers=HEADERS,
-        json={"username": "admin", "password": "short", "display_name": "Admin"},
-    )
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _payload(password="short"),
+        _payload(display_name=""),
+        _payload(username="  ab  "),
+        _payload(username=" ADMIN "),
+    ],
+)
+def test_bootstrap_rejects_invalid_or_reserved_input(
+    client: TestClient, payload: dict[str, str]
+) -> None:
+    response = client.post("/api/v1/system/bootstrap", headers=HEADERS, json=payload)
 
     assert response.status_code == 400
     assert response.json()["code"] == 40001
-
-    status_response = client.get("/api/v1/system/bootstrap-status", headers=HEADERS)
-    assert status_response.json()["data"]["initialized"] is False
-
-
-def test_bootstrap_admin_rejects_a_blank_display_name(client: TestClient) -> None:
-    response = client.post(
-        "/api/v1/system/bootstrap-admin",
-        headers=HEADERS,
-        json={"username": "admin", "password": "correct horse battery staple", "display_name": ""},
-    )
-
-    assert response.status_code == 400
-    assert response.json()["code"] == 40001
-
-
-def test_bootstrap_admin_validates_username_length_after_trimming(client: TestClient) -> None:
-    response = client.post(
-        "/api/v1/system/bootstrap-admin",
-        headers=HEADERS,
-        json={
-            "username": "  ab  ",
-            "password": "correct horse battery staple",
-            "display_name": "Admin",
-        },
-    )
-
-    assert response.status_code == 400
-    assert response.json()["code"] == 40001
+    assert client.get("/api/v1/system/bootstrap-status", headers=HEADERS).json()["data"] == {
+        "initialized": False
+    }

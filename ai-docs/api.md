@@ -1,12 +1,12 @@
 # API 接口规范
 
-> 状态：V1 API 已实现；第二版 API 契约已设计、待用户确认、尚未实现
+> 状态：V1 API 历史契约已实现；第二版 BE-10A 初始化/认证/设置基线已实现，其余待后续阶段
 > 更新日期：2026-08-07
 > 基础路径：`/api/v1`
 
 ## 0. 契约状态与当前实现
 
-> **CR-20260807-01 事实边界**：第 1～12 节仍描述当前 V1 实现；第二版目标接口见第 13 节。目标契约待用户确认且尚未实现，联调只以当前代码和 `progress.md` 为准。
+> **CR-20260807-01 事实边界**：第 1～12 节主要保留 V1 历史契约；第 13 节描述第二版契约。BE-10A 已实现 13.1 的 bootstrap/强制改密（用户删除除外）并移除设置 PATCH，其余目标仍不得视为完成。
 
 本文件定义 V1 目标接口。接口出现在表格中不代表路由已经存在；联调和验收必须以当前代码、自动化测试与 `progress.md` 为准。
 
@@ -15,7 +15,7 @@
 - `GET /health` 已达目标契约：返回统一成功结构、`X-Request-Id`、`data.status`、`data.version` 和 `Cache-Control: no-store`，且豁免 `X-Runtime-Secret` 校验。
 - 已配置精确 Trusted Host/CORS 基线（含 `expose_headers=["Content-Disposition"]`，供导出文件下载在 renderer 端读取服务端文件名），并已实现 `X-Runtime-Secret` 校验中间件（除 `/health`、`/docs`、`/openapi.json` 外的所有请求均需携带）。
 - 统一异常响应基础已实现（`backend/app/core/errors.py`）：`RequestValidationError`（Pydantic 422）归一化为 `code=40001`/`HTTP 400`；`AppError` 基类供后续业务异常子类化；`OperationalError` 映射为 `50301`；未捕获异常映射为 `50001`，均不泄露堆栈或驱动原始报错文本。
-- `GET /api/v1/system/bootstrap-status`、`POST /api/v1/system/bootstrap-admin` 已在阶段 4 `AUTH-01` 实现并有自动化测试：仍需 `X-Runtime-Secret`；空库返回 `initialized:false`；创建成功后返回账号元数据（不含密码/哈希）并原子建立默认模板；重复调用返回 `40001`（含并发场景）。
+- `GET /api/v1/system/bootstrap-status`、`POST /api/v1/system/bootstrap` 已在 BE-10A 更新：仍需 `X-Runtime-Secret`；空库原子创建输入的普通用户和固定 admin，双方拥有独立密码哈希/默认资源，重复或并发调用返回 `40001`。
 - `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`PUT /api/v1/auth/password`、`POST /api/v1/auth/logout` 及五个 `/api/v1/users` 管理接口已在阶段 4 实现；除匿名入口外均同时校验 runtime secret、JWT、用户启用状态和 `token_version`，admin 接口还校验角色。
 - 第 6 节三个模板接口、第 7 节六个日报接口、第 10 节三个设置/能力接口均已在阶段 5 实现（细节见各节末尾说明）。
 - 第 8 节三个导出接口已在阶段 6 `EXPORT-01`/`EXPORT-02` 实现（细节见该节末尾说明）。
@@ -91,9 +91,9 @@ FastAPI/Pydantic 默认 422 必须转换为统一结构，并在 `data.errors` �
 |---|---|---|---|
 | GET | `/health` | 本机运行期 | 存活与版本，不含路径/密钥 |
 | GET | `/system/bootstrap-status` | 匿名 | 是否需要初始化 |
-| POST | `/system/bootstrap-admin` | 仅空用户表 | 原子创建首个 admin |
+| POST | `/system/bootstrap` | 仅空用户表 | 原子创建普通用户和固定 admin |
 | POST | `/auth/login` | 匿名 | 返回 24h access token |
-| GET | `/auth/me` | 登录 | 当前用户和权限 |
+| GET | `/auth/me` | 登录 | 当前用户、权限和 `must_change_password` |
 | PUT | `/auth/password` | 登录 | 修改密码并使旧 Token 失效 |
 | POST | `/auth/logout` | 登录 | 客户端清 Token；V1 无黑名单 |
 
@@ -255,12 +255,11 @@ JWT 声明至少包含 `sub`、`role`、`ver`、`iat`、`exp`、`jti`。每次�
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
 | GET | `/settings/me` | 登录 | 当前用户设置 |
-| PATCH | `/settings/me` | 登录 | 修改 `auto_archive_on_submit` |
 | GET | `/capabilities` | 登录 | 返回能力开关，如 `wecom_sync:false` |
 
 V1 不定义任何企业微信同步接口，点击占位入口只在前端显示本地提示。
 
-上述三个设置/能力接口已实现；`timezone` 固定返回 `Asia/Shanghai`，PATCH 只允许修改 `auto_archive_on_submit`，能力响应固定为 `{"wecom_sync":false}`。设置与能力占位页面已在阶段 8 `FE-07` 实现（`/settings`：自动归档开关、固定时区展示、企业微信占位按钮仅显示本地提示且不发起任何网络请求、管理员整库备份入口）。
+BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /settings/me` 已移除，能力响应仍为 `{"wecom_sync":false}`。Electron 设置页仍是 V1 界面，待 FE-10 移除自动归档开关。
 
 ## 11. 幂等、并发与缓存
 

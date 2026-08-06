@@ -27,7 +27,7 @@ class LoginData(BaseModel):
 
 
 class MeData(UserData):
-    pass
+    must_change_password: bool
 
 
 class ChangePasswordRequest(BaseModel):

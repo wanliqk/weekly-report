@@ -174,14 +174,14 @@ uv sync --directory backend --frozen
 | ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
 |---|---|---|---|---|---|
 | REQ-10 | 主 Agent | 整理同日多条目、日期级归档、管理员撤销、双账号初始化、菜单与统计需求 | 用户新需求 | DONE | 增量需求、覆盖规则、Given-When-Then 与推荐口径已确认并提交 `a866872` |
-| DESIGN-10 | 主 Agent | 第二版方案设计与迁移评审 | REQ-10、ISS-018..ISS-022 | REVIEW | 日期容器 1:n 条目、正式快照、日期互斥事务、最小权限审计、统计、V1 迁移/受限 downgrade、API 与 Electron 路由已完成并交叉复核，等待用户确认 |
-| BE-10A | 主 Agent | 第二版迁移与认证基线 | DESIGN-10 | TODO | 新表/字段/Alembic、双账号 bootstrap、强制改密、自动归档字段移除；旧库副本升级与认证测试通过 |
+| DESIGN-10 | 主 Agent | 第二版方案设计与迁移评审 | REQ-10、ISS-018..ISS-022 | DONE | 日期容器 1:n 条目、正式快照、日期互斥事务、最小权限审计、统计、V1 迁移/受限 downgrade、API 与 Electron 路由已确认并提交 `e767ebd` |
+| BE-10A | 主 Agent | 第二版迁移与认证基线 | DESIGN-10 | DONE | 日期/审计模型与迁移、周报 V2 快照迁移、双账号 bootstrap、强制改密、自动归档移除均已实现；旧库升级/受限降级和认证测试通过 |
 | BE-10B | 主 Agent | 日报聚合、管理员撤销与用户安全删除 | BE-10A | TODO | 同日多篇、幂等创建、草稿删除/提交、日期级归档、最小权限撤销/审计、安全删除及并发测试 |
 | BE-10C | 主 Agent | 周报、导出与统计适配 | BE-10B | TODO | 日期正式来源、周报 JSON、Excel 多来源列、月历/统计 API 及跨年/闰日测试 |
 | FE-10 | 主 Agent | 第二版 Electron/Vue 界面实现 | BE-10A、BE-10B、BE-10C 契约 | TODO | 强制改密、菜单改名、我的日报月历/归档、我的周报适配、设置收口、管理员入口、用户删除和统计页 |
 | QA-10 | 主 Agent | 第二版迁移、权限、并发、统计与 E2E 验收 | BE-10A..BE-10C、FE-10 | TODO | 旧库迁移、同日并发、汇总原子性、权限隔离、删除保护、跨月/闰日统计及完整桌面流程通过门禁 |
 
-第二版需求已确认、方案处于 REVIEW，代码仍是 V1。用户确认方案前没有可领取的实现任务；确认后只允许先领取 `BE-10A`。
+第二版需求、方案和 `BE-10A` 已完成；当前数据与认证基线为 V2，日报多条目业务仍由 V1 兼容桥限制为同日一篇，等待 `BE-10B` 接管。
 
 ## 4. 当前可领取任务
 
@@ -199,7 +199,14 @@ uv sync --directory backend --frozen
 
 阶段 9 四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。V1 全部 9 个阶段现已交付完毕。
 
-第二版 `REQ-10=DONE`、`DESIGN-10=REVIEW`。当前等待用户确认方案；确认后严格按 10A -> 10B -> 10C -> FE-10 -> QA-10 的依赖推进。
+第二版 `REQ-10`、`DESIGN-10`、`BE-10A` 均为 `DONE`。当前可领取且仅可领取 `BE-10B`；后续严格按 BE-10B -> BE-10C -> FE-10 -> QA-10 的依赖推进。
+
+### 第二版阶段 10A 验证记录
+
+- 后端：`uv run --directory backend ruff check .`、`uv run --directory backend mypy`、`uv run --directory backend pytest -q`（199 项）全部通过。
+- 前端/桌面回归：`npm run lint`、`npm run typecheck`、`npm test`（18 文件、108 项）、`npm run build` 全部通过。
+- 数据迁移：空库升级、V1 真实结构副本升级、三态日报、多个用户/模板版本、跨年周、闰日、未来日期、导出任务、停用账号、三列周报 JSON V2 化、逐字节正文/模板保留、行数与外键检查、无损 downgrade、同日多条目/审计事件拒绝 downgrade、坏 JSON 在 DDL 前中止均有自动化测试。
+- `git diff --check` 通过；本阶段未开始 BE-10B 的同日多篇/删除/撤销/日期归档 API，也未修改 Electron 页面。
 
 ## 5. 实际验证记录
 

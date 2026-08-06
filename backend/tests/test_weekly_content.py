@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from app.models import DailyReport
+from app.models import DailyReport, DailyReportDay
 from app.services.weekly_report import (
     WeeklyWeekStartInvalidError,
     build_weekly_content,
@@ -32,10 +32,17 @@ def _fields(pairs: list[tuple[str, str, bool]]) -> str:
 
 
 def _report(work_date: date, *, fields: str, content: dict[str, object]) -> DailyReport:
+    report_id = f"day-{work_date.isoformat()}"
     return DailyReport(
-        id=f"day-{work_date.isoformat()}",
-        user_id="owner",
-        work_date=work_date,
+        id=report_id,
+        day_id=report_id,
+        client_request_id=report_id,
+        day=DailyReportDay(
+            id=report_id,
+            user_id="owner",
+            work_date=work_date,
+            status="open",
+        ),
         status="archived",
         template_version_id="version",
         template_snapshot_json=fields,

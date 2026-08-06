@@ -45,10 +45,11 @@
 | PROD-012 | 第二版 admin 可撤销任意用户尚未归档的已提交条目，普通用户不能撤销 | Accepted for V2 | `docs/需求理解.md` CR-20260807-01、第二版方案 | 仅开放必要元数据，不开放正文；必须填写原因并记录脱敏审计 |
 | PROD-013 | 第二版首次初始化创建普通用户，并自动创建同初始密码的默认管理员 | Accepted for V2 | `docs/需求理解.md` CR-20260807-01、第二版方案 | admin 用户名固定、密码分别哈希、首次登录强制改密、双账号和默认数据原子创建 |
 | PROD-014 | 第二版统计按自然日，日报篇数按来源条目，管理员只看本人统计 | Accepted for V2 | `docs/需求理解.md` CR-20260807-01 | 周末计入；日期正式日报不重复加一；不做团队排名 |
+| PROD-015 | BE-10A 在 V2 表结构上保留 V1 日报 API 的“同日一篇/单篇归档”兼容桥；周报持久化先升级 V2、API 暂扁平化为 V1 展示结构 | Accepted transitional | `BE-10A` 实现、`docs/方案设计.md` 分阶段计划 | 只用于保证 10A 后端既有 Service 可运行，不代表第二版产品能力；BE-10B 必须移除日报兼容限制，BE-10C 必须正式切换周报下游契约 |
 | SEC-001 | JWT 持久化使用 Electron safeStorage | Accepted | `architecture.md`、`AGENTS.md` | renderer 不写 `localStorage`/`sessionStorage`；不可用时必须显式失败或提示 |
 | SEC-002 | 所有业务 API 同时校验 JWT 与 `X-Runtime-Secret` | Accepted | `architecture.md`、`api.md` | `/health` 是唯一例外；Main 随机生成，renderer API 客户端仅在内存持有，不得进入 Vite 变量、持久化存储或日志 |
 | SEC-003 | V1 不做 SQLite 整库加密 | Accepted for V1 | `requirements.md`、`architecture.md` | 密码使用 Argon2id、Token safeStorage；若要求磁盘泄露防护需新 ADR |
-| SEC-004 | 密码最小长度 8 位、最大 128 位（服务端统一校验） | Accepted for V1 | `AUTH-01` 实现（`docs/需求理解.md`/`docs/方案设计.md` 未给出具体数值） | 仅为输入校验基线，非完整密码复杂度策略；`bootstrap-admin`/`AUTH-02` 登录改密/`USER-01` 重置密码均须复用同一下限，不得各自定义 |
+| SEC-004 | 密码最小长度 8 位、最大 128 位（服务端统一校验） | Accepted | `AUTH-01`、`BE-10A` 实现 | 仅为输入校验基线，非完整密码复杂度策略；`bootstrap`、登录改密和管理员重置密码均须复用同一下限，不得各自定义 |
 | SEC-005 | JWT HS256 签名密钥由后端首次启动随机生成并持久化于数据目录 | Accepted for V1 | `AUTH-02` 实现 | 使用 256-bit 随机密钥和独占创建；重启后复用，格式损坏时拒绝启动；不得硬编码、记录日志或经 renderer 暴露 |
 | SEC-006 | 导出 xlsx 对以 `=` 开头的字符串单元格加前缀单引号转义，防止 Excel 公式注入 | Accepted for V1 | `EXPORT-02` 实现，专项安全审查发现 | 仅处理 `=` 前缀（openpyxl 只会把该前缀提升为公式）；不处理 `+`/`-`/`@`，避免破坏中文报告中常见的列表符号 |
 | SEC-007 | CORS 响应头显式 `expose_headers=["Content-Disposition"]` | Accepted for V1 | `EXPORT-02` 实现，真实 Electron 联调发现 | 仅新增这一个响应头的跨域可见性；`allow_origins` 固定白名单、`allow_credentials=False` 不变，不构成新的跨域数据泄露面 |
