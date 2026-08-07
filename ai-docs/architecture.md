@@ -1,12 +1,12 @@
 # 系统架构基线
 
-> 状态：V1 架构已实现；第二版方案已确认，BE-10A 数据/认证基线与 BE-10B 日报聚合/管理员撤销/用户安全删除均已实现
+> 状态：V1 架构已实现；第二版方案已确认，BE-10A 数据/认证基线、BE-10B 日报聚合/管理员撤销/用户安全删除、BE-10C 周报/导出/统计适配均已实现
 > 更新日期：2026-08-07
 > 原始方案：`docs/方案设计.md`
 
 ## 0. 文档定位与事实边界
 
-> **第二版事实边界**：第 1.1 节和 `progress.md` 仍描述当前 V1 实现快照（截至阶段 9）；第二版目标以本文第 13 节和 `docs/方案设计.md` 的 2026-08-07 增量为准，BE-10A/BE-10B 的真实落地事实见 `progress.md` 对应章节。BE-10C/FE-10/QA-10 仍是尚未实现的目标，不得视为完成。
+> **第二版事实边界**：第 1.1 节和 `progress.md` 仍描述当前 V1 实现快照（截至阶段 9）；第二版目标以本文第 13 节和 `docs/方案设计.md` 的 2026-08-07 增量为准，BE-10A/BE-10B/BE-10C 的真实落地事实见 `progress.md` 对应章节。FE-10/QA-10 仍是尚未实现的目标，不得视为完成。
 
 - 本文件描述 V1 的目标架构、依赖方向和不可突破的安全边界，不以“已批准”表示代码已经完成。
 - 产品范围以 `docs/需求理解.md` 为准，技术设计以 `docs/方案设计.md` 为准；本文件是供 Agent 快速恢复上下文的提炼版，不得反向覆盖上游文档。
@@ -208,7 +208,7 @@ Electron Main
 
 ## 13. 第二版目标架构（CR-20260807-01）
 
-> **实现状态**：13.1～13.3（除周报/导出/统计改读日期级正式快照外）已随 `BE-10A`/`BE-10B` 落地；13.4 的一致性机制已实现，迁移部分随 `BE-10A` 落地。`WeeklyReportService`/`ExportService`/`StatisticsService` 改读 `daily_report_days` 正式快照仍是 `BE-10C` 的未完成目标。
+> **实现状态**：13.1～13.4 的后端目标已全部随 `BE-10A`/`BE-10B`/`BE-10C` 落地。Electron/Vue 界面适配是 `FE-10` 的未完成目标。
 
 ### 13.1 领域拆分
 
@@ -216,7 +216,7 @@ Electron Main
 - 新增 `daily_report_days`，以 `(user_id, work_date)` 唯一表示日期容器和不可变正式日报；`open/archived` 是日期关闭状态。**已实现**（`BE-10A` 建表，`BE-10B` 落地归档事务）。
 - 日期行是创建、保存、删除、提交、admin 撤销和日期级归档的共同写入互斥点。SQLite 下通过短事务中的条件 `UPDATE` 取得写锁并复查状态。**已实现**：`DailyReportDayRepository.touch_open_for_write`/`insert_entry_if_day_open`，已用真实并发测试验证创建与归档互斥、双管理员并发互删末位保护。
 - 新增 `admin_audit_events` 记录撤销提交和用户删除；只存白名单元数据和原因，禁止正文/模板快照。**已实现**（`BE-10A` 建表，`BE-10B` 落地两类写入事务）。
-- 周报、导出和完成日期统计只读取 `daily_report_days.status=archived` 的正式快照；来源条目不重复参与正式结果。**未实现**：`WeeklyReportService`/`ExportService` 仍读取条目级 `daily_reports.status='archived'`，是 `BE-10C` 的核心工作。
+- 周报、导出和完成日期统计只读取 `daily_report_days.status=archived` 的正式快照；来源条目不重复参与正式结果。**已实现**（`BE-10C`）：`WeeklyReportService`/`ExportService`/`StatisticsService` 均改读 `daily_report_days`，不再查询条目级 `daily_reports.status='archived'`。
 
 ### 13.2 服务和依赖
 
@@ -225,9 +225,9 @@ API
 ├─ DailyReportService          # 条目创建幂等、保存、删除、提交（已实现）
 ├─ DailyReportDayService       # 月历、日期详情、正式归档事务（已实现）
 ├─ AdminDailyReportService     # 最小元数据、撤销与审计（已实现）
-├─ StatisticsService          # 当前用户月份聚合和连续天数（未实现，BE-10C）
-├─ WeeklyReportService         # 读取日期级正式快照（未适配，仍读条目级状态，BE-10C）
-└─ ExportService               # 一日期一正式记录（未适配，仍读条目级状态，BE-10C）
+├─ StatisticsService          # 当前用户月份聚合和连续天数（已实现，BE-10C）
+├─ WeeklyReportService         # 读取日期级正式快照（已实现，BE-10C）
+└─ ExportService               # 一日期一正式记录（已实现，BE-10C）
         ↓
 Repository -> Model/SQLite
 ```

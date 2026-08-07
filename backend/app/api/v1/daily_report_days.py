@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
-from app.core.errors import AppError
+from app.core.month_range import parse_month_range
 from app.db.session import get_db_session
 from app.models import User
 from app.schemas.common import ApiResponse
@@ -19,23 +19,6 @@ from app.schemas.daily_report_day import (
 from app.services.daily_report_day import DailyReportDayService, DayDetail
 
 router = APIRouter(prefix="/api/v1/daily-report-days", tags=["daily-report-days"])
-
-
-class InvalidMonthError(AppError):
-    def __init__(self) -> None:
-        super().__init__(code=40001, http_status=400, message="month 必须是 YYYY-MM 格式")
-
-
-def _parse_month(month: str) -> tuple[date, date]:
-    year_text, month_text = month.split("-")
-    try:
-        year, month_no = int(year_text), int(month_text)
-        month_start = date(year, month_no, 1)
-    except ValueError as error:
-        raise InvalidMonthError() from error
-    next_month_start = date(year + 1, 1, 1) if month_no == 12 else date(year, month_no + 1, 1)
-    month_end = date.fromordinal(next_month_start.toordinal() - 1)
-    return month_start, month_end
 
 
 def _detail_response(detail: DayDetail) -> DailyReportDayDetailData:
@@ -71,7 +54,7 @@ async def month_summary(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     month: Annotated[str, Query(pattern=r"^\d{4}-\d{2}$")],
 ) -> ApiResponse[DailyReportDayMonthData]:
-    month_start, month_end = _parse_month(month)
+    month_start, month_end = parse_month_range(month)
     items = await DailyReportDayService(session).month_summary(
         current_user.id, month_start=month_start, month_end=month_end
     )

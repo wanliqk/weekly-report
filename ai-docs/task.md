@@ -177,11 +177,11 @@ uv sync --directory backend --frozen
 | DESIGN-10 | 主 Agent | 第二版方案设计与迁移评审 | REQ-10、ISS-018..ISS-022 | DONE | 日期容器 1:n 条目、正式快照、日期互斥事务、最小权限审计、统计、V1 迁移/受限 downgrade、API 与 Electron 路由已确认并提交 `e767ebd` |
 | BE-10A | 主 Agent | 第二版迁移与认证基线 | DESIGN-10 | DONE | 日期/审计模型与迁移、周报 V2 快照迁移、双账号 bootstrap、强制改密、自动归档移除均已实现；旧库升级/受限降级和认证测试通过 |
 | BE-10B | 主 Agent | 日报聚合、管理员撤销与用户安全删除 | BE-10A | DONE | 同日多篇、幂等创建、草稿删除/提交、日期级归档、最小权限撤销/审计、安全删除及并发测试均已实现、自测、质量门禁与独立安全审查通过 |
-| BE-10C | 主 Agent | 周报、导出与统计适配 | BE-10B | TODO | 日期正式来源、周报 JSON、Excel 多来源列、月历/统计 API 及跨年/闰日测试 |
+| BE-10C | 主 Agent | 周报、导出与统计适配 | BE-10B | DONE | 日期正式来源、周报 JSON、Excel 多来源列、月历/统计 API 及跨年/闰日测试均已实现、自测、质量门禁通过 |
 | FE-10 | 主 Agent | 第二版 Electron/Vue 界面实现 | BE-10A、BE-10B、BE-10C 契约 | TODO | 强制改密、菜单改名、我的日报月历/归档、我的周报适配、设置收口、管理员入口、用户删除和统计页 |
 | QA-10 | 主 Agent | 第二版迁移、权限、并发、统计与 E2E 验收 | BE-10A..BE-10C、FE-10 | TODO | 旧库迁移、同日并发、汇总原子性、权限隔离、删除保护、跨月/闰日统计及完整桌面流程通过门禁 |
 
-第二版需求、方案、`BE-10A` 和 `BE-10B` 均已完成；日报条目已是真正的同日多篇 + 日期级归档，V1 单篇兼容桥已移除。周报/导出/统计仍按 BE-10A 遗留方式读取条目级 `archived` 状态，尚未切换到日期级正式快照，等待 `BE-10C` 接管。
+第二版需求、方案、`BE-10A`、`BE-10B` 和 `BE-10C` 均已完成；日报条目已是真正的同日多篇 + 日期级归档，V1 单篇兼容桥已移除；周报、导出和统计后端均已切换为读取日期级正式快照（`daily_report_days.archive_snapshot_json`），不再读取条目级 `archived` 状态。全部第二版 Electron/Vue 界面适配等待 `FE-10` 接管。
 
 ## 4. 当前可领取任务
 
@@ -199,7 +199,7 @@ uv sync --directory backend --frozen
 
 阶段 9 四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。V1 全部 9 个阶段现已交付完毕。
 
-第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B` 均为 `DONE`。当前可领取且仅可领取 `BE-10C`；后续严格按 BE-10C -> FE-10 -> QA-10 的依赖推进。
+第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C` 均为 `DONE`。当前可领取且仅可领取 `FE-10`；后续严格按 FE-10 -> QA-10 的依赖推进。
 
 ### 第二版阶段 10A 验证记录
 
@@ -216,6 +216,18 @@ uv sync --directory backend --frozen
 - 独立安全专项审查（沙盒 Agent 独立读取 diff，未采信本 Agent 的实现结论）：逐项核查所有权隔离（日报条目/日期容器全部按 `owner_id` 过滤）、admin 查询是否泄露正文（`list_submitted_awaiting_archive`/`get_submitted_metadata` 均为原始列选择，不选择 `content_json`/`template_snapshot_json`）、SQL 注入（全部走 SQLAlchemy Core/ORM 构造）、用户删除权限提升路径（非管理员 403、自我删除阻断、末位管理员条件 `DELETE` 且已用并发测试验证、`has_business_records` 覆盖三张业务表并有外键 RESTRICT 兜底）、确认/原因绕过（用户名精确匹配、原因去空白后非空校验）、`client_request_id` 幂等键跨用户信息泄露（跨用户复用返回 40908 冲突而非泄露对方日报）、审计日志注入（`metadata_json` 全部走 `json.dumps` 结构化写入）。未发现 P0/P1 级可利用漏洞；识别出一项低置信度（4/10）信息项（`client_request_id` 跨用户存在性探测，无数据泄露，不构成漏洞）已记录但不阻塞交付。
 - 关键实现事实：`daily_report_days`/`daily_reports` 的所有写操作复用 SQLite 单写者锁作为日期行并发互斥点（`touch_open_for_write` 在归档前率先获取写锁并复查 `open` 状态，`insert_entry_if_day_open` 用 `INSERT ... SELECT ... WHERE EXISTS` 单语句关闭创建与归档之间的竞态窗口，与 `AUTH-01` 的 `create_if_no_users_exist` 同一模式）；`DELETE /daily-reports/{id}/archive` 单篇归档接口已按 `api.md` §13.2 移除，替换为 `POST /daily-report-days/{work_date}/archive` 的日期级归档；用户安全删除的业务记录检查覆盖 `daily_report_days`/`weekly_reports`/`export_jobs`（`daily_reports` 通过日期容器传递覆盖），默认关联资源（`user_settings`/`report_templates`/`template_versions`）作为脚手架数据被显式清理而非阻塞删除。
 - 已知范围边界（非缺陷，记录供 BE-10C 承接）：周报生成/重生成（`WeeklyReportService`）与导出（`ExportService`）仍读取 `daily_reports.status == 'archived'` 的条目级查询，未切换到 `daily_report_days.archive_snapshot_json` 的日期级正式快照；在真实多条目场景下对同一日期归档后，周报/导出的多条目聚合语义尚不正确（`weekly_report_sources` 按 `daily_report_day_id` 去重会在多条目场景下与来源假设冲突），已记录为 BE-10C 的既定范围而非本阶段回归；`test_exports_api.py`/`test_weekly_reports_api.py` 的测试夹具已同步改为调用新的日期级归档接口，但其覆盖场景仍是每日单条目，未验证多条目下的周报/导出行为。
+
+### 第二版阶段 10C 验证记录
+
+- 启动前先完整核对 `docs/方案设计.md` 第二版章节全文，发现并修正 BE-10B 遗留的五处响应契约偏差（`day_id`、`created`、月历稀疏返回/字段改名、用户 `can_delete`、撤销 `actor_username`），随独立 `fix` 提交先行交付（见 ISS-023），确保 BE-10C 在正确契约基础上开工。
+- 周报：`availability()`/`generate()`/`regenerate()` 全部改为查询 `daily_report_days`（`list_in_range`/`list_archived_in_range`），`WeeklyDay` schema 由单一 `daily_report_id` 改为 `daily_report_day_id` + `entries: list[WeeklyDayEntry]`（每个来源条目独立一份 `fields`），`build_weekly_content()` 直接解析每个日期的 `archive_snapshot_json`（不再读取 `daily_reports` 条目表）；`availability()` 的逐日状态改为基于日期容器状态 + 当天条目构成推导（`archived`/`draft`/`submitted`/`None`），而非条目自身状态，`archived_count`/`non_archived_dates` 相应改为按日期计数/去重。V1 遗留的 `schema_version is None` 兼容解析分支已随之移除（BE-10A 迁移已保证全部历史数据是 `schema_version=2`）。
+- 导出：`ExportCreateRequest.report_ids` 改名 `daily_report_day_ids`，筛选/选择均改为查询 `daily_report_days.status='archived'`；一日期一行，基础列新增"来源条目数"；单个日期存在多篇来源时，同一字段的多个值按来源提交顺序渲染为 `[1] 值\n[2] 值`（保留来源边界，`docs/方案设计.md` §9.2），单来源时保持原始类型（数字列不因合并逻辑被转成文本）；`=` 公式注入防护对每个来源值和合并后的整体文本值均生效；越权/不存在/未归档选择的响应字段改名为 `invalid_daily_report_day_ids`。
+- 统计：新增 `GET /api/v1/statistics/monthly?month=YYYY-MM`（`app/services/statistics.py`/`app/api/v1/statistics.py`），当前月分母截至 Asia/Shanghai 今天、历史月为整月、未来月分母 0 且 `completion_rate=null`；`daily_report_count` 统计工作日期在所选月且状态为 `submitted`/`archived` 的来源条目（草稿不计，正式日报不重复计数）；`weekly_report_count` 按 `week_start` 所在月统计；`current_streak_days` 与所选月份无关，始终按"今天已完成则从今天向前，今天未完成但昨天完成则从昨天向前，否则为 0"的规则查询最近完成日期；`days` 复用月历稀疏摘要（仅返回存在记录的日期）。新增 `app/core/month_range.py` 提取 `YYYY-MM` 解析逻辑，供日历和统计两个接口共用（避免重复实现）。
+- 实际门禁：后端 `uv run ruff check .`、`ruff format --check .`、`mypy`（strict，123 个源文件）、`pytest`（**280 项通过**，阶段 10B 遗留 246 项 + 本阶段新增 34 项：完成率/有效范围/连续天数纯函数 14 项、统计服务直连测试 5 项、统计 API 测试 5 项、`parse_month_range` 纯函数测试 10 项）均通过。周报/导出/统计新增与调整测试覆盖：跨年周、闰周/闰日分母、多来源条目合并为周报 `entries[]`、导出多来源 `[N]` 格式化与单来源保持数值类型、导出/周报测试夹具切换为构造真实 `archive_snapshot_json`。
+- 前端/桌面回归（未修改任何 Electron/Vue 文件）：`npm run lint`、`npm run typecheck`、`npm test`（18 文件 108 项）、`npm run build` 均实际执行并通过；renderer 现有周报/导出 TypeScript 代码仍是 V1 形状，尚未适配新契约，是 `FE-10` 的既定范围而非本阶段回归。
+- `git diff --check` 通过（仅常规 LF→CRLF 提示）。
+- 独立安全专项审查（沙盒 Agent 独立读取 diff，未采信本 Agent 的实现结论）：逐项核查所有权隔离（`WeeklyReportService`/`ExportService`/`StatisticsService` 全部新增/改写查询按 `owner_id` 过滤）、导出 `daily_report_day_ids` 越权隔离、统计跨用户泄露、SQL 注入、多来源单元格公式注入防护回归，未发现 P0/P1。发现并修复一项真实的 LOW 严重度问题：`app/core/month_range.py::parse_month_range()` 对 `9999-12`（`date.MAXYEAR` 的 12 月）会在 `try/except` 之外计算下月首日导致未捕获 `ValueError`（原本返回 500 而非预期的 `40001`），已把该计算移入 `try` 块并补充 `tests/test_month_range.py`（10 项，含该回归场景）。
+- 已知的 ISS-013（`test_tampered_access_token_is_rejected`/`test_expired_and_tampered_tokens_map_to_40102` 偶发假阳性）在本阶段全量跑批中复现一次，单独重跑通过，与本阶段改动无关，不阻塞交付。
 
 ## 5. 实际验证记录
 

@@ -1,6 +1,5 @@
 import json
 from datetime import UTC, date, datetime, timedelta
-from typing import cast
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,22 +7,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import Clock, utc_now
 from app.core.errors import AppError
 from app.core.ulid import generate_ulid
-from app.models import DailyReport, WeeklyReport
+from app.models import DailyReportDay, WeeklyReport
 from app.repositories.daily_report import DailyReportRepository
+from app.repositories.daily_report_day import DailyReportDayRepository
 from app.repositories.weekly_report import WeeklyReportRepository, WeeklySource
-from app.schemas.daily_report import DailyContent, DailyStatus
+from app.schemas.daily_report import DailyStatus
 from app.schemas.weekly_report import (
     WeeklyAvailabilityData,
     WeeklyAvailabilityDay,
     WeeklyContent,
     WeeklyDay,
+    WeeklyDayEntry,
     WeeklyDayField,
 )
-from app.services.daily_report import parse_daily_content
-from app.services.template import parse_template_fields
+from app.services.daily_report_day import parse_day_archive_snapshot
 
 WEEK_LENGTH = timedelta(days=6)
-_ACTIVE_STATUSES = {"draft", "submitted"}
 
 
 class WeeklyWeekStartInvalidError(AppError):
@@ -62,39 +61,59 @@ def week_end_for(week_start: date) -> date:
     return week_start + WEEK_LENGTH
 
 
-def _utc_iso(value: datetime) -> str:
+def _utc_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(UTC).isoformat()
 
 
 def parse_weekly_content(content_json: str) -> WeeklyContent:
+    """Parses the `schema_version=2` day/entries JSON (`database.md` §8.1).
+
+    BE-10A's migration unconditionally upgrades every pre-existing row to
+    this shape before the application ever serves traffic, so there is no
+    remaining V1 (flat, single-source) shape to fall back to — the earlier
+    compatibility branch this function had is gone as of `BE-10C`.
+    """
     raw = json.loads(content_json)
-    if not isinstance(raw, dict):
-        raise RuntimeError("stored weekly content is invalid")
-    schema_version = raw.get("schema_version")
-    if schema_version is None:
-        return WeeklyContent.model_validate(raw)
-    if schema_version != 2 or not isinstance(raw.get("days"), list):
+    if (
+        not isinstance(raw, dict)
+        or raw.get("schema_version") != 2
+        or not isinstance(raw.get("days"), list)
+    ):
         raise RuntimeError("stored weekly content has an unsupported schema version")
 
     days: list[WeeklyDay] = []
     for day in raw["days"]:
-        if not isinstance(day, dict) or not isinstance(day.get("entries"), list):
+        if (
+            not isinstance(day, dict)
+            or not isinstance(day.get("entries"), list)
+            or not isinstance(day.get("daily_report_day_id"), str)
+        ):
             raise RuntimeError("stored weekly content contains an invalid day")
         entries = day["entries"]
         if day.get("source_count") != len(entries):
             raise RuntimeError("stored weekly content source count does not match entries")
+        parsed_entries: list[WeeklyDayEntry] = []
         for entry in entries:
             if not isinstance(entry, dict):
                 raise RuntimeError("stored weekly content contains an invalid entry")
-            days.append(
-                WeeklyDay(
-                    work_date=day.get("work_date"),
+            parsed_entries.append(
+                WeeklyDayEntry(
                     daily_report_id=entry.get("daily_report_id"),
-                    fields=entry.get("fields"),
+                    submitted_at=entry.get("submitted_at"),
+                    fields=entry.get("fields", []),
                 )
             )
+        days.append(
+            WeeklyDay(
+                work_date=day.get("work_date"),
+                daily_report_day_id=day["daily_report_day_id"],
+                entries=parsed_entries,
+            )
+        )
     return WeeklyContent(
         days=days,
         supplement=raw.get("supplement", ""),
@@ -103,31 +122,26 @@ def parse_weekly_content(content_json: str) -> WeeklyContent:
     )
 
 
-def _serialize_weekly_content_v2(content: WeeklyContent, reports: list[DailyReport]) -> str:
-    report_by_id = {report.id: report for report in reports}
-    days: list[dict[str, object]] = []
-    for day in content.days:
-        report = report_by_id.get(day.daily_report_id)
-        if report is None or report.submitted_at is None:
-            raise RuntimeError("weekly content source report is missing")
-        days.append(
-            {
-                "work_date": day.work_date.isoformat(),
-                "daily_report_day_id": report.day_id,
-                "source_count": 1,
-                "entries": [
-                    {
-                        "daily_report_id": report.id,
-                        "submitted_at": _utc_iso(report.submitted_at),
-                        "fields": [field.model_dump(mode="json") for field in day.fields],
-                    }
-                ],
-            }
-        )
+def _serialize_weekly_content(content: WeeklyContent) -> str:
     return json.dumps(
         {
             "schema_version": 2,
-            "days": days,
+            "days": [
+                {
+                    "work_date": day.work_date.isoformat(),
+                    "daily_report_day_id": day.daily_report_day_id,
+                    "source_count": len(day.entries),
+                    "entries": [
+                        {
+                            "daily_report_id": entry.daily_report_id,
+                            "submitted_at": _utc_iso(entry.submitted_at),
+                            "fields": [field.model_dump(mode="json") for field in entry.fields],
+                        }
+                        for entry in day.entries
+                    ],
+                }
+                for day in content.days
+            ],
             "supplement": content.supplement,
             "next_week_plan": content.next_week_plan,
             "risks": content.risks,
@@ -137,26 +151,26 @@ def _serialize_weekly_content_v2(content: WeeklyContent, reports: list[DailyRepo
     )
 
 
-def _serialize_weekly_source_snapshot_v2(reports: list[DailyReport]) -> str:
-    days: list[dict[str, object]] = []
-    for report in reports:
-        if report.submitted_at is None:
-            raise RuntimeError("weekly source report is missing submitted_at")
-        days.append(
+def _serialize_source_snapshot(days: list[DailyReportDay]) -> str:
+    snapshot_days: list[dict[str, object]] = []
+    for day in days:
+        snapshot = parse_day_archive_snapshot(day.archive_snapshot_json or "")
+        snapshot_days.append(
             {
-                "work_date": report.work_date.isoformat(),
-                "daily_report_day_id": report.day_id,
-                "source_count": 1,
+                "work_date": day.work_date.isoformat(),
+                "daily_report_day_id": day.id,
+                "source_count": len(snapshot.entries),
                 "entries": [
                     {
-                        "daily_report_id": report.id,
-                        "submitted_at": _utc_iso(report.submitted_at),
+                        "daily_report_id": entry.daily_report_id,
+                        "submitted_at": _utc_iso(entry.submitted_at),
                     }
+                    for entry in snapshot.entries
                 ],
             }
         )
     return json.dumps(
-        {"schema_version": 2, "days": days},
+        {"schema_version": 2, "days": snapshot_days},
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -165,54 +179,61 @@ def _serialize_weekly_source_snapshot_v2(reports: list[DailyReport]) -> str:
 def _replace_weekly_free_text(
     content_json: str, *, supplement: str, next_week_plan: str, risks: str
 ) -> str:
-    raw = json.loads(content_json)
-    if isinstance(raw, dict) and raw.get("schema_version") == 2:
-        raw["supplement"] = supplement
-        raw["next_week_plan"] = next_week_plan
-        raw["risks"] = risks
-        serialized = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
-        parse_weekly_content(serialized)
-        return serialized
     current = parse_weekly_content(content_json)
-    return current.model_copy(
-        update={
-            "supplement": supplement,
-            "next_week_plan": next_week_plan,
-            "risks": risks,
-        }
-    ).model_dump_json()
+    return _serialize_weekly_content(
+        current.model_copy(
+            update={
+                "supplement": supplement,
+                "next_week_plan": next_week_plan,
+                "risks": risks,
+            }
+        )
+    )
 
 
 def build_weekly_content(
-    reports: list[DailyReport], *, supplement: str = "", next_week_plan: str = "", risks: str = ""
+    days: list[DailyReportDay],
+    *,
+    supplement: str = "",
+    next_week_plan: str = "",
+    risks: str = "",
 ) -> WeeklyContent:
-    """Pure function: summarizes archived daily reports into a weekly snapshot.
+    """Pure function: folds each archived day's official snapshot into a week.
 
-    Only enabled fields (in each report's own template snapshot) are carried
-    over, matching how the daily UI itself only ever showed those fields at
-    archive time; disabled fields are dropped rather than shown as stale.
+    Reads only each day's own `archive_snapshot_json` (never the current
+    template), so later template changes cannot alter a week already
+    generated. Only fields still `enabled` in each entry's own snapshot are
+    carried over, matching how the daily UI itself only showed those fields
+    at archive time.
     """
-    days: list[WeeklyDay] = []
-    for report in reports:
-        fields = parse_template_fields(report.template_snapshot_json)
-        content: DailyContent = parse_daily_content(report.content_json)
-        enabled = sorted((f for f in fields if f.enabled), key=lambda f: f.sort_order)
-        days.append(
-            WeeklyDay(
-                work_date=report.work_date,
-                daily_report_id=report.id,
-                fields=[
-                    WeeklyDayField(
-                        field_key=field.field_key,
-                        label=field.label,
-                        value=content.get(field.field_key),
-                    )
-                    for field in enabled
-                ],
+    weekly_days: list[WeeklyDay] = []
+    for day in days:
+        snapshot = parse_day_archive_snapshot(day.archive_snapshot_json or "")
+        entries: list[WeeklyDayEntry] = []
+        for entry in snapshot.entries:
+            enabled = sorted(
+                (field for field in entry.template_snapshot if field.enabled),
+                key=lambda field: field.sort_order,
             )
+            entries.append(
+                WeeklyDayEntry(
+                    daily_report_id=entry.daily_report_id,
+                    submitted_at=entry.submitted_at,
+                    fields=[
+                        WeeklyDayField(
+                            field_key=field.field_key,
+                            label=field.label,
+                            value=entry.content.get(field.field_key),
+                        )
+                        for field in enabled
+                    ],
+                )
+            )
+        weekly_days.append(
+            WeeklyDay(work_date=day.work_date, daily_report_day_id=day.id, entries=entries)
         )
     return WeeklyContent(
-        days=days, supplement=supplement, next_week_plan=next_week_plan, risks=risks
+        days=weekly_days, supplement=supplement, next_week_plan=next_week_plan, risks=risks
     )
 
 
@@ -222,29 +243,38 @@ class WeeklyReportService:
         self._clock = clock
         self._reports = WeeklyReportRepository(session)
         self._daily_reports = DailyReportRepository(session)
+        self._days = DailyReportDayRepository(session)
 
     async def availability(self, owner_id: str, week_start: date) -> WeeklyAvailabilityData:
         week_end = week_end_for(week_start)
-        reports = await self._daily_reports.list_owned_in_range(
-            owner_id, date_from=week_start, date_to=week_end
-        )
-        by_date = {report.work_date: report for report in reports}
-        days = [
-            WeeklyAvailabilityDay(
-                work_date=day,
-                status=cast(DailyStatus, by_date[day].status) if day in by_date else None,
-            )
-            for day in _each_day(week_start, week_end)
-        ]
-        archived_count = sum(1 for report in reports if report.status == "archived")
-        non_archived_dates = [
-            report.work_date for report in reports if report.status in _ACTIVE_STATUSES
-        ]
+        days = await self._days.list_in_range(owner_id, date_from=week_start, date_to=week_end)
+        by_date = {day.work_date: day for day in days}
+
+        availability_days: list[WeeklyAvailabilityDay] = []
+        archived_count = 0
+        non_archived_dates: list[date] = []
+        for current in _each_day(week_start, week_end):
+            day = by_date.get(current)
+            status: DailyStatus | None = None
+            if day is not None:
+                if day.status == "archived":
+                    status = "archived"
+                    archived_count += 1
+                else:
+                    entries = await self._daily_reports.list_by_day(day.id)
+                    if any(entry.status == "draft" for entry in entries):
+                        status = "draft"
+                    elif any(entry.status == "submitted" for entry in entries):
+                        status = "submitted"
+                    if status is not None:
+                        non_archived_dates.append(current)
+            availability_days.append(WeeklyAvailabilityDay(work_date=current, status=status))
+
         existing = await self._reports.get_by_owner_week(owner_id, week_start)
         return WeeklyAvailabilityData(
             week_start=week_start,
             week_end=week_end,
-            days=days,
+            days=availability_days,
             archived_count=archived_count,
             non_archived_dates=non_archived_dates,
             existing_weekly_report_id=existing.id if existing else None,
@@ -273,12 +303,11 @@ class WeeklyReportService:
 
     async def generate(self, owner_id: str, *, week_start: date) -> WeeklyReport:
         week_end = week_end_for(week_start)
-        archived = await self._daily_reports.list_owned_archived_by_range(
+        archived_days = await self._days.list_archived_in_range(
             owner_id, date_from=week_start, date_to=week_end
         )
         now = self._clock()
-        content = build_weekly_content(archived)
-        content_json = _serialize_weekly_content_v2(content, archived)
+        content_json = _serialize_weekly_content(build_weekly_content(archived_days))
         report = WeeklyReport(
             id=generate_ulid(),
             user_id=owner_id,
@@ -286,13 +315,13 @@ class WeeklyReportService:
             week_end=week_end,
             generated_content_json=content_json,
             content_json=content_json,
-            source_snapshot_json=_serialize_weekly_source_snapshot_v2(archived),
+            source_snapshot_json=_serialize_source_snapshot(archived_days),
             generated_at=now,
             version=1,
         )
         try:
             await self._reports.add(report)
-            await self._reports.replace_sources(report.id, _sources_for(archived, now))
+            await self._reports.replace_sources(report.id, _sources_for(archived_days, now))
             await self._session.commit()
         except IntegrityError as error:
             await self._session.rollback()
@@ -344,11 +373,11 @@ class WeeklyReportService:
             raise WeeklyRegenerateNotConfirmedError()
         report = await self.get(owner_id, report_id)
         week_end = week_end_for(report.week_start)
-        archived = await self._daily_reports.list_owned_archived_by_range(
+        archived_days = await self._days.list_archived_in_range(
             owner_id, date_from=report.week_start, date_to=week_end
         )
         now = self._clock()
-        content_json = _serialize_weekly_content_v2(build_weekly_content(archived), archived)
+        content_json = _serialize_weekly_content(build_weekly_content(archived_days))
         updated = await self._reports.replace_on_regenerate(
             report_id=report_id,
             owner_id=owner_id,
@@ -361,7 +390,7 @@ class WeeklyReportService:
         if not updated:
             await self._session.rollback()
             raise WeeklyReportVersionConflictError()
-        await self._reports.replace_sources(report_id, _sources_for(archived, now))
+        await self._reports.replace_sources(report_id, _sources_for(archived_days, now))
         await self._session.commit()
         return await self.get(owner_id, report_id)
 
@@ -375,12 +404,12 @@ def _each_day(week_start: date, week_end: date) -> list[date]:
     return days
 
 
-def _sources_for(reports: list[DailyReport], included_at: datetime) -> list[WeeklySource]:
+def _sources_for(days: list[DailyReportDay], included_at: datetime) -> list[WeeklySource]:
     return [
         WeeklySource(
-            daily_report_id=r.day_id,
-            work_date=r.work_date,
+            daily_report_day_id=day.id,
+            work_date=day.work_date,
             included_at=included_at,
         )
-        for r in reports
+        for day in days
     ]

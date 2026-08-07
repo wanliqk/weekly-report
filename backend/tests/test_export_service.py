@@ -14,8 +14,8 @@ from app.core.ulid import generate_ulid
 from app.db.engine import create_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
-from app.models import DailyReport, DailyReportDay, ExportJob, User
-from app.repositories.daily_report import DailyReportRepository
+from app.models import DailyReportDay, ExportJob, User
+from app.repositories.daily_report_day import DailyReportDayRepository
 from app.repositories.template import TemplateRepository
 from app.schemas.export import ExportFilter
 from app.services.bootstrap import BootstrapService
@@ -27,6 +27,7 @@ from app.services.export import (
 )
 
 _FIXED_NOW = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
+_BASE_HEADERS = ("工作日期", "来源条目数", "提交时间", "归档时间")
 
 
 def _past_clock() -> datetime:
@@ -84,63 +85,80 @@ async def _default_template_version_id(session: AsyncSession, owner_id: str) -> 
     return version.id
 
 
-async def _archived_report(
+def _snapshot(
+    *, work_date: date, entries: list[tuple[str, list[dict[str, object]], dict[str, str]]]
+) -> str:
+    return json.dumps(
+        {
+            "schema_version": 2,
+            "work_date": work_date.isoformat(),
+            "entries": [
+                {
+                    "daily_report_id": entry_id,
+                    "submitted_at": _FIXED_NOW.isoformat(),
+                    "template_version_id": "version",
+                    "template_snapshot": fields,
+                    "content": content,
+                }
+                for entry_id, fields, content in entries
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+async def _archived_day(
     session: AsyncSession,
     *,
     owner_id: str,
     work_date: date,
     fields: list[dict[str, object]],
     content: dict[str, str],
-) -> DailyReport:
-    report_id = generate_ulid()
-    report = DailyReport(
-        id=report_id,
-        day_id=report_id,
-        client_request_id=report_id,
-        day=DailyReportDay(
-            id=report_id,
-            user_id=owner_id,
-            work_date=work_date,
-            status="archived",
-            archive_snapshot_json="{}",
-            source_count=1,
-            archived_by=owner_id,
-            archived_at=_FIXED_NOW,
-        ),
+) -> DailyReportDay:
+    return await _archived_day_multi(
+        session, owner_id=owner_id, work_date=work_date, entries=[(fields, content)]
+    )
+
+
+async def _archived_day_multi(
+    session: AsyncSession,
+    *,
+    owner_id: str,
+    work_date: date,
+    entries: list[tuple[list[dict[str, object]], dict[str, str]]],
+) -> DailyReportDay:
+    await _default_template_version_id(session, owner_id)  # ensures template exists
+    entry_ids = [generate_ulid() for _ in entries]
+    day = DailyReportDay(
+        id=generate_ulid(),
+        user_id=owner_id,
+        work_date=work_date,
         status="archived",
-        template_version_id=await _default_template_version_id(session, owner_id),
-        template_snapshot_json=json.dumps(fields, ensure_ascii=False),
-        content_json=json.dumps(content, ensure_ascii=False),
-        version=2,
-        submitted_at=_FIXED_NOW,
-        archived_at=_FIXED_NOW,
-    )
-    await DailyReportRepository(session).add(report)
-    await session.commit()
-    return report
-
-
-async def _draft_report(session: AsyncSession, *, owner_id: str, work_date: date) -> DailyReport:
-    report_id = generate_ulid()
-    report = DailyReport(
-        id=report_id,
-        day_id=report_id,
-        client_request_id=report_id,
-        day=DailyReportDay(
-            id=report_id,
-            user_id=owner_id,
+        archive_snapshot_json=_snapshot(
             work_date=work_date,
-            status="open",
+            entries=[
+                (entry_id, fields, content)
+                for entry_id, (fields, content) in zip(entry_ids, entries, strict=True)
+            ],
         ),
-        status="draft",
-        template_version_id=await _default_template_version_id(session, owner_id),
-        template_snapshot_json="[]",
-        content_json="{}",
-        version=1,
+        source_count=len(entries),
+        archived_by=owner_id,
+        archived_at=_FIXED_NOW,
+        version=2,
     )
-    await DailyReportRepository(session).add(report)
+    day_repository = DailyReportDayRepository(session)
+    await day_repository.add(day)
     await session.commit()
-    return report
+    return day
+
+
+async def _draft_day(session: AsyncSession, *, owner_id: str, work_date: date) -> DailyReportDay:
+    day = DailyReportDay(
+        id=generate_ulid(), user_id=owner_id, work_date=work_date, status="open", version=1
+    )
+    await DailyReportDayRepository(session).add(day)
+    await session.commit()
+    return day
 
 
 async def _bootstrap_user(session: AsyncSession) -> User:
@@ -160,14 +178,14 @@ async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeed
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
         user = await _bootstrap_user(session)
-        older = await _archived_report(
+        older = await _archived_day(
             session,
             owner_id=user.id,
             work_date=date(2026, 8, 3),
             fields=_fields([("k1", "今日进展"), ("k2", "明日计划")]),
             content={"k1": "写文档", "k2": "写测试"},
         )
-        newer = await _archived_report(
+        newer = await _archived_day(
             session,
             owner_id=user.id,
             work_date=date(2026, 8, 4),
@@ -177,7 +195,7 @@ async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeed
 
     async with session_factory() as session:
         job = await ExportService(session, export_settings).create(
-            user.id, report_ids=[newer.id, older.id], filter_=None
+            user.id, daily_report_day_ids=[newer.id, older.id], filter_=None
         )
 
     assert job.status == "succeeded"
@@ -190,11 +208,45 @@ async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeed
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows[0] == ("工作日期", "提交时间", "归档时间", "今日工作内容", "明日计划", "风险")
+    assert rows[0] == (*_BASE_HEADERS, "今日工作内容", "明日计划", "风险")
     assert rows[1][0] == "2026-08-03"
-    assert rows[1][3:] == ("写文档", "写测试", None)
+    assert rows[1][1] == 1
+    assert rows[1][4:] == ("写文档", "写测试", None)
     assert rows[2][0] == "2026-08-04"
-    assert rows[2][3:] == ("评审代码", "发布", "无")
+    assert rows[2][1] == 1
+    assert rows[2][4:] == ("评审代码", "发布", "无")
+
+
+async def test_create_merges_multiple_source_entries_for_one_day_into_numbered_lines(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """`docs/方案设计.md` §9.2: multi-source values render as `[1] .../[2] ...`
+    lines within a single cell, and a single-source cell keeps its plain value.
+    """
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        day = await _archived_day_multi(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 5),
+            entries=[
+                (_fields([("k1", "今日工作内容")]), {"k1": "上午写文档"}),
+                (_fields([("k1", "今日工作内容")]), {"k1": "下午写测试"}),
+            ],
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=[day.id], filter_=None
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    rows = list(sheet.iter_rows(values_only=True))
+    assert rows[1][1] == 2
+    assert rows[1][4] == "[1] 上午写文档\n[2] 下午写测试"
 
 
 async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(
@@ -203,14 +255,14 @@ async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
         user = await _bootstrap_user(session)
-        await _archived_report(
+        await _archived_day(
             session,
             owner_id=user.id,
             work_date=date(2026, 8, 5),
             fields=_fields([("k1", "今日工作内容")]),
             content={"k1": '=HYPERLINK("http://evil.example","x")'},
         )
-        await _archived_report(
+        await _archived_day(
             session,
             owner_id=user.id,
             work_date=date(2026, 8, 6),
@@ -220,19 +272,19 @@ async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(
 
     async with session_factory() as session:
         job = await ExportService(session, export_settings).create(
-            user.id, report_ids=None, filter_=ExportFilter()
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
         )
 
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    formula_cell, bullet_cell = rows[1][3], rows[2][3]
+    formula_cell, bullet_cell = rows[1][4], rows[2][4]
     assert formula_cell == '\'=HYPERLINK("http://evil.example","x")'
     assert bullet_cell == "-完成需求分析\n-编写代码"
 
     formula_row = next(row for row in sheet.iter_rows() if row[0].value == "2026-08-05")
-    assert formula_row[3].data_type != "f"
+    assert formula_row[4].data_type != "f"
 
 
 async def test_create_rejects_selection_containing_foreign_or_non_archived_ids(
@@ -241,20 +293,20 @@ async def test_create_rejects_selection_containing_foreign_or_non_archived_ids(
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
         user = await _bootstrap_user(session)
-        archived = await _archived_report(
+        archived = await _archived_day(
             session, owner_id=user.id, work_date=date(2026, 8, 5), fields=[], content={}
         )
-        draft = await _draft_report(session, owner_id=user.id, work_date=date(2026, 8, 6))
+        draft = await _draft_day(session, owner_id=user.id, work_date=date(2026, 8, 6))
 
     async with session_factory() as session:
         with pytest.raises(ExportSelectionInvalidError) as excinfo:
             await ExportService(session, export_settings).create(
                 user.id,
-                report_ids=[archived.id, draft.id, "01MISSINGMISSINGMISSINGMI"],
+                daily_report_day_ids=[archived.id, draft.id, "01MISSINGMISSINGMISSINGMI"],
                 filter_=None,
             )
 
-    assert set(excinfo.value.data["invalid_report_ids"]) == {
+    assert set(excinfo.value.data["invalid_daily_report_day_ids"]) == {
         draft.id,
         "01MISSINGMISSINGMISSINGMI",
     }
@@ -266,22 +318,22 @@ async def test_create_from_filter_only_includes_archived_reports_in_range(
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
         user = await _bootstrap_user(session)
-        await _archived_report(
+        await _archived_day(
             session,
             owner_id=user.id,
             work_date=date(2026, 7, 31),
             fields=[],
             content={},
         )
-        in_range = await _archived_report(
+        in_range = await _archived_day(
             session, owner_id=user.id, work_date=date(2026, 8, 2), fields=[], content={}
         )
-        await _draft_report(session, owner_id=user.id, work_date=date(2026, 8, 3))
+        await _draft_day(session, owner_id=user.id, work_date=date(2026, 8, 3))
 
     async with session_factory() as session:
         job = await ExportService(session, export_settings).create(
             user.id,
-            report_ids=None,
+            daily_report_day_ids=None,
             filter_=ExportFilter(date_from=date(2026, 8, 1), date_to=date(2026, 8, 31)),
         )
 
@@ -304,7 +356,7 @@ async def test_create_from_filter_with_no_matches_produces_header_only_workbook(
 
     async with session_factory() as session:
         job = await ExportService(session, export_settings).create(
-            user.id, report_ids=None, filter_=ExportFilter()
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
         )
 
     assert job.status == "succeeded"
@@ -313,7 +365,7 @@ async def test_create_from_filter_with_no_matches_produces_header_only_workbook(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows == [("工作日期", "提交时间", "归档时间")]
+    assert rows == [_BASE_HEADERS]
 
 
 async def test_create_marks_job_failed_without_raising_when_generation_fails(
@@ -328,7 +380,7 @@ async def test_create_marks_job_failed_without_raising_when_generation_fails(
 
     async with session_factory() as session:
         job = await ExportService(session, broken_settings).create(
-            user.id, report_ids=None, filter_=ExportFilter()
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
         )
 
     assert job.status == "failed"
@@ -346,7 +398,7 @@ async def test_get_download_expires_lazily_and_deletes_the_file(
 
     async with session_factory() as session:
         job = await ExportService(session, export_settings, clock=_past_clock).create(
-            user.id, report_ids=None, filter_=ExportFilter()
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
         )
     file_path = _workbook_path(job)
     assert file_path.exists()
@@ -373,7 +425,7 @@ async def test_get_download_rejects_files_outside_the_export_directory(
 
     async with session_factory() as session:
         job = await ExportService(session, export_settings).create(
-            user.id, report_ids=None, filter_=ExportFilter()
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
         )
         job.file_path = str(outside_file)
         await session.commit()
@@ -393,11 +445,11 @@ async def test_cleanup_expired_sweeps_every_owner_and_leaves_fresh_jobs_alone(
 
     async with session_factory() as session:
         stale_job = await ExportService(session, export_settings, clock=_past_clock).create(
-            user.id, report_ids=None, filter_=ExportFilter()
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
         )
     async with session_factory() as session:
         fresh_job = await ExportService(session, export_settings).create(
-            user.id, report_ids=None, filter_=ExportFilter()
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
         )
 
     stale_path = _workbook_path(stale_job)

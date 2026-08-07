@@ -1,16 +1,16 @@
 # 数据库设计
 
-> 状态：第二版 BE-10A 数据模型与 V1→V2 迁移、BE-10B 日期聚合与审计写入均已实现；周报/导出/统计下游查询待 BE-10C
+> 状态：第二版 BE-10A 数据模型与 V1→V2 迁移、BE-10B 日期聚合与审计写入、BE-10C 周报/导出/统计下游查询均已实现
 > 更新日期：2026-08-07
 > 数据库：SQLite（SQLAlchemy 2.x + Alembic）
 
 ## 0. 当前实现状态
 
-> **CR-20260807-01 事实边界**：第 1～7 节保留 V1 历史结构；第 8 节是当前 V2 数据契约。BE-10A 已落地 8.1、8.3 与认证/设置字段；BE-10B 已落地 8.2 的完整多条目事务与 8.4 的删除策略。周报/导出/统计仍按条目级查询读取 `daily_reports.status='archived'`，尚未切换为读取 `daily_report_days.archive_snapshot_json`（BE-10C 范围）。
+> **CR-20260807-01 事实边界**：第 1～7 节保留 V1 历史结构；第 8 节是当前 V2 数据契约。BE-10A 已落地 8.1、8.3 与认证/设置字段；BE-10B 已落地 8.2 的完整多条目事务与 8.4 的删除策略；BE-10C 已把周报、导出和完成统计的下游查询全部切换为读取 `daily_report_days.archive_snapshot_json`（不再读取条目级 `daily_reports.status='archived'`），实现 8.4 的统计查询口径。
 
 - 当前共有 10 张业务表的 SQLAlchemy Model；Alembic 初始迁移 `3f6f955b87bb` 与 V2 迁移 `8b1d4e6f2a90` 均已落地，启动时迁移前备份/轮转保持不变，未使用 `create_all()` 代替迁移。
 - 下列表、约束、索引、事务与备份**规则**仍是权威契约来源；实现细节（如具体文件路径）以代码为准，本节只记录"哪些已经真实存在"，不重复描述设计意图。
-- 现有 Repository/Service 已适配日期容器所有权连接和周报日期来源 FK；`admin_audit_events` 的模型/迁移随 BE-10A 落地，写入事务（撤销提交、用户删除）随 `BE-10B` 实现。
+- 现有 Repository/Service 已适配日期容器所有权连接和周报日期来源 FK；`admin_audit_events` 的模型/迁移随 BE-10A 落地，写入事务（撤销提交、用户删除）随 `BE-10B` 实现；周报/导出/统计的日期级正式来源查询随 `BE-10C` 实现，未新增表或列（复用既有 `daily_report_days`/`weekly_report_sources`/`export_jobs`/`weekly_reports` schema）。
 - 迁移与备份基础设施验证方式：`backend/tests/test_migrations.py`（空库 upgrade/降级/幂等）、`backend/tests/test_migrate_backup.py`（备份触发条件、轮转、路径边界、失败停止启动）、`backend/tests/test_db_engine.py`（PRAGMA 实际连接值）。
 - 实现后以 migration、Model、自动化测试和 `progress.md` 共同证明状态；若代码与本文冲突，先修正文档或请求确认。
 
@@ -311,4 +311,6 @@ downgrade 只有在每日期最多一条且周报快照可无损还原时允许�
 - 用户物理删除前检查日报日期/条目、周报、导出及其他业务记录；有任一业务记录返回冲突，只能停用。外键 RESTRICT 是并发最终防线。
 - 月历、统计、周报和导出均按 `user_id + 日期范围` 收敛查询；完成日期只认 archived 日期，日报篇数按 submitted/archived 来源条目计数。
 
-**已实现（BE-10B，删除部分）**：`DailyReportService.delete()` 条件删除 `status='draft'` 的条目，删除后若 `daily_report_days` 下无剩余条目则同事务删除该空 open 日期行（`DailyReportDayRepository.delete_if_empty_open`）。`UserService.delete_user()` 检查 `daily_report_days`/`weekly_reports`/`export_jobs`（`daily_reports` 通过日期容器传递覆盖，无需单独查询）；无记录时同事务清理 `user_settings`/`template_versions`/`report_templates` 默认关联资源后物理删除 `users` 行；检查后并发产生业务记录的场景由外键 `RESTRICT` 触发 `IntegrityError` 兜底捕获为 `40910`。月历、统计、周报和导出的日期级正式来源查询仍待 `BE-10C`。
+**已实现（BE-10B，删除部分）**：`DailyReportService.delete()` 条件删除 `status='draft'` 的条目，删除后若 `daily_report_days` 下无剩余条目则同事务删除该空 open 日期行（`DailyReportDayRepository.delete_if_empty_open`）。`UserService.delete_user()` 检查 `daily_report_days`/`weekly_reports`/`export_jobs`（`daily_reports` 通过日期容器传递覆盖，无需单独查询）；无记录时同事务清理 `user_settings`/`template_versions`/`report_templates` 默认关联资源后物理删除 `users` 行；检查后并发产生业务记录的场景由外键 `RESTRICT` 触发 `IntegrityError` 兜底捕获为 `40910`。
+
+**已实现（BE-10C，统计/周报/导出部分）**：月历、周报和导出均已改为按 `user_id + 日期范围` 查询 `daily_report_days`（`list_in_range`/`list_archived_in_range`/`get_by_ids_for_owner_archived`），不再查询条目级 `daily_reports` 表；完成日期只认 `daily_report_days.status='archived'`；`daily_report_count` 按工作日期归属月份统计 `daily_reports.status IN ('submitted','archived')` 的来源条目（`DailyReportRepository.count_submitted_or_archived_in_range`），`weekly_report_count` 按 `weekly_reports.week_start` 所在月统计（`WeeklyReportRepository.count_by_week_start_range`），`current_streak_days` 按 `daily_report_days.status='archived'` 的 `work_date` 集合用今天/昨天规则向前查询（`DailyReportDayRepository.list_archived_work_dates_on_or_before`，无窗口限制，个人数据规模下可接受全量查询）。

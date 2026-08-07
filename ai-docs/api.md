@@ -1,12 +1,12 @@
 # API 接口规范
 
-> 状态：V1 API 历史契约已实现；第二版 BE-10A/BE-10B 已实现，BE-10C/FE-10 待后续阶段
+> 状态：V1 API 历史契约已实现；第二版 BE-10A/BE-10B/BE-10C 已实现，FE-10 待后续阶段
 > 更新日期：2026-08-07
 > 基础路径：`/api/v1`
 
 ## 0. 契约状态与当前实现
 
-> **CR-20260807-01 事实边界**：第 1～12 节主要保留 V1 历史契约（第 7 节日报接口已被第 13.2 节取代，见下）；第 13 节描述第二版契约。BE-10A 已实现 13.1 的 bootstrap/强制改密（用户删除除外）并移除设置 PATCH；BE-10B 已实现 13.1 的 `DELETE /users/{user_id}`、13.2 全部日报条目/日期接口、13.3 全部管理员日报/审计接口；13.4（统计、周报/导出的日期级来源适配）仍待 `BE-10C`。
+> **CR-20260807-01 事实边界**：第 1～12 节主要保留 V1 历史契约（第 7 节日报接口已被第 13.2 节取代、第 8 节导出与第 9 节周报的选择/内容字段已被第 13.4 节取代，见下）；第 13 节描述第二版契约。BE-10A 已实现 13.1 的 bootstrap/强制改密（用户删除除外）并移除设置 PATCH；BE-10B 已实现 13.1 的 `DELETE /users/{user_id}`、13.2 全部日报条目/日期接口、13.3 全部管理员日报/审计接口；BE-10C 已实现 13.4 的统计 API 与周报/导出的日期级来源适配。
 
 本文件定义 V1 目标接口。接口出现在表格中不代表路由已经存在；联调和验收必须以当前代码、自动化测试与 `progress.md` 为准。
 
@@ -18,10 +18,11 @@
 - `GET /api/v1/system/bootstrap-status`、`POST /api/v1/system/bootstrap` 已在 BE-10A 更新：仍需 `X-Runtime-Secret`；空库原子创建输入的普通用户和固定 admin，双方拥有独立密码哈希/默认资源，重复或并发调用返回 `40001`。
 - `POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`PUT /api/v1/auth/password`、`POST /api/v1/auth/logout` 及五个 `/api/v1/users` 管理接口已在阶段 4 实现；除匿名入口外均同时校验 runtime secret、JWT、用户启用状态和 `token_version`，admin 接口还校验角色。
 - 第 6 节三个模板接口、第 7 节六个日报接口、第 10 节三个设置/能力接口均已在阶段 5 实现（细节见各节末尾说明）。
-- 第 8 节三个导出接口已在阶段 6 `EXPORT-01`/`EXPORT-02` 实现（细节见该节末尾说明）。
-- 第 9 节六个周报接口已在阶段 7 `WEEKLY-01`/`WEEKLY-02` 实现（细节见该节末尾说明）。
+- 第 8 节三个导出接口已在阶段 6 `EXPORT-01`/`EXPORT-02` 实现，选择字段和多来源渲染已随 `BE-10C` 更新（细节见第 13.4 节末尾说明）。
+- 第 9 节六个周报接口已在阶段 7 `WEEKLY-01`/`WEEKLY-02` 实现，内容结构和来源查询已随 `BE-10C` 更新（细节见第 13.4 节末尾说明）。
 - 第 4.1 节两个手动整库备份接口已在阶段 8 `BACKUP-01` 实现（细节见该节末尾说明）。
 - 第 13.1 节 `DELETE /users/{user_id}`、第 13.2 节全部日报条目/日期容器接口、第 13.3 节全部管理员日报/审计接口已在 `BE-10B` 实现（细节见该节末尾说明）；第 7 节描述的 V1 日报接口（同日一篇、单篇归档）已被取代，不再是当前实现契约。
+- 第 13.4 节的 `GET /statistics/monthly`、周报日期级来源适配、导出 `daily_report_day_ids` 选择均已在 `BE-10C` 实现（细节见该节末尾说明）。
 
 本文后续示例均为目标契约；实现任务不得为了匹配“已存在”的假象跳过测试或状态更新。
 
@@ -333,9 +334,17 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 | GET | `/settings/me` | 本人 | 固定时区/能力；删除自动归档字段 |
 | PATCH | `/settings/me` | 本人 | 第二版移除 |
 | GET/POST/PUT | `/weekly-reports...` | 本人 | 路径保持，来源改为日期级正式日报 |
-| POST | `/exports` | 本人 | 显式选择改为 `daily_report_day_ids`；筛选只选 archived 日期 |
+| POST | `/daily-report-exports` | 本人 | 显式选择改为 `daily_report_day_ids`；筛选只选 archived 日期。路径本身不改名（`docs/方案设计.md` §8 明确未列出的导出/周报/备份接口保持既有路径），此前草案曾写作 `/exports`，已按方案原文订正 |
 
 统计当前月分母截至 Asia/Shanghai 今天，历史月为整月，未来月分母 0 且完成率 null；完成日期只认 archived 日期，日报篇数为 submitted/archived 来源条目，周报按 `week_start` 月份，连续天数按今天/昨天规则。
+
+上述统计、周报、导出适配均已在 `BE-10C` 实现。
+
+**`GET /statistics/monthly`**：响应 `{month, effective_date_from, effective_date_to, denominator_days, completed_days, completion_rate, daily_report_count, weekly_report_count, current_streak_days, days}`；`completion_rate` 四舍五入到小数点后一位，分母为 0（未来月）时为 `null`；`days` 复用与 `GET /daily-report-days?month=` 相同的稀疏月历摘要（只含存在记录的日期）；`current_streak_days` 与所选 `month` 无关，始终基于 Asia/Shanghai 今天用今天/昨天规则向前查询最近完成日期。
+
+**周报**：`WeeklyDay` 从单一 `daily_report_id`+`fields` 改为 `daily_report_day_id`+`entries: list[{daily_report_id,submitted_at,fields}]`，一个日期下可能有多个来源条目，各自保留独立字段值；`availability` 返回的逐日 `status` 现在反映日期容器状态（`archived`/日期开放且有草稿则 `draft`/日期开放且仅有已提交则 `submitted`/无记录则 `null`），不再是单一条目自身状态。
+
+**导出**：`ExportCreateRequest.report_ids` 更名为 `daily_report_day_ids`；选择/筛选校验失败的响应字段同步更名为 `data.invalid_daily_report_day_ids`；基础列新增"来源条目数"；一个日期存在多篇来源时，同一字段的多个值在单元格内按提交顺序渲染为 `[1] 值`、`[2] 值`（换行分隔，保留来源边界），只有单一来源时保持字段原始类型（数字列不因合并逻辑被迫转为文本）；`=` 前缀公式注入防护对每个来源值和合并后的整体文本值均生效。
 
 ### 13.5 新错误码和幂等
 

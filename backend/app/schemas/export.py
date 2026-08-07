@@ -29,15 +29,17 @@ class ExportFilter(BaseModel):
 
 
 class ExportCreateRequest(BaseModel):
-    report_ids: list[str] | None = Field(default=None)
+    """`docs/方案设计.md` §9.2: selection moved from entry IDs to date IDs."""
+
+    daily_report_day_ids: list[str] | None = Field(default=None)
     filter: ExportFilter | None = None
 
     @model_validator(mode="after")
     def _validate_exclusive_selection(self) -> Self:
-        if (self.report_ids is None) == (self.filter is None):
-            raise ValueError("report_ids 与 filter 必须二选一")
-        if self.report_ids is not None and len(self.report_ids) == 0:
-            raise ValueError("report_ids 不能为空")
+        if (self.daily_report_day_ids is None) == (self.filter is None):
+            raise ValueError("daily_report_day_ids 与 filter 必须二选一")
+        if self.daily_report_day_ids is not None and len(self.daily_report_day_ids) == 0:
+            raise ValueError("daily_report_day_ids 不能为空")
         return self
 
 

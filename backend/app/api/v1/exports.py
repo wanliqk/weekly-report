@@ -34,7 +34,9 @@ async def create_export(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> ApiResponse[ExportJobData]:
     job = await ExportService(session, settings).create(
-        current_user.id, report_ids=payload.report_ids, filter_=payload.filter
+        current_user.id,
+        daily_report_day_ids=payload.daily_report_day_ids,
+        filter_=payload.filter,
     )
     return ApiResponse(data=_job_data(job))
 

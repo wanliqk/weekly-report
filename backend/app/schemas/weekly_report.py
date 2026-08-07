@@ -5,7 +5,9 @@ from pydantic import BaseModel, Field, field_serializer
 from app.schemas.daily_report import DailyFieldValue, DailyStatus
 
 
-def _utc_iso(value: datetime) -> str:
+def _utc_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(UTC).isoformat()
@@ -17,10 +19,28 @@ class WeeklyDayField(BaseModel):
     value: DailyFieldValue
 
 
-class WeeklyDay(BaseModel):
-    work_date: date
+class WeeklyDayEntry(BaseModel):
     daily_report_id: str
+    submitted_at: datetime | None
     fields: list[WeeklyDayField]
+
+    @field_serializer("submitted_at")
+    def _serialize_submitted_at(self, value: datetime | None) -> str | None:
+        return _utc_iso(value)
+
+
+class WeeklyDay(BaseModel):
+    """One completed date's official result.
+
+    `entries` may hold several source entries when the day was archived
+    from multiple submitted entries (`docs/方案设计.md` §9.1); the day
+    itself is still exactly one row here, matching the one-official-record-
+    per-date rule.
+    """
+
+    work_date: date
+    daily_report_day_id: str
+    entries: list[WeeklyDayEntry]
 
 
 class WeeklyContent(BaseModel):
@@ -70,7 +90,7 @@ class WeeklyReportListItemData(BaseModel):
 
     @field_serializer("generated_at", "updated_at")
     def _serialize_datetimes(self, value: datetime) -> str:
-        return _utc_iso(value)
+        return _utc_iso(value) or ""
 
 
 class WeeklyReportListData(BaseModel):
@@ -93,4 +113,4 @@ class WeeklyReportData(BaseModel):
 
     @field_serializer("generated_at", "created_at", "updated_at")
     def _serialize_datetimes(self, value: datetime) -> str:
-        return _utc_iso(value)
+        return _utc_iso(value) or ""

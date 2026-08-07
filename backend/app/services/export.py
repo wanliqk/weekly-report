@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -15,13 +16,13 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.timezone import format_shanghai, to_shanghai
 from app.core.ulid import generate_ulid
-from app.models import DailyReport, ExportJob
-from app.repositories.daily_report import DailyReportRepository
+from app.models import DailyReportDay, ExportJob
+from app.repositories.daily_report_day import DailyReportDayRepository
 from app.repositories.export_job import ExportJobRepository
+from app.schemas.daily_report_day import DayArchiveSnapshotData
 from app.schemas.export import ExportFilter
 from app.schemas.template import TemplateFieldData
-from app.services.daily_report import parse_daily_content
-from app.services.template import parse_template_fields
+from app.services.daily_report_day import parse_day_archive_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +31,16 @@ EXPORT_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml
 
 _SHEET_TITLE = "日报导出"
 _MULTISELECT_SEPARATOR = "、"
-_BASE_HEADERS = ["工作日期", "提交时间", "归档时间"]
+_BASE_HEADERS = ["工作日期", "来源条目数", "提交时间", "归档时间"]
 
 
 class ExportSelectionInvalidError(AppError):
-    def __init__(self, invalid_report_ids: list[str]) -> None:
+    def __init__(self, invalid_daily_report_day_ids: list[str]) -> None:
         super().__init__(
             code=40001,
             http_status=400,
-            message="所选日报中存在不属于本人或未归档的记录",
-            data={"invalid_report_ids": invalid_report_ids},
+            message="所选日期中存在不属于本人或未归档的记录",
+            data={"invalid_daily_report_day_ids": invalid_daily_report_day_ids},
         )
 
 
@@ -60,17 +61,17 @@ class ExportColumn:
 
 
 def plan_export_columns(snapshots: list[list[TemplateFieldData]]) -> list[ExportColumn]:
-    """Merges every included report's field snapshot into one ordered column list.
+    """Merges every included entry's field snapshot into one ordered column list.
 
     `field_key` is immutable (database.md 3.4) so it is always the merge key;
     a field's *label* can change release to release, so the most recent
     snapshot that still carries the key wins for the displayed header
     (requirements.md 4.4.2: label changes must not affect merging). Column
     order follows first appearance across the chronologically ordered
-    snapshots, so fields still in use lead and fields only old reports used
-    trail after them. Two distinct `field_key`s that happen to end up with
-    the same header text get a short `field_key` suffix appended so the
-    generated columns stay unambiguous.
+    snapshots (day by day, entry by entry within a day), so fields still in
+    use lead and fields only old entries used trail after them. Two distinct
+    `field_key`s that happen to end up with the same header text get a short
+    `field_key` suffix appended so the generated columns stay unambiguous.
     """
     order: dict[str, int] = {}
     label_by_key: dict[str, str] = {}
@@ -108,7 +109,7 @@ def _defuse_formula(text: str) -> str:
     return f"'{text}" if text.startswith("=") else text
 
 
-def _cell_value(value: object) -> str | int | float | None:
+def _single_source_cell(value: object) -> str | int | float | None:
     if value is None:
         return None
     if isinstance(value, list):
@@ -120,7 +121,29 @@ def _cell_value(value: object) -> str | int | float | None:
     return _defuse_formula(str(value))
 
 
-def build_export_workbook(reports: list[DailyReport], columns: list[ExportColumn]) -> bytes:
+def _multi_source_cell(
+    values_by_position: Sequence[tuple[int, object]],
+) -> str | int | float | None:
+    """Renders a field/column that may carry values from several of a day's
+
+    source entries. `docs/方案设计.md` §9.2: a single value keeps its native
+    type (so numeric columns stay numeric); two or more values are written
+    as one text cell, one `[N] value` line per source, preserving which
+    numbered source (1-based, by submission order) each value came from.
+    """
+    present = [
+        (position, cell)
+        for position, raw in values_by_position
+        if (cell := _single_source_cell(raw)) is not None
+    ]
+    if not present:
+        return None
+    if len(present) == 1:
+        return present[0][1]
+    return "\n".join(f"[{position}] {value}" for position, value in present)
+
+
+def build_export_workbook(days: list[DailyReportDay], columns: list[ExportColumn]) -> bytes:
     """Pure, blocking xlsx builder — callers must run it off the event loop."""
     workbook = Workbook()
     sheet = workbook.active
@@ -128,14 +151,29 @@ def build_export_workbook(reports: list[DailyReport], columns: list[ExportColumn
         raise RuntimeError("workbook has no active worksheet")
     sheet.title = _SHEET_TITLE
     sheet.append([*_BASE_HEADERS, *(column.header for column in columns)])
-    for report in reports:
-        content = parse_daily_content(report.content_json)
+    for day in days:
+        snapshot: DayArchiveSnapshotData = parse_day_archive_snapshot(
+            day.archive_snapshot_json or ""
+        )
+        entries = snapshot.entries
+        submitted_times = _multi_source_cell(
+            [
+                (index + 1, format_shanghai(entry.submitted_at))
+                for index, entry in enumerate(entries)
+            ]
+        )
         row: list[str | int | float | None] = [
-            report.work_date.isoformat(),
-            format_shanghai(report.submitted_at) if report.submitted_at else "",
-            format_shanghai(report.archived_at) if report.archived_at else "",
+            day.work_date.isoformat(),
+            len(entries),
+            submitted_times,
+            format_shanghai(day.archived_at) if day.archived_at else "",
         ]
-        row.extend(_cell_value(content.get(column.field_key)) for column in columns)
+        for column in columns:
+            values_by_position = [
+                (index + 1, entry.content.get(column.field_key))
+                for index, entry in enumerate(entries)
+            ]
+            row.append(_multi_source_cell(values_by_position))
         sheet.append(row)
     buffer = BytesIO()
     workbook.save(buffer)
@@ -154,18 +192,24 @@ class ExportService:
         self._session = session
         self._settings = settings
         self._clock = clock
-        self._reports = DailyReportRepository(session)
+        self._days = DailyReportDayRepository(session)
         self._jobs = ExportJobRepository(session)
 
     async def create(
         self,
         owner_id: str,
         *,
-        report_ids: list[str] | None,
+        daily_report_day_ids: list[str] | None,
         filter_: ExportFilter | None,
     ) -> ExportJob:
-        reports = await self._resolve_reports(owner_id, report_ids=report_ids, filter_=filter_)
-        snapshots = [parse_template_fields(report.template_snapshot_json) for report in reports]
+        days = await self._resolve_days(
+            owner_id, daily_report_day_ids=daily_report_day_ids, filter_=filter_
+        )
+        snapshots = [
+            entry.template_snapshot
+            for day in days
+            for entry in parse_day_archive_snapshot(day.archive_snapshot_json or "").entries
+        ]
         columns = plan_export_columns(snapshots)
 
         now = self._clock()
@@ -174,8 +218,8 @@ class ExportService:
             user_id=owner_id,
             status="processing",
             request_json=json.dumps(
-                {"report_ids": report_ids}
-                if report_ids is not None
+                {"daily_report_day_ids": daily_report_day_ids}
+                if daily_report_day_ids is not None
                 else {"filter": (filter_ or ExportFilter()).model_dump(mode="json")},
                 ensure_ascii=False,
                 separators=(",", ":"),
@@ -187,7 +231,7 @@ class ExportService:
 
         file_path = self._settings.export_temp_dir / f"{job.id}.xlsx"
         try:
-            file_bytes = await asyncio.to_thread(build_export_workbook, reports, columns)
+            file_bytes = await asyncio.to_thread(build_export_workbook, days, columns)
             await asyncio.to_thread(file_path.write_bytes, file_bytes)
         except Exception:
             logger.exception("export file generation failed")
@@ -197,7 +241,7 @@ class ExportService:
             job.status = "succeeded"
             job.file_name = _export_file_name(now)
             job.file_path = str(file_path)
-            job.record_count = len(reports)
+            job.record_count = len(days)
 
         await self._jobs.add(job)
         await self._session.commit()
@@ -229,23 +273,23 @@ class ExportService:
         if jobs:
             await self._session.commit()
 
-    async def _resolve_reports(
+    async def _resolve_days(
         self,
         owner_id: str,
         *,
-        report_ids: list[str] | None,
+        daily_report_day_ids: list[str] | None,
         filter_: ExportFilter | None,
-    ) -> list[DailyReport]:
-        if report_ids is not None:
-            unique_ids = list(dict.fromkeys(report_ids))
-            reports = await self._reports.list_owned_archived_by_ids(owner_id, unique_ids)
-            found_ids = {report.id for report in reports}
-            missing = [report_id for report_id in unique_ids if report_id not in found_ids]
+    ) -> list[DailyReportDay]:
+        if daily_report_day_ids is not None:
+            unique_ids = list(dict.fromkeys(daily_report_day_ids))
+            days = await self._days.get_by_ids_for_owner_archived(owner_id, unique_ids)
+            found_ids = {day.id for day in days}
+            missing = [day_id for day_id in unique_ids if day_id not in found_ids]
             if missing:
                 raise ExportSelectionInvalidError(missing)
-            return reports
+            return days
         resolved_filter = filter_ or ExportFilter()
-        return await self._reports.list_owned_archived_by_range(
+        return await self._days.list_archived_in_range(
             owner_id, date_from=resolved_filter.date_from, date_to=resolved_filter.date_to
         )
 

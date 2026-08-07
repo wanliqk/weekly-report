@@ -84,7 +84,7 @@ def test_export_by_ids_returns_succeeded_job_with_downloadable_xlsx(
     created = client.post(
         "/api/v1/daily-report-exports",
         headers=headers,
-        json={"report_ids": [archived["id"]]},
+        json={"daily_report_day_ids": [archived["day_id"]]},
     )
     assert created.status_code == 200, created.text
     job = created.json()["data"]
@@ -106,8 +106,9 @@ def test_export_by_ids_returns_succeeded_job_with_downloadable_xlsx(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows[0][:3] == ("工作日期", "提交时间", "归档时间")
+    assert rows[0][:4] == ("工作日期", "来源条目数", "提交时间", "归档时间")
     assert rows[1][0] == "2026-08-01"
+    assert rows[1][1] == 1
 
 
 def test_export_file_exposes_content_disposition_to_cross_origin_renderer(
@@ -124,7 +125,7 @@ def test_export_file_exposes_content_disposition_to_cross_origin_renderer(
     created = client.post(
         "/api/v1/daily-report-exports",
         headers=headers,
-        json={"report_ids": [archived["id"]]},
+        json={"daily_report_day_ids": [archived["day_id"]]},
     )
     job_id = created.json()["data"]["id"]
 
@@ -141,7 +142,7 @@ def test_export_file_exposes_content_disposition_to_cross_origin_renderer(
     "payload",
     [
         {},
-        {"report_ids": ["01AAAAAAAAAAAAAAAAAAAAAAAA"], "filter": {}},
+        {"daily_report_day_ids": ["01AAAAAAAAAAAAAAAAAAAAAAAA"], "filter": {}},
     ],
 )
 def test_export_requires_exactly_one_selection_mode(
@@ -164,12 +165,12 @@ def test_export_rejects_selection_mixing_archived_and_non_archived_ids(
     response = client.post(
         "/api/v1/daily-report-exports",
         headers=headers,
-        json={"report_ids": [archived["id"], draft["id"]]},
+        json={"daily_report_day_ids": [archived["day_id"], draft["day_id"]]},
     )
 
     assert response.status_code == 400
     assert response.json()["code"] == 40001
-    assert response.json()["data"]["invalid_report_ids"] == [draft["id"]]
+    assert response.json()["data"]["invalid_daily_report_day_ids"] == [draft["day_id"]]
 
 
 def test_export_by_filter_only_includes_archived_reports_in_range(
@@ -204,7 +205,7 @@ def test_export_job_and_file_are_isolated_per_owner(
     created = client.post(
         "/api/v1/daily-report-exports",
         headers=admin_headers,
-        json={"report_ids": [archived["id"]]},
+        json={"daily_report_day_ids": [archived["day_id"]]},
     )
     job_id = created.json()["data"]["id"]
     alice_headers = _create_user_headers(client, admin_headers)
@@ -212,13 +213,13 @@ def test_export_job_and_file_are_isolated_per_owner(
     foreign_selection = client.post(
         "/api/v1/daily-report-exports",
         headers=alice_headers,
-        json={"report_ids": [archived["id"]]},
+        json={"daily_report_day_ids": [archived["day_id"]]},
     )
     get_job = client.get(f"/api/v1/daily-report-exports/{job_id}", headers=alice_headers)
     download = client.get(f"/api/v1/daily-report-exports/{job_id}/file", headers=alice_headers)
 
     assert foreign_selection.status_code == 400
-    assert foreign_selection.json()["data"]["invalid_report_ids"] == [archived["id"]]
+    assert foreign_selection.json()["data"]["invalid_daily_report_day_ids"] == [archived["day_id"]]
     assert get_job.status_code == 404
     assert get_job.json()["code"] == 40401
     assert download.status_code == 404

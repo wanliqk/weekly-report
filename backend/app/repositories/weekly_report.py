@@ -9,7 +9,7 @@ from app.models import WeeklyReport, WeeklyReportSource
 
 @dataclass(frozen=True)
 class WeeklySource:
-    daily_report_id: str
+    daily_report_day_id: str
     work_date: date
     included_at: datetime
 
@@ -39,6 +39,20 @@ class WeeklyReportRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def count_by_week_start_range(
+        self, owner_id: str, *, date_from: date, date_to: date
+    ) -> int:
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(WeeklyReport)
+            .where(
+                WeeklyReport.user_id == owner_id,
+                WeeklyReport.week_start >= date_from,
+                WeeklyReport.week_start <= date_to,
+            )
+        )
+        return result.scalar_one()
 
     async def list_page(
         self,
@@ -129,7 +143,7 @@ class WeeklyReportRepository:
             self._session.add(
                 WeeklyReportSource(
                     weekly_report_id=weekly_report_id,
-                    daily_report_day_id=source.daily_report_id,
+                    daily_report_day_id=source.daily_report_day_id,
                     work_date=source.work_date,
                     included_at=source.included_at,
                 )

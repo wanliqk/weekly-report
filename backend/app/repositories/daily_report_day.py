@@ -38,19 +38,37 @@ class DailyReportDayRepository:
         return list(result.scalars())
 
     async def list_archived_in_range(
-        self, owner_id: str, *, date_from: date, date_to: date
+        self, owner_id: str, *, date_from: date | None = None, date_to: date | None = None
     ) -> list[DailyReportDay]:
+        filters = [DailyReportDay.user_id == owner_id, DailyReportDay.status == "archived"]
+        if date_from is not None:
+            filters.append(DailyReportDay.work_date >= date_from)
+        if date_to is not None:
+            filters.append(DailyReportDay.work_date <= date_to)
         result = await self._session.execute(
-            select(DailyReportDay)
+            select(DailyReportDay).where(*filters).order_by(DailyReportDay.work_date.asc())
+        )
+        return list(result.scalars())
+
+    async def list_archived_work_dates_on_or_before(
+        self, owner_id: str, *, on_or_before: date
+    ) -> list[date]:
+        """Every archived date up to and including `on_or_before`, newest first.
+
+        Feeds the streak calculation (`StatisticsService`), which walks
+        backward day by day until it finds a gap; unbounded on purpose since
+        a personal daily-report history is small even after years of use.
+        """
+        result = await self._session.execute(
+            select(DailyReportDay.work_date)
             .where(
                 DailyReportDay.user_id == owner_id,
                 DailyReportDay.status == "archived",
-                DailyReportDay.work_date >= date_from,
-                DailyReportDay.work_date <= date_to,
+                DailyReportDay.work_date <= on_or_before,
             )
-            .order_by(DailyReportDay.work_date.asc())
+            .order_by(DailyReportDay.work_date.desc())
         )
-        return list(result.scalars())
+        return [row[0] for row in result.all()]
 
     async def get_by_ids_for_owner_archived(
         self, owner_id: str, day_ids: list[str]

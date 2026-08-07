@@ -13,6 +13,7 @@ from app.api.v1.daily_report_days import router as daily_report_days_router
 from app.api.v1.daily_reports import router as daily_reports_router
 from app.api.v1.exports import router as exports_router
 from app.api.v1.settings import router as settings_router
+from app.api.v1.statistics import router as statistics_router
 from app.api.v1.system import router as system_router
 from app.api.v1.templates import router as templates_router
 from app.api.v1.users import router as users_router
@@ -90,4 +91,5 @@ def create_app(settings: Settings | None = None, *, jwt_secret: str | None = Non
     application.include_router(admin_daily_reports_router)
     application.include_router(exports_router)
     application.include_router(weekly_reports_router)
+    application.include_router(statistics_router)
     return application

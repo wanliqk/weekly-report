@@ -127,7 +127,9 @@ def test_generate_creates_a_report_from_archived_days_only(
     assert data["week_start"] == "2026-08-03"
     assert data["week_end"] == "2026-08-09"
     assert [day["work_date"] for day in data["content"]["days"]] == ["2026-08-03"]
-    assert data["content"]["days"][0]["daily_report_id"] == archived["id"]
+    day = data["content"]["days"][0]
+    assert day["daily_report_day_id"] == archived["day_id"]
+    assert [entry["daily_report_id"] for entry in day["entries"]] == [archived["id"]]
     assert data["content"] == data["generated_content"]
 
 

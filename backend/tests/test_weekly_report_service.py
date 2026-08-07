@@ -59,6 +59,26 @@ async def _default_template_version_id(session: AsyncSession, owner_id: str) -> 
     return version.id
 
 
+def _archive_snapshot(*, work_date: date, entry_ids: list[str]) -> str:
+    return json.dumps(
+        {
+            "schema_version": 2,
+            "work_date": work_date.isoformat(),
+            "entries": [
+                {
+                    "daily_report_id": entry_id,
+                    "submitted_at": _FIXED_NOW.isoformat(),
+                    "template_version_id": "version",
+                    "template_snapshot": [],
+                    "content": {},
+                }
+                for entry_id in entry_ids
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
 async def _report(
     session: AsyncSession,
     *,
@@ -78,7 +98,9 @@ async def _report(
             user_id=owner_id,
             work_date=work_date,
             status="archived" if is_archived else "open",
-            archive_snapshot_json="{}" if is_archived else None,
+            archive_snapshot_json=_archive_snapshot(work_date=work_date, entry_ids=[report_id])
+            if is_archived
+            else None,
             source_count=1 if is_archived else 0,
             archived_by=owner_id if is_archived else None,
             archived_at=_FIXED_NOW if is_archived else None,

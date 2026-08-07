@@ -40,55 +40,27 @@ class DailyReportRepository:
         )
         return list(result.scalars())
 
-    async def list_owned_archived_by_ids(
-        self, owner_id: str, report_ids: list[str]
-    ) -> list[DailyReport]:
-        result = await self._session.execute(
-            select(DailyReport)
-            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
-            .where(
-                DailyReportDay.user_id == owner_id,
-                DailyReport.status == "archived",
-                DailyReport.id.in_(report_ids),
-            )
-            .order_by(DailyReportDay.work_date.asc(), DailyReport.id.asc())
-        )
-        return list(result.scalars())
-
-    async def list_owned_archived_by_range(
-        self,
-        owner_id: str,
-        *,
-        date_from: date | None,
-        date_to: date | None,
-    ) -> list[DailyReport]:
-        filters = [DailyReportDay.user_id == owner_id, DailyReport.status == "archived"]
-        if date_from is not None:
-            filters.append(DailyReportDay.work_date >= date_from)
-        if date_to is not None:
-            filters.append(DailyReportDay.work_date <= date_to)
-        result = await self._session.execute(
-            select(DailyReport)
-            .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
-            .where(*filters)
-            .order_by(DailyReportDay.work_date.asc(), DailyReport.id.asc())
-        )
-        return list(result.scalars())
-
-    async def list_owned_in_range(
+    async def count_submitted_or_archived_in_range(
         self, owner_id: str, *, date_from: date, date_to: date
-    ) -> list[DailyReport]:
+    ) -> int:
+        """`daily_report_count` (`docs/方案设计.md` §8.6): submitted + archived
+
+        source entries whose work date falls in the month, drafts excluded;
+        a day's own aggregated official record is never counted again since
+        it isn't a `daily_reports` row.
+        """
         result = await self._session.execute(
-            select(DailyReport)
+            select(func.count())
+            .select_from(DailyReport)
             .join(DailyReportDay, DailyReport.day_id == DailyReportDay.id)
             .where(
                 DailyReportDay.user_id == owner_id,
                 DailyReportDay.work_date >= date_from,
                 DailyReportDay.work_date <= date_to,
+                DailyReport.status.in_(("submitted", "archived")),
             )
-            .order_by(DailyReportDay.work_date.asc(), DailyReport.id.asc())
         )
-        return list(result.scalars())
+        return result.scalar_one()
 
     async def list_page(
         self,
