@@ -1,7 +1,12 @@
 import type { DailyDayCellStatus, DailyReportDayMonthItemData } from '../types/daily-report-day'
 
-/** Derives the calendar-cell status text/tag from a month-summary row (`docs/方案设计.md` §8.3): `undefined` means the date has no `daily_report_days` row at all. */
-export function dayCellStatus(item: DailyReportDayMonthItemData | undefined): DailyDayCellStatus {
+type DayCellStatusInput = Pick<
+  DailyReportDayMonthItemData,
+  'status' | 'draft_count' | 'submitted_count'
+>
+
+/** Derives the calendar-cell status text/tag from a month-summary row or day-detail payload (`docs/方案设计.md` §8.3): `undefined` means the date has no `daily_report_days` row at all. */
+export function dayCellStatus(item: DayCellStatusInput | undefined): DailyDayCellStatus {
   if (!item) {
     return 'none'
   }
