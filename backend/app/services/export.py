@@ -25,6 +25,7 @@ from app.schemas.daily_report_day import DayArchiveSnapshotData
 from app.schemas.export import ExportFilter
 from app.schemas.template import TemplateFieldData
 from app.services.daily_report_day import parse_day_archive_snapshot
+from app.services.export_style import style_report_sheet
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,10 @@ def build_export_workbook(days: list[DailyReportDay], columns: list[ExportColumn
     if sheet is None:  # pragma: no cover - a fresh Workbook() always has an active sheet
         raise RuntimeError("workbook has no active worksheet")
     sheet.title = _SHEET_TITLE
-    sheet.append([*_BASE_HEADERS, *(column.header for column in columns)])
+    headers = [*_BASE_HEADERS, *(column.header for column in columns)]
+    header_row = 2
+    sheet.append([None] * len(headers))  # row 1: title, filled in by style_report_sheet
+    sheet.append(headers)  # row 2: header
     for day in days:
         snapshot: DayArchiveSnapshotData = parse_day_archive_snapshot(
             day.archive_snapshot_json or ""
@@ -177,6 +181,13 @@ def build_export_workbook(days: list[DailyReportDay], columns: list[ExportColumn
             ]
             row.append(_multi_source_cell(values_by_position))
         sheet.append(row)
+    style_report_sheet(
+        sheet,
+        header_row=header_row,
+        first_data_row=header_row + 1,
+        last_data_row=header_row + len(days),
+        column_count=len(headers),
+    )
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()

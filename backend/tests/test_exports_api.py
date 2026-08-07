@@ -109,9 +109,9 @@ def test_export_by_ids_returns_succeeded_job_with_downloadable_xlsx(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows[0][:4] == ("工作日期", "来源条目数", "提交时间", "归档时间")
-    assert rows[1][0] == "2026-08-01"
-    assert rows[1][1] == 1
+    assert rows[1][:4] == ("工作日期", "来源条目数", "提交时间", "归档时间")
+    assert rows[2][0] == "2026-08-01"
+    assert rows[2][1] == 1
 
 
 def test_export_file_exposes_content_disposition_to_cross_origin_renderer(
@@ -197,7 +197,7 @@ def test_export_by_filter_only_includes_archived_reports_in_range(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows[1][0] == archived["work_date"]
+    assert rows[2][0] == archived["work_date"]
 
 
 def test_export_job_and_file_are_isolated_per_owner(

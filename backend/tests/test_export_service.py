@@ -26,6 +26,7 @@ from app.services.export import (
     ExportService,
     _safe_filename_component,
 )
+from app.services.export_style import REPORT_TITLE
 
 _FIXED_NOW = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
 _BASE_HEADERS = ("工作日期", "来源条目数", "提交时间", "归档时间")
@@ -209,13 +210,14 @@ async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeed
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows[0] == (*_BASE_HEADERS, "今日工作内容", "明日计划", "风险")
-    assert rows[1][0] == "2026-08-03"
-    assert rows[1][1] == 1
-    assert rows[1][4:] == ("写文档", "写测试", None)
-    assert rows[2][0] == "2026-08-04"
+    assert rows[0][0] == REPORT_TITLE
+    assert rows[1] == (*_BASE_HEADERS, "今日工作内容", "明日计划", "风险")
+    assert rows[2][0] == "2026-08-03"
     assert rows[2][1] == 1
-    assert rows[2][4:] == ("评审代码", "发布", "无")
+    assert rows[2][4:] == ("写文档", "写测试", None)
+    assert rows[3][0] == "2026-08-04"
+    assert rows[3][1] == 1
+    assert rows[3][4:] == ("评审代码", "发布", "无")
 
 
 async def test_create_merges_multiple_source_entries_for_one_day_into_numbered_lines(
@@ -246,8 +248,8 @@ async def test_create_merges_multiple_source_entries_for_one_day_into_numbered_l
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows[1][1] == 2
-    assert rows[1][4] == "[1] 上午写文档\n[2] 下午写测试"
+    assert rows[2][1] == 2
+    assert rows[2][4] == "[1] 上午写文档\n[2] 下午写测试"
 
 
 async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(
@@ -280,7 +282,7 @@ async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    formula_cell, bullet_cell = rows[1][4], rows[2][4]
+    formula_cell, bullet_cell = rows[2][4], rows[3][4]
     assert formula_cell == '\'=HYPERLINK("http://evil.example","x")'
     assert bullet_cell == "-完成需求分析\n-编写代码"
 
@@ -344,8 +346,8 @@ async def test_create_from_filter_only_includes_archived_reports_in_range(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert len(rows) == 2
-    assert rows[1][0] == in_range.work_date.isoformat()
+    assert len(rows) == 3
+    assert rows[2][0] == in_range.work_date.isoformat()
 
 
 async def test_create_from_filter_with_no_matches_produces_header_only_workbook(
@@ -366,7 +368,7 @@ async def test_create_from_filter_with_no_matches_produces_header_only_workbook(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows == [_BASE_HEADERS]
+    assert rows == [(REPORT_TITLE, None, None, None), _BASE_HEADERS]
 
 
 async def test_create_marks_job_failed_without_raising_when_generation_fails(

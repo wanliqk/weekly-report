@@ -19,6 +19,7 @@
 - 当前阻塞：无。ISS-018/019/020/021/022 已随 `QA-10` 完成端到端验收全部升级为 RESOLVED；ISS-023（BE-10B 契约偏差）已 RESOLVED；ISS-024（既有 Playwright spec 断言 V1 UI）已随 `QA-10` 重写全部 spec 关闭为 RESOLVED；新记录 ISS-025（P3，非缺陷）：生产环境下无法用环境变量隔离已打包二进制的数据目录（`SEC-010` 既定安全设计），仅供以后需要沙箱化已打包产物时参考。
 - 第二版需求与设计事实：增量需求和方案已确认；日期/审计表、V1 数据迁移、周报 JSON V2 化、双账号初始化、强制改密和自动归档移除（BE-10A），同日多条目、幂等创建、草稿删除、日期级归档、管理员最小权限撤销/审计、用户安全删除（BE-10B），周报/导出改读日期级正式快照与新增个人统计 API（BE-10C），以及全部 Electron/Vue 界面适配——强制改密路由、菜单改名、我的日报月历、我的周报多来源展示、统计页、管理员日报管理/用户删除、设置收口（FE-10）——均已完成并通过真实 Electron 冒烟验证。当前仅剩 `QA-10` 的迁移/并发/权限专项验收和 E2E 套件重建。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
+- 2026-08-08：应用户直接指令完成日报 Excel 导出排版增强（`PROD-021`）：新增 `backend/app/services/export_style.py` 封装标题/表头/边框/列宽/行高/冻结表头样式，`export.py` 的 `build_export_workbook` 改为写入 headers/data 后调用 `style_report_sheet()`；未改动列合并、公式防注入、多来源渲染等业务逻辑。因新增标题行，`test_export_service.py`/`test_exports_api.py` 中依赖固定行号的断言已同步更新（表头从 `rows[0]` 移到 `rows[1]`，数据从 `rows[1..]` 移到 `rows[2..]`）。已执行 `uv run ruff check .`、`uv run mypy`、`uv run pytest`（124 源文件、全量测试两次运行均 100% 通过，含一次单测 `test_expired_and_tampered_tokens_map_to_40102` 的偶发无关 flake，隔离重跑与全量重跑均通过，与本次改动无关）；未创建提交，等待用户确认。
 
 ## 2. 已实现事实
 
