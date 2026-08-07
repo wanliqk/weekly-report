@@ -11,6 +11,7 @@ from pydantic import (
 )
 
 UserRole = Literal["admin", "user"]
+CannotDeleteReason = Literal["self", "last_active_admin", "has_business_records"]
 
 
 class UserData(BaseModel):
@@ -22,6 +23,8 @@ class UserData(BaseModel):
     role: UserRole
     is_active: bool
     created_at: datetime
+    can_delete: bool = True
+    cannot_delete_reason: CannotDeleteReason | None = None
 
     @field_serializer("created_at")
     def _serialize_created_at(self, value: datetime) -> str:

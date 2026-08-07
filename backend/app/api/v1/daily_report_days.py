@@ -46,10 +46,11 @@ def _detail_response(detail: DayDetail) -> DailyReportDayDetailData:
         submitted_count=detail.submitted_count,
         archived_count=detail.archived_count,
         can_archive=detail.can_archive,
-        disabled_reason=detail.disabled_reason,
+        archive_disabled_reason=detail.archive_disabled_reason,
         entries=[
             DailyReportListItemData(
                 id=entry.id,
+                day_id=entry.day_id,
                 work_date=entry.work_date,
                 status=cast(DailyStatus, entry.status),
                 version=entry.version,
@@ -80,6 +81,7 @@ async def month_summary(
             items=[
                 DailyReportDayMonthItemData(
                     work_date=item.work_date,
+                    day_id=item.day_id,
                     status=item.status,
                     draft_count=item.draft_count,
                     submitted_count=item.submitted_count,
@@ -87,7 +89,7 @@ async def month_summary(
                     total_count=item.total_count,
                     can_create=item.can_create,
                     can_archive=item.can_archive,
-                    disabled_reason=item.disabled_reason,
+                    archive_disabled_reason=item.archive_disabled_reason,
                 )
                 for item in items
             ],

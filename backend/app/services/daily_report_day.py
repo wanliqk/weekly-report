@@ -44,14 +44,15 @@ def _utc_iso(value: datetime) -> str:
 @dataclass(frozen=True)
 class DayMonthSummary:
     work_date: date
-    status: DailyReportDayStatus | None
+    day_id: str
+    status: DailyReportDayStatus
     draft_count: int
     submitted_count: int
     archived_count: int
     total_count: int
     can_create: bool
     can_archive: bool
-    disabled_reason: str | None
+    archive_disabled_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,7 @@ class DayDetail:
     submitted_count: int
     archived_count: int
     can_archive: bool
-    disabled_reason: str | None
+    archive_disabled_reason: str | None
     entries: list[DailyReport]
     archive_snapshot: DayArchiveSnapshotData | None
     archived_at: datetime | None
@@ -101,30 +102,31 @@ def parse_day_archive_snapshot(archive_snapshot_json: str) -> DayArchiveSnapshot
         raise RuntimeError("stored day archive snapshot is invalid") from error
 
 
-def _open_day_summary(
-    work_date: date, day: DailyReportDay | None, entries: list[DailyReport]
-) -> DayMonthSummary:
+@dataclass(frozen=True)
+class _OpenDayComposition:
+    draft_count: int
+    submitted_count: int
+    can_archive: bool
+    archive_disabled_reason: str | None
+
+
+def _composition_for_open_day(entries: list[DailyReport]) -> _OpenDayComposition:
     draft_count = sum(1 for entry in entries if entry.status == "draft")
     submitted_count = sum(1 for entry in entries if entry.status == "submitted")
     if draft_count > 0:
         can_archive = False
-        disabled_reason: str | None = "存在草稿未提交"
+        reason: str | None = "存在草稿未提交"
     elif submitted_count == 0:
         can_archive = False
-        disabled_reason = "尚无已提交条目"
+        reason = "尚无已提交条目"
     else:
         can_archive = True
-        disabled_reason = None
-    return DayMonthSummary(
-        work_date=work_date,
-        status="open" if day is not None else None,
+        reason = None
+    return _OpenDayComposition(
         draft_count=draft_count,
         submitted_count=submitted_count,
-        archived_count=0,
-        total_count=len(entries),
-        can_create=True,
         can_archive=can_archive,
-        disabled_reason=disabled_reason,
+        archive_disabled_reason=reason,
     )
 
 
@@ -141,18 +143,19 @@ class DailyReportDayService:
     async def month_summary(
         self, owner_id: str, *, month_start: date, month_end: date
     ) -> list[DayMonthSummary]:
-        days = await self._days.list_month(owner_id, month_start=month_start, month_end=month_end)
-        by_date = {day.work_date: day for day in days}
+        """Sparse by design (`docs/方案设计.md` §8.3): dates with no
+        `daily_report_days` row are simply absent from the result, and the
+        caller derives "no record" itself rather than the server
+        synthesizing a placeholder row for every calendar date.
+        """
+        days = await self._days.list_in_range(owner_id, date_from=month_start, date_to=month_end)
         items: list[DayMonthSummary] = []
-        current = month_start
-        while current <= month_end:
-            day = by_date.get(current)
-            if day is None:
-                items.append(_open_day_summary(current, None, []))
-            elif day.status == "archived":
+        for day in days:
+            if day.status == "archived":
                 items.append(
                     DayMonthSummary(
-                        work_date=current,
+                        work_date=day.work_date,
+                        day_id=day.id,
                         status="archived",
                         draft_count=0,
                         submitted_count=0,
@@ -160,32 +163,44 @@ class DailyReportDayService:
                         total_count=day.source_count,
                         can_create=False,
                         can_archive=False,
-                        disabled_reason="日期已归档",
+                        archive_disabled_reason="日期已归档",
                     )
                 )
-            else:
-                entries = await self._reports.list_by_day(day.id)
-                items.append(_open_day_summary(current, day, entries))
-            current = date.fromordinal(current.toordinal() + 1)
+                continue
+            entries = await self._reports.list_by_day(day.id)
+            composition = _composition_for_open_day(entries)
+            items.append(
+                DayMonthSummary(
+                    work_date=day.work_date,
+                    day_id=day.id,
+                    status="open",
+                    draft_count=composition.draft_count,
+                    submitted_count=composition.submitted_count,
+                    archived_count=0,
+                    total_count=len(entries),
+                    can_create=True,
+                    can_archive=composition.can_archive,
+                    archive_disabled_reason=composition.archive_disabled_reason,
+                )
+            )
         return items
 
     async def get_detail(self, owner_id: str, work_date: date) -> DayDetail:
         day = await self._days.get_for_owner_by_date(owner_id, work_date)
-        entries = await self._reports.list_by_day(day.id) if day is not None else []
         if day is None:
-            summary = _open_day_summary(work_date, None, entries)
             return DayDetail(
                 work_date=work_date,
                 status="open",
-                draft_count=summary.draft_count,
-                submitted_count=summary.submitted_count,
-                archived_count=summary.archived_count,
-                can_archive=summary.can_archive,
-                disabled_reason=summary.disabled_reason,
-                entries=entries,
+                draft_count=0,
+                submitted_count=0,
+                archived_count=0,
+                can_archive=False,
+                archive_disabled_reason="尚无已提交条目",
+                entries=[],
                 archive_snapshot=None,
                 archived_at=None,
             )
+        entries = await self._reports.list_by_day(day.id)
         if day.status == "archived":
             snapshot = (
                 parse_day_archive_snapshot(day.archive_snapshot_json)
@@ -199,20 +214,20 @@ class DailyReportDayService:
                 submitted_count=0,
                 archived_count=day.source_count,
                 can_archive=False,
-                disabled_reason="日期已归档",
+                archive_disabled_reason="日期已归档",
                 entries=entries,
                 archive_snapshot=snapshot,
                 archived_at=day.archived_at,
             )
-        summary = _open_day_summary(work_date, day, entries)
+        composition = _composition_for_open_day(entries)
         return DayDetail(
             work_date=work_date,
             status="open",
-            draft_count=summary.draft_count,
-            submitted_count=summary.submitted_count,
+            draft_count=composition.draft_count,
+            submitted_count=composition.submitted_count,
             archived_count=0,
-            can_archive=summary.can_archive,
-            disabled_reason=summary.disabled_reason,
+            can_archive=composition.can_archive,
+            archive_disabled_reason=composition.archive_disabled_reason,
             entries=entries,
             archive_snapshot=None,
             archived_at=None,

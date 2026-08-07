@@ -121,6 +121,7 @@ def test_revoke_submission_returns_the_entry_to_draft_and_records_audit(
     assert detail["submitted_at"] is None
     assert detail["content"] == submitted["content"]
     assert detail["last_revocation"]["reason"] == "内容需要补充"
+    assert detail["last_revocation"]["actor_username"] == "admin"
 
     audit = client.get("/api/v1/admin/audit-events", headers=admin_headers)
     assert audit.status_code == 200, audit.text

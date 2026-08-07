@@ -23,15 +23,44 @@ class DailyReportDayRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_month(
-        self, owner_id: str, *, month_start: date, month_end: date
+    async def list_in_range(
+        self, owner_id: str, *, date_from: date, date_to: date
     ) -> list[DailyReportDay]:
         result = await self._session.execute(
             select(DailyReportDay)
             .where(
                 DailyReportDay.user_id == owner_id,
-                DailyReportDay.work_date >= month_start,
-                DailyReportDay.work_date <= month_end,
+                DailyReportDay.work_date >= date_from,
+                DailyReportDay.work_date <= date_to,
+            )
+            .order_by(DailyReportDay.work_date.asc())
+        )
+        return list(result.scalars())
+
+    async def list_archived_in_range(
+        self, owner_id: str, *, date_from: date, date_to: date
+    ) -> list[DailyReportDay]:
+        result = await self._session.execute(
+            select(DailyReportDay)
+            .where(
+                DailyReportDay.user_id == owner_id,
+                DailyReportDay.status == "archived",
+                DailyReportDay.work_date >= date_from,
+                DailyReportDay.work_date <= date_to,
+            )
+            .order_by(DailyReportDay.work_date.asc())
+        )
+        return list(result.scalars())
+
+    async def get_by_ids_for_owner_archived(
+        self, owner_id: str, day_ids: list[str]
+    ) -> list[DailyReportDay]:
+        result = await self._session.execute(
+            select(DailyReportDay)
+            .where(
+                DailyReportDay.user_id == owner_id,
+                DailyReportDay.status == "archived",
+                DailyReportDay.id.in_(day_ids),
             )
             .order_by(DailyReportDay.work_date.asc())
         )

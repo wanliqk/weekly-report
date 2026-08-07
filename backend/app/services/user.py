@@ -120,6 +120,30 @@ class UserService:
             raise UserNotFoundError()
         return user
 
+    async def deletion_eligibility(
+        self, users: list[User], *, actor_id: str
+    ) -> dict[str, str | None]:
+        """Non-sensitive `cannot_delete_reason` per user (`docs/方案设计.md` §7.3).
+
+        A UI hint only: `delete_user()` re-checks every condition itself, so
+        a stale eligibility read here can never let an actual deletion
+        bypass a guard.
+        """
+        candidate_ids = [user.id for user in users if user.id != actor_id]
+        business_ids = await self._users.has_business_records_bulk(candidate_ids)
+        active_admin_count = await self._users.count_active_admins()
+        reasons: dict[str, str | None] = {}
+        for user in users:
+            if user.id == actor_id:
+                reasons[user.id] = "self"
+            elif user.role == "admin" and user.is_active and active_admin_count <= 1:
+                reasons[user.id] = "last_active_admin"
+            elif user.id in business_ids:
+                reasons[user.id] = "has_business_records"
+            else:
+                reasons[user.id] = None
+        return reasons
+
     async def create_user(
         self, *, username: str, password: str, display_name: str, role: str
     ) -> User:

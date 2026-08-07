@@ -44,6 +44,7 @@ class DailyVersionRequest(BaseModel):
 class DailyRevocationData(BaseModel):
     reason: str
     revoked_at: datetime
+    actor_username: str
 
     @field_serializer("revoked_at")
     def _serialize_revoked_at(self, value: datetime) -> str:
@@ -52,6 +53,7 @@ class DailyRevocationData(BaseModel):
 
 class DailyReportListItemData(BaseModel):
     id: str
+    day_id: str
     work_date: date
     status: DailyStatus
     version: int
@@ -73,6 +75,7 @@ class DailyReportListData(BaseModel):
 
 class DailyReportData(BaseModel):
     id: str
+    day_id: str
     work_date: date
     status: DailyStatus
     template_version_id: str
@@ -88,3 +91,9 @@ class DailyReportData(BaseModel):
     @field_serializer("submitted_at", "archived_at", "created_at", "updated_at")
     def _serialize_datetimes(self, value: datetime | None) -> str | None:
         return _utc_iso(value)
+
+
+class DailyReportCreateData(DailyReportData):
+    """`docs/方案设计.md` §6.2: creation replies must flag idempotent replays."""
+
+    created: bool

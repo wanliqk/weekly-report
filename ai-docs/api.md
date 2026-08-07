@@ -293,6 +293,8 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 
 `DELETE /users/{user_id}` 已在 `BE-10B` 实现：拒绝删除当前登录账号，`confirm_username` 须与目标账号原始 `username` 精确匹配（非规范化比较），无业务记录（`daily_report_days`/`weekly_reports`/`export_jobs`）时物理删除并清理默认关联资源，否则返回 `40910`；末位有效管理员保护复用 `USER-01` 的条件更新模式，已用真实并发测试验证只保留一个活跃管理员；成功删除写入 `admin_audit_events`（`action=user_deleted`）。
 
+`GET /users`、`GET /users/{user_id}` 响应新增 `can_delete: bool` 与 `cannot_delete_reason: "self"|"last_active_admin"|"has_business_records"|null`（`docs/方案设计.md` §7.3），供界面提前禁用删除按钮；仅供 UX 提示，`DELETE` 时服务端仍重新校验全部条件。
+
 ### 13.2 日报条目与日期
 
 | 方法 | 路径 | 权限 | 第二版语义 |
@@ -309,7 +311,7 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 
 删除单篇 `/daily-reports/{id}/archive`。月历摘要返回草稿/已提交/归档/总数、能否创建/归档及禁用原因；日期已归档时重复归档幂等返回已有正式结果，不改写归档时间。
 
-上述九个接口均已在 `BE-10B` 实现。创建按 `client_request_id` 幂等：同一 key 且所有者/日期一致返回既有条目，跨用户或跨日期复用同一 key 返回 `40908`（不泄露对方条目内容）。日期容器与全部子写操作（创建/保存/删除/提交/归档）共用同一并发互斥点：归档在读取当天条目前先对日期行做条件 `UPDATE` 占用 SQLite 写锁，创建改用 `INSERT ... SELECT ... WHERE EXISTS` 单语句关闭"日期是否仍为 open"的检查竞态；均已用真实 `asyncio.gather` 并发测试验证（含创建与归档并发时二者互斥、双管理员并发互删只保留一个活跃管理员）。归档按 `submitted_at ASC, id ASC` 聚合当天全部已提交条目为不可变 `archive_snapshot_json`，并把这些条目的状态一并翻转为 `archived`。
+上述九个接口均已在 `BE-10B` 实现。创建按 `client_request_id` 幂等：同一 key 且所有者/日期一致返回既有条目（响应 `created:false`），不存在时创建新草稿（响应 `created:true`），跨用户或跨日期复用同一 key 返回 `40908`（不泄露对方条目内容）。日期容器与全部子写操作（创建/保存/删除/提交/归档）共用同一并发互斥点：归档在读取当天条目前先对日期行做条件 `UPDATE` 占用 SQLite 写锁，创建改用 `INSERT ... SELECT ... WHERE EXISTS` 单语句关闭"日期是否仍为 open"的检查竞态；均已用真实 `asyncio.gather` 并发测试验证（含创建与归档并发时二者互斥、双管理员并发互删只保留一个活跃管理员）。归档按 `submitted_at ASC, id ASC` 聚合当天全部已提交条目为不可变 `archive_snapshot_json`，并把这些条目的状态一并翻转为 `archived`。条目响应（`GET/POST/PATCH/submit`）均新增 `day_id`；月历摘要按 `docs/方案设计.md` §8.3 只返回存在 `daily_report_days` 记录的日期（不为整月合成占位行），字段为 `work_date/day_id/status/draft_count/submitted_count/archived_count/total_count/can_create/can_archive/archive_disabled_reason`（原 `disabled_reason` 已更名为 `archive_disabled_reason` 以对齐方案原文，日期详情接口同步改名）。
 
 ### 13.3 管理员日报与审计
 
@@ -319,7 +321,7 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 | POST | `/admin/daily-reports/{report_id}/revoke-submission` | admin | `{version,reason}` 撤销为草稿并审计 |
 | GET | `/admin/audit-events` | admin | 按动作/日期分页查白名单审计 |
 
-撤销只允许 open 日期下 submitted 条目；成功后清空提交时间、保留正文、版本加一，所有者详情返回最近撤销原因和时间。
+撤销只允许 open 日期下 submitted 条目；成功后清空提交时间、保留正文、版本加一，所有者详情返回最近撤销原因、操作者用户名和时间（`GET /daily-reports/{id}` 响应的 `last_revocation.actor_username`；复用已有的 `admin_audit_events.actor_username_snapshot` 列，未新增“显示名”快照列）。
 
 上述三个接口均已在 `BE-10B` 实现。待归档列表和撤销均通过原始列 SQL 选择返回，服务端从不加载 `content_json`/`template_snapshot_json`（不依赖响应 schema 兜底过滤，已通过独立安全审查确认）；撤销的 `reason` 服务端去空白后校验非空，写入 `admin_audit_events` 的 `metadata_json` 只含 `work_date` 等白名单字段。审计事件查询支持按 `action`（`daily_submission_revoked`/`user_deleted`）和日期范围过滤。
 

@@ -164,6 +164,37 @@ class UserRepository:
         )
         return bool(result.scalar_one())
 
+    async def has_business_records_bulk(self, user_ids: list[str]) -> set[str]:
+        """Bulk form of `has_business_records`, for annotating a user list.
+
+        Three grouped `IN (...)` queries (one per business table) instead of
+        one `EXISTS` per user avoids an N+1 query pattern for `GET /users`.
+        """
+        if not user_ids:
+            return set()
+        day_owners = await self._session.execute(
+            select(DailyReportDay.user_id).where(DailyReportDay.user_id.in_(user_ids)).distinct()
+        )
+        weekly_owners = await self._session.execute(
+            select(WeeklyReport.user_id).where(WeeklyReport.user_id.in_(user_ids)).distinct()
+        )
+        export_owners = await self._session.execute(
+            select(ExportJob.user_id).where(ExportJob.user_id.in_(user_ids)).distinct()
+        )
+        return (
+            {row[0] for row in day_owners}
+            | {row[0] for row in weekly_owners}
+            | {row[0] for row in export_owners}
+        )
+
+    async def count_active_admins(self) -> int:
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.role == "admin", User.is_active.is_(True))
+        )
+        return result.scalar_one()
+
     async def delete_if_no_business_records(self, user_id: str) -> bool:
         """Physically removes a user and their default scaffolding.
 

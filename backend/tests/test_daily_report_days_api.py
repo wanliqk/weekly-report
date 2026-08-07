@@ -81,10 +81,12 @@ def test_month_summary_counts_by_status_across_the_whole_month(
     assert response.status_code == 200, response.text
     items = {item["work_date"]: item for item in response.json()["data"]["items"]}
 
-    assert len(items) == 31
-    assert items["2026-08-01"]["status"] is None
-    assert items["2026-08-01"]["can_create"] is True
+    # Sparse by design (`docs/方案设计.md` §8.3): only dates with an actual
+    # `daily_report_days` row are returned; 2026-08-01 was never touched.
+    assert len(items) == 2
+    assert "2026-08-01" not in items
     assert items["2026-08-03"]["status"] == "open"
+    assert items["2026-08-03"]["day_id"]
     assert items["2026-08-03"]["draft_count"] == 1
     assert items["2026-08-03"]["can_archive"] is False
     assert items["2026-08-05"]["status"] == "archived"
@@ -114,7 +116,7 @@ def test_day_detail_lists_open_entries_and_flags_archivability(
     assert data["status"] == "open"
     assert data["draft_count"] == 1
     assert data["can_archive"] is False
-    assert data["disabled_reason"] == "存在草稿未提交"
+    assert data["archive_disabled_reason"] == "存在草稿未提交"
     assert [item["id"] for item in data["entries"]] == [report["id"]]
     assert data["archive_snapshot"] is None
 
@@ -214,4 +216,4 @@ def test_day_endpoints_isolate_owners(
 
     month = client.get("/api/v1/daily-report-days?month=2026-08", headers=alice_headers)
     items = {item["work_date"]: item for item in month.json()["data"]["items"]}
-    assert items["2026-08-05"]["status"] is None
+    assert "2026-08-05" not in items

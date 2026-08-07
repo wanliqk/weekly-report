@@ -88,8 +88,11 @@ def test_create_supports_leap_future_and_historical_dates_and_allows_same_day_mu
 
     assert created["work_date"] == work_date
     assert created["status"] == "draft"
+    assert created["created"] is True
+    assert created["day_id"]
     assert second_entry["id"] != created["id"]
     assert second_entry["work_date"] == work_date
+    assert second_entry["day_id"] == created["day_id"]
 
 
 def test_create_replaying_the_same_client_request_id_is_idempotent(
@@ -102,6 +105,8 @@ def test_create_replaying_the_same_client_request_id_is_idempotent(
     second = _create(client, headers, "2026-08-05", key)
 
     assert first["id"] == second["id"]
+    assert first["created"] is True
+    assert second["created"] is False
 
 
 def test_create_reusing_client_request_id_for_a_different_date_is_rejected(

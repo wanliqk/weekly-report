@@ -51,6 +51,16 @@ async def _bootstrap_user(session_factory: object) -> User:
         )
 
 
+async def _create_entry(
+    session_factory: object, *, owner_id: str, work_date: date, client_request_id: str | None = None
+) -> DailyReport:
+    async with session_factory() as session:  # type: ignore[operator]
+        report, _created = await DailyReportService(session).create(
+            owner_id, work_date=work_date, client_request_id=client_request_id or generate_ulid()
+        )
+        return report
+
+
 async def _submit_full(session_factory: object, *, owner_id: str, report: DailyReport) -> None:
     """Fills every required field with dummy text and submits the entry."""
     async with session_factory() as session:  # type: ignore[operator]
@@ -74,9 +84,10 @@ async def test_concurrent_creation_with_distinct_keys_produces_two_entries(
 
     async def _create(key: str) -> DailyReport:
         async with session_factory() as session:
-            return await DailyReportService(session).create(
+            report, _created = await DailyReportService(session).create(
                 user.id, work_date=date(2026, 8, 5), client_request_id=key
             )
+            return report
 
     first, second = await asyncio.gather(_create(generate_ulid()), _create(generate_ulid()))
 
@@ -96,18 +107,38 @@ async def test_concurrent_creation_with_the_same_key_is_idempotent(
     user = await _bootstrap_user(session_factory)
     key = generate_ulid()
 
-    async def _create() -> DailyReport:
+    async def _create() -> tuple[DailyReport, bool]:
         async with session_factory() as session:
             return await DailyReportService(session).create(
                 user.id, work_date=date(2026, 8, 5), client_request_id=key
             )
 
-    first, second = await asyncio.gather(_create(), _create())
+    (first, first_created), (second, second_created) = await asyncio.gather(_create(), _create())
 
     assert first.id == second.id
+    assert first_created != second_created
     async with session_factory() as session:
         count = await session.execute(select(func.count()).select_from(DailyReport))
         assert count.scalar_one() == 1
+
+
+async def test_create_replaying_the_same_key_reports_created_false(
+    daily_engine: AsyncEngine,
+) -> None:
+    session_factory = create_session_factory(daily_engine)
+    user = await _bootstrap_user(session_factory)
+    key = generate_ulid()
+    async with session_factory() as session:
+        _report, created = await DailyReportService(session).create(
+            user.id, work_date=date(2026, 8, 5), client_request_id=key
+        )
+        assert created is True
+
+    async with session_factory() as session:
+        _report, created_again = await DailyReportService(session).create(
+            user.id, work_date=date(2026, 8, 5), client_request_id=key
+        )
+        assert created_again is False
 
 
 async def test_replaying_client_request_id_for_a_different_date_is_rejected(
@@ -116,10 +147,9 @@ async def test_replaying_client_request_id_for_a_different_date_is_rejected(
     session_factory = create_session_factory(daily_engine)
     user = await _bootstrap_user(session_factory)
     key = generate_ulid()
-    async with session_factory() as session:
-        await DailyReportService(session).create(
-            user.id, work_date=date(2026, 8, 5), client_request_id=key
-        )
+    await _create_entry(
+        session_factory, owner_id=user.id, work_date=date(2026, 8, 5), client_request_id=key
+    )
 
     async with session_factory() as session:
         with pytest.raises(DailyReportIdempotencyConflictError):
@@ -132,10 +162,7 @@ async def test_create_is_rejected_once_the_day_is_archived(daily_engine: AsyncEn
     session_factory = create_session_factory(daily_engine)
     user = await _bootstrap_user(session_factory)
     work_date = date(2026, 8, 5)
-    async with session_factory() as session:
-        report = await DailyReportService(session).create(
-            user.id, work_date=work_date, client_request_id=generate_ulid()
-        )
+    report = await _create_entry(session_factory, owner_id=user.id, work_date=work_date)
     await _submit_full(session_factory, owner_id=user.id, report=report)
     async with session_factory() as session:
         await DailyReportDayService(session).archive(user.id, work_date, confirm_archive=True)
@@ -160,18 +187,16 @@ async def test_concurrent_create_and_archive_resolve_to_exactly_one_success(
     session_factory = create_session_factory(daily_engine)
     user = await _bootstrap_user(session_factory)
     work_date = date(2026, 8, 5)
-    async with session_factory() as session:
-        report = await DailyReportService(session).create(
-            user.id, work_date=work_date, client_request_id=generate_ulid()
-        )
+    report = await _create_entry(session_factory, owner_id=user.id, work_date=work_date)
     await _submit_full(session_factory, owner_id=user.id, report=report)
 
     async def _create_new_entry() -> DailyReport | Exception:
         async with session_factory() as session:
             try:
-                return await DailyReportService(session).create(
+                created_report, _created = await DailyReportService(session).create(
                     user.id, work_date=work_date, client_request_id=generate_ulid()
                 )
+                return created_report
             except (DailyReportDayArchivedError, DailyReportDayHasDraftsError) as error:
                 return error
 
@@ -201,10 +226,7 @@ async def test_deleting_the_last_draft_removes_the_empty_open_day(
     session_factory = create_session_factory(daily_engine)
     user = await _bootstrap_user(session_factory)
     work_date = date(2026, 8, 5)
-    async with session_factory() as session:
-        report = await DailyReportService(session).create(
-            user.id, work_date=work_date, client_request_id=generate_ulid()
-        )
+    report = await _create_entry(session_factory, owner_id=user.id, work_date=work_date)
 
     async with session_factory() as session:
         await DailyReportService(session).delete(
@@ -215,11 +237,8 @@ async def test_deleting_the_last_draft_removes_the_empty_open_day(
         remaining_day = await DailyReportDayService(session).get_for_owner(user.id, work_date)
         assert remaining_day is None
 
-    async with session_factory() as session:
-        recreated = await DailyReportService(session).create(
-            user.id, work_date=work_date, client_request_id=generate_ulid()
-        )
-        assert recreated.day_id != report.day_id
+    recreated = await _create_entry(session_factory, owner_id=user.id, work_date=work_date)
+    assert recreated.day_id != report.day_id
 
 
 async def test_deleting_one_of_several_drafts_keeps_the_day_open(
@@ -228,14 +247,8 @@ async def test_deleting_one_of_several_drafts_keeps_the_day_open(
     session_factory = create_session_factory(daily_engine)
     user = await _bootstrap_user(session_factory)
     work_date = date(2026, 8, 5)
-    async with session_factory() as session:
-        first = await DailyReportService(session).create(
-            user.id, work_date=work_date, client_request_id=generate_ulid()
-        )
-    async with session_factory() as session:
-        second = await DailyReportService(session).create(
-            user.id, work_date=work_date, client_request_id=generate_ulid()
-        )
+    first = await _create_entry(session_factory, owner_id=user.id, work_date=work_date)
+    second = await _create_entry(session_factory, owner_id=user.id, work_date=work_date)
 
     async with session_factory() as session:
         await DailyReportService(session).delete(user.id, first.id, expected_version=first.version)

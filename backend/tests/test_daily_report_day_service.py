@@ -53,9 +53,10 @@ async def _bootstrap_user(session_factory: object) -> User:
 
 async def _create_draft(session_factory: object, *, owner_id: str, work_date: date) -> DailyReport:
     async with session_factory() as session:  # type: ignore[operator]
-        return await DailyReportService(session).create(
+        report, _created = await DailyReportService(session).create(
             owner_id, work_date=work_date, client_request_id=generate_ulid()
         )
+        return report
 
 
 async def _submit(session_factory: object, *, owner_id: str, report: DailyReport) -> DailyReport:
@@ -197,11 +198,12 @@ async def test_month_summary_reflects_every_day_state(day_engine: AsyncEngine) -
         )
     by_date = {item.work_date: item for item in items}
 
-    assert len(items) == 31
-    assert by_date[date(2026, 8, 1)].status is None
-    assert by_date[date(2026, 8, 1)].can_create is True
-    assert by_date[date(2026, 8, 1)].can_archive is False
+    # Sparse by design (`docs/方案设计.md` §8.3): only dates with an actual
+    # `daily_report_days` row are returned; 2026-08-01 never had a record.
+    assert len(items) == 3
+    assert date(2026, 8, 1) not in by_date
     assert by_date[date(2026, 8, 3)].status == "open"
+    assert by_date[date(2026, 8, 3)].day_id == draft_only.day_id
     assert by_date[date(2026, 8, 3)].draft_count == 1
     assert by_date[date(2026, 8, 3)].can_archive is False
     assert by_date[date(2026, 8, 4)].submitted_count == 1

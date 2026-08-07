@@ -277,3 +277,30 @@ def test_unknown_user_returns_404_without_account_details(client: TestClient) ->
 
     assert response.status_code == 404
     assert response.json() == {"code": 40401, "msg": "用户不存在", "data": {}}
+
+
+def test_user_list_flags_deletion_eligibility(client: TestClient) -> None:
+    """`docs/方案设计.md` §7.3: the list must let the UI pre-disable delete."""
+    _bootstrap(client)
+    headers = _admin_headers(client)
+    deletable = _create_user(client, headers, username="deletable")
+    busy = _create_user(client, headers, username="busy")
+    busy_headers = _auth_headers(_login(client, "busy", "alice secure password"))
+    created_report = client.post(
+        "/api/v1/daily-reports",
+        headers=busy_headers,
+        json={"work_date": "2026-08-05", "client_request_id": "user-list-eligibility-test"},
+    )
+    assert created_report.status_code == 200, created_report.text
+    me = client.get("/api/v1/auth/me", headers=headers).json()["data"]
+
+    listing = client.get("/api/v1/users", headers=headers)
+
+    assert listing.status_code == 200, listing.text
+    by_id = {item["id"]: item for item in listing.json()["data"]["items"]}
+    assert by_id[me["id"]]["can_delete"] is False
+    assert by_id[me["id"]]["cannot_delete_reason"] == "self"
+    assert by_id[busy["id"]]["can_delete"] is False
+    assert by_id[busy["id"]]["cannot_delete_reason"] == "has_business_records"
+    assert by_id[deletable["id"]]["can_delete"] is True
+    assert by_id[deletable["id"]]["cannot_delete_reason"] is None

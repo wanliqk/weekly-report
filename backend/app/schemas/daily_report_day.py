@@ -22,15 +22,24 @@ class DailyReportDayArchiveRequest(BaseModel):
 
 
 class DailyReportDayMonthItemData(BaseModel):
+    """One row per date that already has a `daily_report_days` row.
+
+    `docs/方案设计.md` §8.3: the month endpoint only returns dates with an
+    existing record — a date absent from `items` has no record at all
+    ("none"), which the caller derives itself rather than the server
+    synthesizing an empty placeholder row for every calendar date.
+    """
+
     work_date: date
-    status: DailyReportDayStatus | None
+    day_id: str
+    status: DailyReportDayStatus
     draft_count: int
     submitted_count: int
     archived_count: int
     total_count: int
     can_create: bool
     can_archive: bool
-    disabled_reason: str | None
+    archive_disabled_reason: str | None
 
 
 class DailyReportDayMonthData(BaseModel):
@@ -62,7 +71,7 @@ class DailyReportDayDetailData(BaseModel):
     submitted_count: int
     archived_count: int
     can_archive: bool
-    disabled_reason: str | None
+    archive_disabled_reason: str | None
     entries: list[DailyReportListItemData]
     archive_snapshot: DayArchiveSnapshotData | None
     archived_at: datetime | None

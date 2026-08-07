@@ -11,6 +11,7 @@ from app.schemas.auth import EmptyData
 from app.schemas.common import ApiResponse
 from app.schemas.daily_report import (
     DailyCreateRequest,
+    DailyReportCreateData,
     DailyReportData,
     DailyReportListData,
     DailyReportListItemData,
@@ -28,15 +29,21 @@ from app.services.template import parse_template_fields
 router = APIRouter(prefix="/api/v1/daily-reports", tags=["daily-reports"])
 
 
-async def _report_data(session: AsyncSession, report: DailyReport) -> DailyReportData:
-    revocation = await DailyReportService(session).last_revocation(report.id)
-    last_revocation = (
-        DailyRevocationData(reason=revocation.reason, revoked_at=revocation.created_at)
-        if revocation is not None
-        else None
+async def _last_revocation(session: AsyncSession, report_id: str) -> DailyRevocationData | None:
+    revocation = await DailyReportService(session).last_revocation(report_id)
+    if revocation is None:
+        return None
+    return DailyRevocationData(
+        reason=revocation.reason,
+        revoked_at=revocation.created_at,
+        actor_username=revocation.actor_username_snapshot,
     )
+
+
+async def _report_data(session: AsyncSession, report: DailyReport) -> DailyReportData:
     return DailyReportData(
         id=report.id,
+        day_id=report.day_id,
         work_date=report.work_date,
         status=cast(DailyStatus, report.status),
         template_version_id=report.template_version_id,
@@ -47,13 +54,14 @@ async def _report_data(session: AsyncSession, report: DailyReport) -> DailyRepor
         archived_at=report.archived_at,
         created_at=report.created_at,
         updated_at=report.updated_at,
-        last_revocation=last_revocation,
+        last_revocation=await _last_revocation(session, report.id),
     )
 
 
 def _list_item(report: DailyReport) -> DailyReportListItemData:
     return DailyReportListItemData(
         id=report.id,
+        day_id=report.day_id,
         work_date=report.work_date,
         status=cast(DailyStatus, report.status),
         version=report.version,
@@ -91,18 +99,22 @@ async def list_daily_reports(
     )
 
 
-@router.post("", response_model=ApiResponse[DailyReportData])
+@router.post("", response_model=ApiResponse[DailyReportCreateData])
 async def create_daily_report(
     payload: DailyCreateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> ApiResponse[DailyReportData]:
-    report = await DailyReportService(session).create(
+) -> ApiResponse[DailyReportCreateData]:
+    report, created = await DailyReportService(session).create(
         current_user.id,
         work_date=payload.work_date,
         client_request_id=payload.client_request_id,
     )
-    return ApiResponse(data=await _report_data(session, report))
+    data = await _report_data(session, report)
+    # `.__dict__` (not `.model_dump()`) is used deliberately: `DailyReportData`'s
+    # `field_serializer`s apply even to python-mode dumps, which would turn
+    # every datetime field into an already-formatted string here.
+    return ApiResponse(data=DailyReportCreateData(**data.__dict__, created=created))
 
 
 @router.get("/{report_id}", response_model=ApiResponse[DailyReportData])

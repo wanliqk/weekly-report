@@ -167,11 +167,20 @@ class DailyReportService:
 
     async def create(
         self, owner_id: str, *, work_date: date, client_request_id: str
-    ) -> DailyReport:
+    ) -> tuple[DailyReport, bool]:
+        """Returns `(entry, created)`; `created` is `False` for an idempotent replay.
+
+        `docs/方案设计.md` §6.2 requires the create response to flag whether
+        this call produced a brand-new entry or returned an existing one
+        matched by `client_request_id`.
+        """
         existing_by_key = await self._reports.get_by_client_request_id(client_request_id)
         if existing_by_key is not None:
-            return self._resolve_idempotent_create(
-                existing_by_key, owner_id=owner_id, work_date=work_date
+            return (
+                self._resolve_idempotent_create(
+                    existing_by_key, owner_id=owner_id, work_date=work_date
+                ),
+                False,
             )
 
         _template, version, fields = await TemplateService(self._session).get_current(owner_id)
@@ -216,15 +225,18 @@ class DailyReportService:
                 await self._session.rollback()
                 existing_by_key = await self._reports.get_by_client_request_id(client_request_id)
                 if existing_by_key is not None:
-                    return self._resolve_idempotent_create(
-                        existing_by_key, owner_id=owner_id, work_date=work_date
+                    return (
+                        self._resolve_idempotent_create(
+                            existing_by_key, owner_id=owner_id, work_date=work_date
+                        ),
+                        False,
                     )
                 raise RuntimeError("daily report insert failed") from error
             if inserted:
                 await self._session.commit()
-                created = await self._reports.get_for_owner(report.id, owner_id)
-                assert created is not None
-                return created
+                created_report = await self._reports.get_for_owner(report.id, owner_id)
+                assert created_report is not None
+                return created_report, True
             await self._session.rollback()
         raise RuntimeError("daily report creation failed after retrying the open-day race")
 
