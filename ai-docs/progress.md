@@ -7,7 +7,7 @@
 ## 1. 总体状态
 
 - 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存、阶段 7 周报闭环、阶段 8 设置能力与受控备份、阶段 9 质量与发布。V1 规划的全部 9 个阶段均已交付。
-- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）、`346b0ea`（周报闭环）、`2584133`（关闭阶段 7 并回填提交号）、`00caa33`（设置能力与受控备份）、`0148171`（质量与发布）、`a866872`（第二版增量需求）、`e767ebd`（第二版技术方案）。
+- 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）、`346b0ea`（周报闭环）、`2584133`（关闭阶段 7 并回填提交号）、`00caa33`（设置能力与受控备份）、`0148171`（质量与发布）、`a866872`（第二版增量需求）、`e767ebd`（第二版技术方案）、`e86b88c`（第二版迁移与认证基线 BE-10A）、`784f96c`（日报聚合、管理员撤销与用户安全删除 BE-10B）。
 - 当前所在阶段：CR-20260807-01 的 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B` 已完成；当前可进入 `BE-10C`。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
 - 阶段 4 实现状态：六项任务均已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
@@ -321,7 +321,7 @@
 - `backend/app/services/user.py::UserService.delete_user()`：自我删除直接拒绝；确认用户名须与目标账号 `username` 精确一致（非规范化比较）；`has_business_records()` 检查 `daily_report_days`/`weekly_reports`/`export_jobs` 三张表（`daily_reports` 通过日期容器传递覆盖）；无业务记录时在同一事务内先删除 `user_settings`/`template_versions`/`report_templates` 脚手架数据，再对 `users` 做条件 `DELETE`（复用 `update_account` 同款末位有效管理员保护谓词）；末位管理员保护和业务记录检查均以数据库当前状态为准，且捕获检查后仍发生业务记录写入的并发场景（`IntegrityError` → `40910`，`ON DELETE RESTRICT` 兜底）。删除成功写入 `admin_audit_events`（`action=user_deleted`）。
 - API 层新增/变更：`app/api/v1/daily_reports.py` 的 `POST`/`PATCH` 已改为要求 `client_request_id`，新增 `DELETE /daily-reports/{id}`，移除 `POST /daily-reports/{id}/archive`；新增 `app/api/v1/daily_report_days.py`（`GET ''`月历、`GET '/{work_date}'`详情、`POST '/{work_date}/archive'`）；新增 `app/api/v1/admin_daily_reports.py`（`GET /admin/daily-reports/submitted`、`POST /admin/daily-reports/{id}/revoke-submission`、`GET /admin/audit-events`）；`app/api/v1/users.py` 新增 `DELETE /users/{id}`。均已接入 `main.py` 并校验 `get_current_user`/`get_current_admin`。
 - 已知范围边界（记录供 `BE-10C` 承接，非本阶段缺陷）：`WeeklyReportService`/`ExportService` 仍读取 `daily_reports.status=='archived'` 的条目级查询，尚未切换为按 `daily_report_days.archive_snapshot_json` 的日期级正式快照聚合；真实多条目日期归档后，周报/导出在同一日期出现多条 `archived` 条目时的聚合语义尚不正确（`weekly_report_sources` 按 `daily_report_day_id` 主键会与多来源写入冲突）。`test_exports_api.py`/`test_weekly_reports_api.py` 的 `_archive` 测试夹具已同步改为调用新的 `POST /daily-report-days/{work_date}/archive`，但覆盖场景仍是每日单条目，未验证多条目下游行为。
-- 实际门禁：后端 `uv run ruff check .`、`ruff format --check .`、`mypy`（strict，115 个源文件）、`pytest`（**242 项通过**，阶段 10A 遗留 199 项 + 本阶段新增 43 项）均通过；根工作区 `npm run lint`、`npm run typecheck`、`npm test`（18 文件 108 项）、`npm run build` 作为回归检查全部通过（未修改任何 Electron/Vue 文件）；`git diff --check` 通过（仅 LF→CRLF 提示）。独立安全专项审查（沙盒 Agent 独立读取 diff）逐项核查所有权隔离、管理员正文泄露、SQL 注入、用户删除权限提升、确认/原因绕过、`client_request_id` 跨用户信息泄露、审计日志注入，未发现 P0/P1；识别一项低置信度（4/10）非漏洞信息项已记录不阻塞交付。实现提交待创建，阶段 10B 正式关闭。
+- 实际门禁：后端 `uv run ruff check .`、`ruff format --check .`、`mypy`（strict，115 个源文件）、`pytest`（**242 项通过**，阶段 10A 遗留 199 项 + 本阶段新增 43 项）均通过；根工作区 `npm run lint`、`npm run typecheck`、`npm test`（18 文件 108 项）、`npm run build` 作为回归检查全部通过（未修改任何 Electron/Vue 文件）；`git diff --check` 通过（仅 LF→CRLF 提示）。独立安全专项审查（沙盒 Agent 独立读取 diff）逐项核查所有权隔离、管理员正文泄露、SQL 注入、用户删除权限提升、确认/原因绕过、`client_request_id` 跨用户信息泄露、审计日志注入，未发现 P0/P1；识别一项低置信度（4/10）非漏洞信息项已记录不阻塞交付。实现提交 `784f96c` 已创建，阶段 10B 正式关闭。
 
 ## 3. 尚未实现
 
@@ -351,7 +351,7 @@
 3. 新增月历/统计 API（`GET /statistics/monthly`），实现自然日完成率、来源条目篇数、连续记录天数等既定口径（`decisions.md` PROD-014）。
 4. 补充跨年周、闰日、多来源聚合的自动化测试；10C 独立提交完成前不开始 `FE-10` 的 Electron 页面。
 
-阶段 10B（日报聚合、管理员撤销与用户安全删除）已在本次实现、自测、质量门禁与独立安全审查通过，实现提交待创建（见下方“当前运行方式”前的实现记录一节）。
+阶段 10B（日报聚合、管理员撤销与用户安全删除）已实现、自测、质量门禁与独立安全审查通过，实现提交 `784f96c`（见上方"第二版日报聚合、管理员撤销与用户安全删除（阶段 10B，BE-10B）"一节）。
 
 阶段 3 已满足以下目标，独立提交 `8480515` 已创建：
 
