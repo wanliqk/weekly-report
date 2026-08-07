@@ -110,17 +110,24 @@ function sweepOrphanSidecarProcesses(): void {
   }
 }
 
-export interface AdminCredentials {
+export interface BootstrapUser {
   username: string
   displayName: string
   password: string
 }
 
-export const DEFAULT_ADMIN: AdminCredentials = {
-  username: 'admin',
-  displayName: 'E2E 管理员',
+/** The first ordinary user submitted through `/setup` (`docs/方案设计.md` §7.1: the setup form only ever creates *this* account — the fixed `admin` account is created atomically by the server alongside it, never by this form). */
+export const FIRST_USER: BootstrapUser = {
+  username: 'e2e_user',
+  displayName: 'E2E 用户',
   password: 'TestPass123!'
 }
+
+/** Second-version bootstrap always creates the default admin under this fixed, reserved username (`BootstrapService.DEFAULT_ADMIN_USERNAME`) — it is never chosen by the setup form. */
+export const FIXED_ADMIN_USERNAME = 'admin'
+
+/** Password the default admin sets during its mandatory first-login `/change-password` flow. */
+export const ADMIN_NEW_PASSWORD = 'AdminPass456!'
 
 /** Scopes a locator to the `.el-form-item` whose label text contains `label`, then to its input control. Only safe when at most one matching form is visible at a time — true for every screen this suite drives. */
 export function formField(page: Page, label: string): ReturnType<Page['locator']> {
@@ -134,11 +141,15 @@ export async function waitForSetupOrLogin(page: Page): Promise<void> {
     .waitFor({ state: 'visible' })
 }
 
-export async function bootstrapAdmin(page: Page, creds: AdminCredentials): Promise<void> {
+/** Submits `/setup`'s single form. The server atomically creates this account (`role=user`) plus the fixed `admin` account sharing the same initial password (`docs/方案设计.md` §7.1) — this helper only drives the one form, it does not touch the admin account it implicitly creates. */
+export async function bootstrapFirstUser(
+  page: Page,
+  user: BootstrapUser = FIRST_USER
+): Promise<void> {
   await page.locator('h2:has-text("创建管理员")').waitFor({ state: 'visible' })
-  await formField(page, '用户名').fill(creds.username)
-  await formField(page, '显示名称').fill(creds.displayName)
-  await formField(page, '密码').fill(creds.password)
+  await formField(page, '用户名').fill(user.username)
+  await formField(page, '显示名称').fill(user.displayName)
+  await formField(page, '密码').fill(user.password)
   await page.locator('button:has-text("创建并继续")').click()
   await page.locator('h2:has-text("登录工作手记")').waitFor({ state: 'visible' })
 }
@@ -148,6 +159,38 @@ export async function login(page: Page, username: string, password: string): Pro
   await formField(page, '用户名').fill(username)
   await formField(page, '密码').fill(password)
   await page.locator('button:has-text("登录")').click()
+}
+
+/** Drives the forced `/change-password` screen a `must_change_password=true` account lands on right after login (`docs/方案设计.md` §7.2); ends back on the login screen since a successful change clears the session and requires a fresh login. */
+export async function completeForcedPasswordChange(
+  page: Page,
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  await page.locator('h2:has-text("设置新密码")').waitFor({ state: 'visible' })
+  await formField(page, '当前（临时）密码').fill(currentPassword)
+  await formField(page, '新密码').fill(newPassword)
+  await page.locator('button:has-text("修改密码并重新登录")').click()
+  await page.locator('h2:has-text("登录工作手记")').waitFor({ state: 'visible' })
+}
+
+/**
+ * Full second-version bootstrap: creates the first ordinary user + fixed
+ * `admin` in one `/setup` submission, then logs into the admin account,
+ * completes its mandatory first-login password change, and logs back in
+ * with the new password — leaving the admin session on `/daily`.
+ */
+export async function bootstrapAndSignInAsAdmin(
+  page: Page,
+  options: { user?: BootstrapUser; newAdminPassword?: string } = {}
+): Promise<void> {
+  const user = options.user ?? FIRST_USER
+  const newAdminPassword = options.newAdminPassword ?? ADMIN_NEW_PASSWORD
+  await bootstrapFirstUser(page, user)
+  await login(page, FIXED_ADMIN_USERNAME, user.password)
+  await completeForcedPasswordChange(page, user.password, newAdminPassword)
+  await login(page, FIXED_ADMIN_USERNAME, newAdminPassword)
+  await page.locator('h1:has-text("我的日报")').waitFor({ state: 'visible' })
 }
 
 export async function logout(page: Page): Promise<void> {

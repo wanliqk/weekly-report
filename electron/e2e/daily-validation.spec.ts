@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
 
 import {
-  bootstrapAdmin,
+  bootstrapFirstUser,
   closeApp,
   confirmMessageBox,
   DAILY_DETAIL_URL_PATTERN,
-  DEFAULT_ADMIN,
+  FIRST_USER,
   formField,
   launchApp,
   login,
@@ -25,9 +25,9 @@ test.afterEach(async () => {
 test('submitting with a required field blank surfaces a field-level error and keeps other input', async () => {
   const { page } = instance
 
-  await bootstrapAdmin(page, DEFAULT_ADMIN)
-  await login(page, DEFAULT_ADMIN.username, DEFAULT_ADMIN.password)
-  await page.locator('h1:has-text("日报工作台")').waitFor({ state: 'visible' })
+  await bootstrapFirstUser(page)
+  await login(page, FIRST_USER.username, FIRST_USER.password)
+  await page.locator('h1:has-text("我的日报")').waitFor({ state: 'visible' })
 
   await page.locator('button:has-text("新建日报")').click()
   await page.locator('button:has-text("创建并填写")').click()

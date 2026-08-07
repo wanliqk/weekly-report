@@ -179,9 +179,9 @@ uv sync --directory backend --frozen
 | BE-10B | 主 Agent | 日报聚合、管理员撤销与用户安全删除 | BE-10A | DONE | 同日多篇、幂等创建、草稿删除/提交、日期级归档、最小权限撤销/审计、安全删除及并发测试均已实现、自测、质量门禁与独立安全审查通过 |
 | BE-10C | 主 Agent | 周报、导出与统计适配 | BE-10B | DONE | 日期正式来源、周报 JSON、Excel 多来源列、月历/统计 API 及跨年/闰日测试均已实现、自测、质量门禁通过 |
 | FE-10 | 主 Agent | 第二版 Electron/Vue 界面实现 | BE-10A、BE-10B、BE-10C 契约 | DONE | 强制改密、菜单改名、我的日报月历/归档、我的周报适配、设置收口、管理员入口、用户删除和统计页均已实现、自测、质量门禁与真实 Electron 冒烟通过 |
-| QA-10 | 主 Agent | 第二版迁移、权限、并发、统计与 E2E 验收 | BE-10A..BE-10C、FE-10 | TODO | 旧库迁移、同日并发、汇总原子性、权限隔离、删除保护、跨月/闰日统计及完整桌面流程通过门禁；另需重写 `electron/e2e/*.spec.ts`（当前套件仍是 V1 UI 形状，见 `issues.md` ISS-024） |
+| QA-10 | 主 Agent | 第二版迁移、权限、并发、统计与 E2E 验收 | BE-10A..BE-10C、FE-10 | DONE | 旧库迁移（既有自动化 fixture + 一次真实意外触发的生产环境 V1→V2 升级）、同日并发、汇总原子性、权限隔离、删除保护、跨月/闰日统计及完整桌面流程通过门禁；重写全部 `electron/e2e/*.spec.ts` 为第二版 UI 断言并新增用户删除 spec；真实生产打包（PyInstaller+electron-builder）+ 真实安装/升级/卸载验证均已完成 |
 
-第二版需求、方案、`BE-10A`、`BE-10B`、`BE-10C` 和 `FE-10` 均已完成；日报条目已是真正的同日多篇 + 日期级归档，V1 单篇兼容桥已移除；周报、导出和统计后端均已切换为读取日期级正式快照（`daily_report_days.archive_snapshot_json`），不再读取条目级 `archived` 状态；全部第二版 Electron/Vue 界面（强制改密、我的日报月历、我的周报多来源展示、统计页、管理员日报管理/用户删除、设置收口）均已实现并通过真实 Electron 冒烟验证。仅剩 `QA-10` 的迁移/并发/权限专项验收和 E2E 套件重建待完成。
+第二版需求、方案、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均已完成；日报条目已是真正的同日多篇 + 日期级归档，V1 单篇兼容桥已移除；周报、导出和统计后端均已切换为读取日期级正式快照（`daily_report_days.archive_snapshot_json`），不再读取条目级 `archived` 状态；全部第二版 Electron/Vue 界面（强制改密、我的日报月历、我的周报多来源展示、统计页、管理员日报管理/用户删除、设置收口）均已实现并通过真实 Electron 冒烟验证、真实生产打包安装验证和重写后的 Playwright E2E 全量验证。CR-20260807-01 第二版增量至此全部交付完毕。
 
 ## 4. 当前可领取任务
 
@@ -199,7 +199,7 @@ uv sync --directory backend --frozen
 
 阶段 9 四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。V1 全部 9 个阶段现已交付完毕。
 
-第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10` 均为 `DONE`。当前可领取且仅可领取 `QA-10`。
+第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均为 `DONE`。CR-20260807-01 第二版增量的全部任务已交付完毕，当前无可领取的第二版任务。
 
 ### 第二版阶段 10A 验证记录
 
@@ -244,6 +244,24 @@ uv sync --directory backend --frozen
 - 真实环境验证：用项目既有的 Playwright `_electron` 驱动能力（`electron/e2e/helpers/app.ts`，隔离临时数据目录，全程未触碰仓库 `.local-data/`）编写了两次一次性冒烟脚本（均未纳入正式套件，验证后已删除，重建正式 V2 E2E 覆盖是 `QA-10` 的范围）：① 主链路——双账号首次初始化 → 默认 `admin` 用 bootstrap 密码登录被强制跳转到 `/change-password` 且导航栏不可见 → 修改密码后要求重新登录 → 新密码登录进入日历 → 确认无残留英文星期表头 → 新建/保存/提交日报条目 → 返回日历发起日期级归档并看到合并后的正式日报卡片 → 生成本周周报并确认条目内容出现在来源卡片中 → 统计页无 `NaN` → 设置页无“提交后自动归档”文案且含“修改密码”“整库手动备份” → 管理员“日报管理”页可打开 → “用户管理”页当前账号删除按钮禁用、另一账号可删除按钮可用；② 导出——补充发现导出入口缺失后专门验证“导出当天正式日报”和“导出本月已归档日报”两个按钮均能触发真实 `POST /daily-report-exports`、下载并通过 `exportFile.save` 落盘，磁盘文件头校验为合法 xlsx（`PK\x03\x04`）。
 - 安全审查：对本次实际改动范围（渲染进程 TypeScript/Vue 文件）执行了聚焦安全检查（未使用 `security-review` 技能默认抓取的全分支历史 diff，因其包含已在阶段 6/7/8/`BE-10B`/`BE-10C` 审查过的无关代码）：确认新增代码无 `v-html`/`innerHTML`/`eval`、无 `localStorage`/`sessionStorage` 写入、`el-tooltip` 的 `:content` 绑定均未设置 `raw-content`（按纯文本渲染）、管理员页面展示字段与后端最小元数据类型逐一对应（类型定义中不存在任何正文/模板快照字段，前端无法展示不存在的数据）、用户删除确认与所有权/角色相关的客户端校验均只是 UX 提示，真正的授权判定仍全部在后端。未发现 P0/P1；本次审查为主 Agent 直接执行，未额外派发独立沙盒 Agent 复核（与阶段 6/7/8/`BE-10B`/`BE-10C` 的沙盒 Agent 独立审查模式不同，如实记录该差异）。
 - 已知非阻塞缺口（记录供 `QA-10` 承接）：`electron/e2e/*.spec.ts`（`primary-path`/`auth-failures`/`daily-validation`/`admin-guard`/`stale-version-conflict`）仍是 V1 UI 断言（如 `bootstrapAdmin` 用户名 `'admin'` 会命中新的保留用户名拒绝、页面标题“日报工作台”已改名“我的日报”、单篇归档按钮已不存在），运行 `npm run test:e2e` 现在会失败；这是 FE-10 改变 UI 形状后的预期结果，不是本阶段引入的回归，已记入 `issues.md` ISS-024，重写正式 V2 E2E 套件是 `QA-10` 的既定范围。
+
+### 第二版阶段 10E 验证记录（QA-10）
+
+- 后端回归：`uv run ruff check .`、`ruff format --check .`、`mypy`（strict，123 个源文件）均通过；`pytest`（**280 项全部通过**，与 `BE-10C` 收尾一致，本阶段未改动后端代码）。全量跑批中一次性复现了已知的 `ISS-013`（JWT 篡改测试偶发假阳性），单独重跑通过，与本阶段改动无关。
+- 迁移覆盖复核：逐项核对 `backend/tests/test_v2_migration.py` 的 4 个测试函数，确认已覆盖设计要求的全部迁移场景（空库/真实 V1 结构副本升级、三态日报、多模板版本、跨年周与闰日日期、未来日期、导出任务、停用账号、周报 JSON V2 化、逐字节正文/模板保留、`PRAGMA foreign_key_check`、无损 downgrade、同日多条目/审计事件拒绝 downgrade、坏 JSON 在 DDL 前中止）——判定已有覆盖满足 `QA-10` 的"旧库迁移"验收要求，未重复造轮子。
+- E2E 套件重写：`electron/e2e/helpers/app.ts` 新增 `bootstrapFirstUser`/`completeForcedPasswordChange`/`bootstrapAndSignInAsAdmin` 等第二版专用 helper，移除只适用单账号 V1 的 `bootstrapAdmin`/`DEFAULT_ADMIN`。重写全部 5 个既有 spec（`primary-path`/`auth-failures`/`daily-validation`/`admin-guard`/`stale-version-conflict`）为第二版 UI/路由/流程断言，新增 `user-deletion.spec.ts`。`primary-path.spec.ts` 扩写为覆盖 `docs/方案设计.md` §13 要求的完整链路：双账号初始化→admin 强制改密（含手动 hash 导航绕过被路由守卫拦回的断言）→同日创建两篇→提交→admin 撤销一篇→所有者看到撤销原因并重新提交→日期级归档合并两篇来源→统计卡片篇数正确且无 `NaN`→周报聚合两篇来源→导出正式日报为真实 xlsx 文件。`npm run test:e2e`（含 `npm run build` 重新构建）连续 3 次全量重跑，6 个 spec 均 100% 通过，无 flaky。
+- 前端回归：`npm run lint`（0 error/0 warning）、`npm run typecheck`、`npm test`（**22 文件 125 项**，与 `FE-10` 收尾一致，本阶段未改动 renderer 业务代码，仅改动 `e2e/`）、`npm run test:integration`（真实 sidecar，2 项）均通过；`git diff --check` 通过（仅 LF→CRLF 提示）。
+- 生产打包与真实安装/升级/卸载验证（本机，无独立干净虚拟机，沿用阶段 9 `REL-01` 已获用户确认的方案，本次为该验证首次在第二版代码上执行）：
+  - 重新执行 `uv run pyinstaller weekly-report-backend.spec` 产出全新 V2 sidecar 并替换 `build/sidecar/`；在剥离 PATH（仅 `System32`/`Windows`）的隔离环境下启动，`/health` 返回正常，生成的 SQLite 库含全部 11 张表（8 张业务表 + `alembic_version` + 第二版新增的 `daily_report_days`/`admin_audit_events`）。
+  - 重新执行 `npm run build:win` 产出全新安装包 `weekly-report-0.1.0-setup.exe`；`Get-AuthenticodeSignature` 确认安装包与内部可执行文件均为 `NotSigned`（`RISK-003` 已知风险，未变化）。
+  - 真实静默安装（`/S`）：确认安装到 `%LOCALAPPDATA%\Programs\weekly-report-electron\`，桌面快捷方式与注册表卸载项（`DisplayName`/`DisplayVersion`/`UninstallString`/`QuietUninstallString`）均正确写入。
+  - 真实使用：用 Playwright `_electron` 直接指向已安装的 `weekly-report.exe`（不做任何数据目录隔离，即完全按真实用户路径运行）驱动：双账号初始化→admin 强制改密→创建/提交/归档日报→周报生成→统计页无 `NaN`→切换回 admin 查看用户管理列表；全部通过。
+  - 意外但有价值的发现：尝试用环境变量隔离 `win-unpacked` 产物的数据目录时失败——生产环境下 `paths.ts::productionDataDirEnv` 会无条件基于 `app.getPath('userData')` 重新计算并覆盖同名环境变量（`SEC-010` 既定安全设计，防止外部环境变量劫持已安装应用的数据位置）。这次意外触发的启动实际读写了阶段 9 `REL-01` 遗留的真实 V1 数据库（单一 `admin` 账号），逐项核对确认该库被自动、正确地迁移到了第二版头版本（`alembic_version=8b1d4e6f2a90`，全部 11 张表含新表）——构成一次真实的、非合成的"已安装环境下 V1→V2 升级"验证，比预期计划的更真实。已记为 `ISS-025`（P3，非缺陷，记录该环境变量隔离方式对已打包二进制无效的事实供以后参考）。
+  - 升级冒烟：对同一安装目录重新静默安装（模拟版本升级的覆盖安装路径），确认此前创建的两个账号、已提交/已归档日报和周报在重新安装后依然完整存在。
+  - 卸载：`Uninstall weekly-report.exe /currentuser /S` 正确移除安装目录下全部程序文件、桌面快捷方式和注册表卸载项；卸载后 `%APPDATA%\weekly-report-electron\data\weekly-report.db` 依然存在且可正常读取（表结构、账号数据均完整），满足"卸载不删用户数据"的目标要求。
+  - 验证完成后已清理本次 QA 注入到真实 `%APPDATA%\weekly-report-electron\` 的测试数据（双账号、日报、周报），不留存于用户实际数据目录。
+  - 本阶段驱动打包/安装验证用的 Playwright spec（`_qa10-packaged-smoke.spec.ts`、`_qa10-installed-smoke.spec.ts`）均为一次性冒烟脚本，验证通过后已删除，不纳入正式套件（正式 V2 E2E 覆盖已由上述 6 个常规 spec 提供）。
+- 与阶段 9 `REL-01` 的差异：本次打包/安装验证过程中未发现任何新的真实缺陷（阶段 9 当时发现并修复了三个真实缺陷，其中一个 P0）；第二版的打包配置（`electron-builder.yml`、`weekly-report-backend.spec`、`electron.vite.config.ts` 的依赖外部化排除）自阶段 9 起未被修改，此次验证是对这些既有配置在全新第二版应用代码上的复用性确认，结果为完全兼容、零回归。
 
 ## 5. 实际验证记录
 
