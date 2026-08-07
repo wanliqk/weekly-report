@@ -67,10 +67,6 @@ async function selectDate(day: string): Promise<void> {
   resolvingDate.value = true
   try {
     const dayDetail = await getDayDetail(day)
-    if (dayDetail.status === 'archived') {
-      router.push({ name: 'daily-day', params: { date: day } })
-      return
-    }
     if (dayDetail.entries.length === 0) {
       try {
         await ElMessageBox.confirm(`${day} 还没有日报，是否新建一篇？`, '新建日报', {
@@ -84,11 +80,10 @@ async function selectDate(day: string): Promise<void> {
       router.push({ path: '/daily/new', query: { work_date: day } })
       return
     }
-    if (dayDetail.entries.length === 1 && dayDetail.entries[0].status === 'draft') {
-      router.push(`/daily/${dayDetail.entries[0].id}`)
-      return
-    }
-    router.push({ name: 'daily-day', params: { date: day } })
+    const target =
+      dayDetail.entries.find((entry) => entry.status === 'draft') ??
+      dayDetail.entries[dayDetail.entries.length - 1]
+    router.push(`/daily/${target.id}`)
   } catch (error) {
     ElMessage.error(userMessage(error))
   } finally {
@@ -171,7 +166,7 @@ onMounted(() => {
         <span class="eyebrow">MY DAILY REPORTS</span>
         <h1>我的日报</h1>
         <p>
-          按月历查看每天的日报状态；一天可创建多篇条目，提交后由你手动发起当天归档，归档后自动汇总为一份正式日报。点击某一天可进入该天的日报详情。
+          按月历查看每天的日报状态；点击某一天可继续编辑草稿、查看已提交或已归档的日报，也可以新建一篇。提交后会自动归档当天（若当天还有其他草稿未提交，需先处理后才能归档）。
         </p>
       </div>
       <el-button :loading="exporting" @click="exportMonth">导出本月已归档日报</el-button>

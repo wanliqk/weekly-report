@@ -12,6 +12,7 @@ import {
   saveDailyReport,
   submitDailyReport
 } from '@renderer/api/daily-reports'
+import { createDailyReportExport, downloadDailyReportExportFile } from '@renderer/api/exports'
 import DynamicFieldInput from '@renderer/components/DynamicFieldInput.vue'
 import type { DailyContent, DailyFieldValue, DailyReportData } from '@renderer/types/daily-report'
 import {
@@ -22,12 +23,14 @@ import {
   initializeDailyContent,
   todayInShanghai
 } from '@renderer/utils/daily-form'
+import { invalidExportDayIds } from '@renderer/utils/export'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(true)
 const saving = ref(false)
 const actionRunning = ref(false)
+const exporting = ref(false)
 const report = ref<DailyReportData | null>(null)
 const content = ref<DailyContent>({})
 const fieldErrors = ref<Record<string, string>>({})
@@ -151,6 +154,44 @@ async function archiveAfterSubmit(workDate: string): Promise<void> {
   }
 }
 
+async function exportReport(): Promise<void> {
+  if (!report.value) {
+    return
+  }
+  exporting.value = true
+  try {
+    const job = await createDailyReportExport({ daily_report_day_ids: [report.value.day_id] })
+    if (job.status === 'failed') {
+      ElMessage.error('导出生成失败，请稍后重试')
+      return
+    }
+    if (job.record_count === 0) {
+      ElMessage.warning('所选或筛选范围内没有可导出的正式日报')
+      return
+    }
+    const file = await downloadDailyReportExportFile(job.id)
+    const outcome = await window.runtimeBridge.exportFile.save(
+      file.fileName,
+      new Uint8Array(file.data)
+    )
+    if (outcome.status === 'saved') {
+      ElMessage.success('导出文件已保存')
+    } else if (outcome.status === 'canceled') {
+      ElMessage.info('已取消保存')
+    } else {
+      ElMessage.error('保存导出文件失败，请检查目标位置后重试')
+    }
+  } catch (error) {
+    if (invalidExportDayIds(error)) {
+      ElMessage.error('所选日期不可导出（需为本人已归档日期）')
+    } else {
+      ElMessage.error(userMessage(error))
+    }
+  } finally {
+    exporting.value = false
+  }
+}
+
 async function removeDraft(): Promise<void> {
   if (!report.value || report.value.status !== 'draft') {
     return
@@ -222,6 +263,9 @@ function handleOperationError(error: unknown): void {
         >
           {{ dailyStatusLabel(report.status) }}
         </el-tag>
+        <el-button v-if="report.status === 'archived'" :loading="exporting" @click="exportReport">
+          导出日报
+        </el-button>
         <el-button @click="backToCalendar">返回我的日报</el-button>
       </div>
     </header>

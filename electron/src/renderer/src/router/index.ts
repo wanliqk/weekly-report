@@ -5,7 +5,6 @@ import { useAuthStore } from '@renderer/stores/auth'
 import { useSidecarStore } from '@renderer/stores/sidecar'
 import AdminDailyReportsView from '@renderer/views/AdminDailyReportsView.vue'
 import ChangePasswordView from '@renderer/views/ChangePasswordView.vue'
-import DailyDayDetailView from '@renderer/views/DailyDayDetailView.vue'
 import DailyDetailView from '@renderer/views/DailyDetailView.vue'
 import DailyListView from '@renderer/views/DailyListView.vue'
 import HomeView from '@renderer/views/HomeView.vue'
@@ -46,7 +45,6 @@ export const router = createRouter({
       meta: { requiresAuth: true },
       children: [
         { path: 'daily', name: 'daily', component: DailyListView },
-        { path: 'daily/day/:date', name: 'daily-day', component: DailyDayDetailView },
         { path: 'daily/:id', name: 'daily-detail', component: DailyDetailView },
         { path: 'weekly', name: 'weekly', component: WeeklyListView },
         { path: 'weekly/:id', name: 'weekly-detail', component: WeeklyDetailView },
