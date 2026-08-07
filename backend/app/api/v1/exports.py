@@ -1,5 +1,6 @@
 import asyncio
 from typing import Annotated, cast
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,8 +62,18 @@ async def download_export(
 ) -> Response:
     file_name, path = await ExportService(session, settings).get_download(current_user.id, job_id)
     content = await asyncio.to_thread(path.read_bytes)
+    # `file_name` carries Chinese characters, which raw HTTP headers cannot
+    # encode (must be latin-1); RFC 6266 `filename*=UTF-8''<percent-encoded>`
+    # carries the real name, with an ASCII `filename=` fallback for clients
+    # that only understand the legacy parameter.
+    encoded_name = quote(file_name, safe="")
     return Response(
         content=content,
         media_type=EXPORT_MEDIA_TYPE,
-        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="daily-report-export.xlsx"; '
+                f"filename*=UTF-8''{encoded_name}"
+            )
+        },
     )

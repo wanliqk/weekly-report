@@ -144,6 +144,27 @@ describe('API client authentication', () => {
     expect(result.fileName).toBe('report.xlsx')
   })
 
+  it('prefers the RFC 6266 UTF-8 file name over the ASCII fallback', async () => {
+    configureApiAuth({
+      getAccessToken: () => 'access-token',
+      onTokenInvalid: vi.fn(),
+      onPasswordChangeRequired: vi.fn()
+    })
+    const bytes = new Uint8Array([1, 2, 3]).buffer
+    axiosMock.request.mockResolvedValue({
+      status: 200,
+      data: bytes,
+      headers: {
+        'content-disposition':
+          'attachment; filename="daily-report-export.xlsx"; filename*=UTF-8\'\'%E6%97%A5%E6%8A%A5-Alice_2026%E5%B9%B48%E6%9C%887%E6%97%A5.xlsx'
+      }
+    })
+
+    const result = await requestBinary({ method: 'GET', url: '/probe/file' })
+
+    expect(result.fileName).toBe('日报-Alice_2026年8月7日.xlsx')
+  })
+
   it('decodes a JSON error body returned as an ArrayBuffer into the real business code', async () => {
     configureApiAuth({
       getAccessToken: () => 'access-token',

@@ -24,6 +24,7 @@ from app.services.export import (
     ExportFileNotAvailableError,
     ExportSelectionInvalidError,
     ExportService,
+    _safe_filename_component,
 )
 
 _FIXED_NOW = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
@@ -200,7 +201,7 @@ async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeed
 
     assert job.status == "succeeded"
     assert job.record_count == 2
-    assert job.file_name is not None and job.file_name.endswith(".xlsx")
+    assert job.file_name == "日报-owner_2026年8月4日.xlsx"
     workbook_path = _workbook_path(job)
     assert workbook_path.parent == export_settings.export_temp_dir.resolve()
 
@@ -473,3 +474,48 @@ def test_export_media_type_is_the_standard_xlsx_mime_type() -> None:
     assert EXPORT_MEDIA_TYPE == (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+@pytest.mark.parametrize(
+    ("username", "expected"),
+    [
+        ("alice", "alice"),
+        ("张三", "张三"),
+        ("ali/ce", "ali_ce"),
+        ("../../etc/passwd", "etc_passwd"),
+        ("  bob  ", "bob"),
+        ("😀", "user"),
+        ("", "user"),
+    ],
+)
+def test_safe_filename_component_strips_characters_outside_the_electron_whitelist(
+    username: str, expected: str
+) -> None:
+    """Must stay in lockstep with `SAFE_FILE_NAME_PATTERN` in
+
+    `electron/src/main/export/file-saver.ts` — usernames have no character
+    restriction beyond length, so this is the only thing standing between an
+    admin-chosen username and an export the desktop app's save dialog
+    whitelist would otherwise reject.
+    """
+    assert _safe_filename_component(username) == expected
+
+
+async def test_create_sanitizes_an_unsafe_username_in_the_file_name(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await BootstrapService(session).bootstrap(
+            username="ali/ce bob", password=STAGE5_PASSWORD, display_name="Alice"
+        )
+        archived = await _archived_day(
+            session, owner_id=user.id, work_date=date(2026, 8, 5), fields=[], content={}
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=[archived.id], filter_=None
+        )
+
+    assert job.file_name == "日报-ali_ce_bob_2026年8月5日.xlsx"

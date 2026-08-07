@@ -1,5 +1,6 @@
 from io import BytesIO
 from typing import Any, cast
+from urllib.parse import unquote
 
 import openpyxl
 import pytest
@@ -101,7 +102,9 @@ def test_export_by_ids_returns_succeeded_job_with_downloadable_xlsx(
     assert downloaded.headers["content-type"] == (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    assert job["file_name"] in downloaded.headers["content-disposition"]
+    disposition = downloaded.headers["content-disposition"]
+    encoded_name = disposition.split("filename*=UTF-8''", 1)[1]
+    assert unquote(encoded_name) == job["file_name"]
     workbook = openpyxl.load_workbook(BytesIO(downloaded.content))
     sheet = workbook.active
     assert sheet is not None

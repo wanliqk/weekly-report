@@ -8,7 +8,11 @@ import type { ExportSaveResult } from '../../shared/contracts'
 // not a bulk import); this ceiling only exists to reject an obviously
 // malformed or hostile IPC payload before it reaches the filesystem.
 const MAX_EXPORT_FILE_BYTES = 25 * 1024 * 1024
-const SAFE_FILE_NAME_PATTERN = /^[A-Za-z0-9._-]{1,150}\.xlsx$/
+// The server names exported files `日报-<username>_<year>年<month>月<day>日.xlsx`
+// (CJK Unified Ideographs, U+4E00-U+9FFF), so the whitelist allows that block
+// alongside the original ASCII set — it stays a strict allow-list, just
+// widened to the character classes our own naming scheme can produce.
+const SAFE_FILE_NAME_PATTERN = /^[-A-Za-z0-9._一-鿿]{1,150}\.xlsx$/u
 
 export class ExportFileSaveError extends Error {
   constructor(message: string) {

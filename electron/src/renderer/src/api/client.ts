@@ -144,6 +144,14 @@ function extractFileName(headerValue: unknown): string | null {
   if (typeof headerValue !== 'string') {
     return null
   }
+  const encodedMatch = /filename\*=UTF-8''([^;]+)/i.exec(headerValue)
+  if (encodedMatch) {
+    try {
+      return decodeURIComponent(encodedMatch[1])
+    } catch {
+      // fall through to the plain `filename=` parameter below
+    }
+  }
   const match = /filename="([^"]+)"/.exec(headerValue)
   return match ? match[1] : null
 }

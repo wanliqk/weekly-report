@@ -59,6 +59,14 @@ describe('ExportFileSaver', () => {
     expect(showSaveDialog).toHaveBeenCalledWith('report.xlsx')
   })
 
+  it('accepts the server-generated CJK export file name', async () => {
+    const { instance, showSaveDialog } = saver()
+
+    await instance.save('日报-alice_2026年8月7日.xlsx', new Uint8Array([1]))
+
+    expect(showSaveDialog).toHaveBeenCalledWith('日报-alice_2026年8月7日.xlsx')
+  })
+
   it.each([
     ['missing extension', 'report'],
     ['wrong extension', 'report.txt'],

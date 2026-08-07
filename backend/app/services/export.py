@@ -1,10 +1,11 @@
 import asyncio
 import json
 import logging
+import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from app.core.ulid import generate_ulid
 from app.models import DailyReportDay, ExportJob
 from app.repositories.daily_report_day import DailyReportDayRepository
 from app.repositories.export_job import ExportJobRepository
+from app.repositories.user import UserRepository
 from app.schemas.daily_report_day import DayArchiveSnapshotData
 from app.schemas.export import ExportFilter
 from app.schemas.template import TemplateFieldData
@@ -180,9 +182,23 @@ def build_export_workbook(days: list[DailyReportDay], columns: list[ExportColumn
     return buffer.getvalue()
 
 
-def _export_file_name(moment: datetime) -> str:
-    timestamp = to_shanghai(moment).strftime("%Y%m%d-%H%M%S")
-    return f"daily-report-export-{timestamp}.xlsx"
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9一-鿿]+")
+
+
+def _safe_filename_component(username: str) -> str:
+    """Keeps the export file name inside the Electron save-dialog whitelist
+
+    (`electron/src/main/export/file-saver.ts`'s `SAFE_FILE_NAME_PATTERN`)
+    regardless of what characters the username itself contains — usernames
+    have no character restriction beyond length (`app/schemas/user.py`).
+    """
+    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", username).strip("_")
+    return cleaned or "user"
+
+
+def _export_file_name(username: str, target_date: date) -> str:
+    safe_username = _safe_filename_component(username)
+    return f"日报-{safe_username}_{target_date.year}年{target_date.month}月{target_date.day}日.xlsx"
 
 
 class ExportService:
@@ -194,6 +210,7 @@ class ExportService:
         self._clock = clock
         self._days = DailyReportDayRepository(session)
         self._jobs = ExportJobRepository(session)
+        self._users = UserRepository(session)
 
     async def create(
         self,
@@ -238,8 +255,11 @@ class ExportService:
             job.status = "failed"
             job.error_message = "导出文件生成失败"
         else:
+            user = await self._users.get_by_id(owner_id)
+            assert user is not None
+            target_date = max((day.work_date for day in days), default=to_shanghai(now).date())
             job.status = "succeeded"
-            job.file_name = _export_file_name(now)
+            job.file_name = _export_file_name(user.username, target_date)
             job.file_path = str(file_path)
             job.record_count = len(days)
 
