@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { userMessage } from '@renderer/api/client'
-import { getMonthSummary } from '@renderer/api/daily-report-days'
+import { getDayDetail, getMonthSummary } from '@renderer/api/daily-report-days'
 import { createDailyReportExport, downloadDailyReportExportFile } from '@renderer/api/exports'
 import type {
   DailyDayCellStatus,
@@ -28,6 +28,7 @@ const calendarDate = ref(parseCalendarDate(initialDate))
 const monthItems = ref<DailyReportDayMonthItemData[]>([])
 const monthLoading = ref(false)
 const exporting = ref(false)
+const resolvingDate = ref(false)
 
 const month = computed(() => formatCalendarDate(calendarDate.value).slice(0, 7))
 const selectedDate = computed(() => formatCalendarDate(calendarDate.value))
@@ -59,8 +60,40 @@ function goToday(): void {
   calendarDate.value = parseCalendarDate(todayInShanghai())
 }
 
-function selectDate(day: string): void {
-  router.push({ name: 'daily-day', params: { date: day } })
+async function selectDate(day: string): Promise<void> {
+  if (resolvingDate.value) {
+    return
+  }
+  resolvingDate.value = true
+  try {
+    const dayDetail = await getDayDetail(day)
+    if (dayDetail.status === 'archived') {
+      router.push({ name: 'daily-day', params: { date: day } })
+      return
+    }
+    if (dayDetail.entries.length === 0) {
+      try {
+        await ElMessageBox.confirm(`${day} 还没有日报，是否新建一篇？`, '新建日报', {
+          confirmButtonText: '新建',
+          cancelButtonText: '取消',
+          type: 'info'
+        })
+      } catch {
+        return
+      }
+      router.push({ path: '/daily/new', query: { work_date: day } })
+      return
+    }
+    if (dayDetail.entries.length === 1 && dayDetail.entries[0].status === 'draft') {
+      router.push(`/daily/${dayDetail.entries[0].id}`)
+      return
+    }
+    router.push({ name: 'daily-day', params: { date: day } })
+  } catch (error) {
+    ElMessage.error(userMessage(error))
+  } finally {
+    resolvingDate.value = false
+  }
 }
 
 async function loadMonth(): Promise<void> {
@@ -155,7 +188,7 @@ onMounted(() => {
       </el-tag>
     </section>
 
-    <section v-loading="monthLoading" class="calendar-card create-card">
+    <section v-loading="monthLoading || resolvingDate" class="calendar-card create-card">
       <el-calendar v-model="calendarDate">
         <template #header>
           <div class="calendar-toolbar">
