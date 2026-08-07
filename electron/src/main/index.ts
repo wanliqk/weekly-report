@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { join } from 'path'
 
-import { app, BrowserWindow, dialog, safeStorage } from 'electron'
+import { app, BrowserWindow, dialog, safeStorage, globalShortcut } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
@@ -47,6 +47,8 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
   })
+
+  
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
@@ -127,6 +129,10 @@ if (!hasSingleInstanceLock) {
     createWindow()
     void getSidecarManager(sidecarDeps).start()
 
+    globalShortcut.register('CommandOrControl+Shift+I', () => {
+      mainWindow?.webContents.toggleDevTools()
+    })
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow()
@@ -139,6 +145,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
 })
 
 let isQuitting = false
