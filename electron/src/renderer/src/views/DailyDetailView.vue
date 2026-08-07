@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, userMessage } from '@renderer/api/client'
+import { archiveDay } from '@renderer/api/daily-report-days'
 import {
   createDailyReport,
   deleteDailyReport,
@@ -110,9 +111,9 @@ async function submit(): Promise<void> {
   }
   try {
     await ElMessageBox.confirm(
-      '提交后正文不可继续编辑；需要在“我的日报”中手动发起当天归档才会生成正式日报。',
-      '确认提交日报',
-      { confirmButtonText: '提交', cancelButtonText: '取消', type: 'warning' }
+      '提交后正文不可继续编辑，系统会自动归档当天日报；若当天还有其他草稿未提交，将无法自动归档，需要处理后手动归档。',
+      '确认提交并归档',
+      { confirmButtonText: '提交并归档', cancelButtonText: '取消', type: 'warning' }
     )
   } catch {
     return
@@ -124,11 +125,29 @@ async function submit(): Promise<void> {
   try {
     const submitted = await submitDailyReport(report.value.id, report.value.version)
     assignReport(submitted)
-    ElMessage.success('日报已提交')
+    await archiveAfterSubmit(submitted.work_date)
   } catch (error) {
     handleOperationError(error)
   } finally {
     actionRunning.value = false
+  }
+}
+
+async function archiveAfterSubmit(workDate: string): Promise<void> {
+  if (!report.value) {
+    return
+  }
+  try {
+    await archiveDay(workDate)
+    const refreshed = await getDailyReport(report.value.id)
+    assignReport(refreshed)
+    ElMessage.success('日报已提交并归档')
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 40906) {
+      ElMessage.warning('日报已提交，但当天还有其他草稿未提交，无法自动归档，请处理后手动归档')
+      return
+    }
+    ElMessage.warning('日报已提交，但自动归档失败，请稍后在“我的日报”中手动归档')
   }
 }
 
@@ -265,7 +284,7 @@ function handleOperationError(error: unknown): void {
               :disabled="saving"
               @click="submit"
             >
-              提交日报
+              提交并归档
             </el-button>
           </div>
         </footer>
