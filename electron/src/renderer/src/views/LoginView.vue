@@ -17,7 +17,7 @@ async function submit(): Promise<void> {
   submitting.value = true
   try {
     await authStore.login(form.username, form.password)
-    await router.replace('/daily')
+    await router.replace(authStore.mustChangePassword ? '/change-password' : '/daily')
   } catch (error) {
     errorMessage.value = userMessage(error)
   } finally {
@@ -40,7 +40,14 @@ async function submit(): Promise<void> {
       </div>
       <el-alert
         v-if="route.query.initialized === '1'"
-        title="管理员创建成功，请登录"
+        title="账号创建成功，请登录"
+        type="success"
+        show-icon
+        :closable="false"
+      />
+      <el-alert
+        v-if="route.query.passwordChanged === '1'"
+        title="密码已修改，请使用新密码登录"
         type="success"
         show-icon
         :closable="false"

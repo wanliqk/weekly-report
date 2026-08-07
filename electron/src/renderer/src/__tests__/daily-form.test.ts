@@ -5,7 +5,9 @@ import type { TemplateFieldData } from '@renderer/types/template'
 import {
   dailyFieldErrors,
   dailyStatusLabel,
+  formatDailyFieldValue,
   formatShanghaiTime,
+  generateClientRequestId,
   initializeDailyContent,
   todayInShanghai
 } from '@renderer/utils/daily-form'
@@ -72,5 +74,20 @@ describe('daily form helpers', () => {
     expect(todayInShanghai()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(formatShanghaiTime('2026-08-05T08:00:00+00:00')).toContain('16:00:00')
     expect(formatShanghaiTime(null)).toBe('—')
+  })
+
+  it('generates a fresh client request id on every call', () => {
+    const first = generateClientRequestId()
+    const second = generateClientRequestId()
+    expect(first).not.toBe(second)
+    expect(first).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('formats a daily field value for read-only display', () => {
+    expect(formatDailyFieldValue(null)).toBe('—')
+    expect(formatDailyFieldValue([])).toBe('—')
+    expect(formatDailyFieldValue(['开发', '评审'])).toBe('开发、评审')
+    expect(formatDailyFieldValue(2.5)).toBe('2.5')
+    expect(formatDailyFieldValue('完成开发')).toBe('完成开发')
   })
 })

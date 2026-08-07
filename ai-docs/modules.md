@@ -1,11 +1,11 @@
 # 模块说明
 
-> 状态：V1 模块已实现；第二版 BE-10A/BE-10B/BE-10C 后端模块已实现，Electron/Vue 界面待 FE-10
+> 状态：V1 模块已实现；第二版 BE-10A/BE-10B/BE-10C 后端模块与 FE-10 Electron/Vue 界面均已实现，QA-10 端到端验收待启动
 > 更新日期：2026-08-07
 
 本文件说明目标模块边界。模块被列出不表示对应代码已经存在或完成；实际进度以当前工作树、`progress.md` 和 `task.md` 为准。
 
-> CR-20260807-01 的模块边界见第 9 节；第 2 节保留 V1 历史快照。BE-10A 已完成 M03 数据基线、M05 双账号/强制改密及 M21 审计表；BE-10B 已完成 M06 安全删除、M08/M18 日报聚合与日期归档、M19/M21 管理员撤销与审计；BE-10C 已完成 M09/M11/M20 的日期级正式来源适配和统计查询。业务事务状态以 `task.md` 为准。
+> CR-20260807-01 的模块边界见第 9 节；第 2 节保留 V1 历史快照。BE-10A 已完成 M03 数据基线、M05 双账号/强制改密及 M21 审计表；BE-10B 已完成 M06 安全删除、M08/M18 日报聚合与日期归档、M19/M21 管理员撤销与审计；BE-10C 已完成 M09/M11/M20 的日期级正式来源适配和统计查询；FE-10 已完成 M13/M15/M16/M22 全部 Electron/Vue 界面。业务事务状态以 `task.md` 为准。
 
 ## 1. 工程模块
 
@@ -193,9 +193,12 @@ app/
 | M19 Admin Daily | DONE（后端） | 待撤销元数据列表（原始列选择不触碰正文）、撤销提交（`{version,reason}`）、审计查询（按 action/日期过滤）均已实现并通过独立安全审查；Electron 管理界面待 `FE-10` |
 | M20 Statistics | DONE（后端） | `GET /statistics/monthly?month=` 已实现（`BE-10C`）：当前/历史/未来月分母、完成率、`daily_report_count`/`weekly_report_count`、今天/昨天连续记录规则均有纯函数与服务级测试覆盖；Electron 统计页待 `FE-10` |
 | M21 Audit | DONE（后端） | `daily_submission_revoked`/`user_deleted` 两类白名单审计写入均已实现，`metadata_json` 只含结构化白名单字段 |
-| M09 Weekly Report | DONE（后端） | 已随 `BE-10C` 改读 `daily_report_days.archive_snapshot_json` 的日期级正式快照，`WeeklyDay` 支持一日期多来源 `entries[]`，`availability` 按日期容器状态推导；Electron 周报页仍是 V1 展示形状，适配待 `FE-10` |
-| M11 Export | DONE（后端） | 已随 `BE-10C` 改为按 `daily_report_day_ids`/日期范围选择 `daily_report_days.status='archived'`，一日期一行，多来源字段按 `[1]`/`[2]` 编号合并、单来源保持原始类型；Electron 导出交互仍按条目 ID 选择，适配待 `FE-10` |
-| M13/M15/M16/M22 UI | 未实现 | 全部第二版 Electron/Vue 页面待 `FE-10` |
+| M09 Weekly Report | DONE | 已随 `BE-10C` 改读 `daily_report_days.archive_snapshot_json` 的日期级正式快照，`WeeklyDay` 支持一日期多来源 `entries[]`，`availability` 按日期容器状态推导；FE-10 已把 `WeeklyDetailView.vue` 改为按日期渲染多来源子卡片，来源跳转改为 `/daily?date=...` |
+| M11 Export | DONE | 已随 `BE-10C` 改为按 `daily_report_day_ids`/日期范围选择 `daily_report_days.status='archived'`，一日期一行，多来源字段按 `[1]`/`[2]` 编号合并、单来源保持原始类型；FE-10 已把导出交互迁移到“我的日报”日历页——归档日期详情面板提供“导出当天正式日报”（单日期 `daily_report_day_ids`），页头提供“导出本月已归档日报”（按当前显示月的日期范围 + `status=archived` 筛选），均已用真实 Electron + 生成的 xlsx 文件验证 |
+| M13 Daily UI | DONE | FE-10 已实现“我的日报”月历（含状态图例、日期详情面板、`client_request_id` 幂等创建、草稿删除、日期级归档）与日报详情页（草稿删除、`last_revocation` 展示、移除单篇归档），并经真实 Electron 冒烟验证 |
+| M15 Weekly UI | DONE | FE-10 已实现周报多来源展示与 `/daily?date=...` 来源跳转 |
+| M16 Admin/Settings UI | DONE | FE-10 已实现日报管理（待归档列表+撤销+审计）、用户管理删除入口（`can_delete` 门控）、设置页收口（移除自动归档、新增修改密码） |
+| M22 Statistics UI | DONE | FE-10 已实现统计页（月历、完成率等四项指标卡、`--`/0 口径） |
 
 ### 9.2 第二版路由
 

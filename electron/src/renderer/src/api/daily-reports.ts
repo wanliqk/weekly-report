@@ -1,6 +1,7 @@
 import { requestData } from './client'
 import type {
   DailyContent,
+  DailyReportCreateData,
   DailyReportData,
   DailyReportListData,
   DailyReportQuery
@@ -10,11 +11,14 @@ export function listDailyReports(query: DailyReportQuery): Promise<DailyReportLi
   return requestData({ method: 'GET', url: '/api/v1/daily-reports', params: query })
 }
 
-export function createDailyReport(workDate: string): Promise<DailyReportData> {
+export function createDailyReport(
+  workDate: string,
+  clientRequestId: string
+): Promise<DailyReportCreateData> {
   return requestData({
     method: 'POST',
     url: '/api/v1/daily-reports',
-    data: { work_date: workDate }
+    data: { work_date: workDate, client_request_id: clientRequestId }
   })
 }
 
@@ -34,18 +38,21 @@ export function saveDailyReport(
   })
 }
 
-export function submitDailyReport(reportId: string, version: number): Promise<DailyReportData> {
+export function deleteDailyReport(
+  reportId: string,
+  version: number
+): Promise<Record<string, never>> {
   return requestData({
-    method: 'POST',
-    url: `/api/v1/daily-reports/${reportId}/submit`,
+    method: 'DELETE',
+    url: `/api/v1/daily-reports/${reportId}`,
     data: { version }
   })
 }
 
-export function archiveDailyReport(reportId: string, version: number): Promise<DailyReportData> {
+export function submitDailyReport(reportId: string, version: number): Promise<DailyReportData> {
   return requestData({
     method: 'POST',
-    url: `/api/v1/daily-reports/${reportId}/archive`,
+    url: `/api/v1/daily-reports/${reportId}/submit`,
     data: { version }
   })
 }

@@ -4,9 +4,16 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { userMessage } from '@renderer/api/client'
-import { createUser, listUsers, resetUserPassword, updateUser } from '@renderer/api/users'
+import {
+  createUser,
+  deleteUser,
+  listUsers,
+  resetUserPassword,
+  updateUser
+} from '@renderer/api/users'
 import { useAuthStore } from '@renderer/stores/auth'
 import type { UserData, UserRole } from '@renderer/types/user'
+import { cannotDeleteReasonLabel } from '@renderer/utils/users'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -37,6 +44,11 @@ const editForm = reactive({
 const resetDialogVisible = ref(false)
 const resetTarget = ref<UserData | null>(null)
 const resetPassword = ref('')
+
+const deleteDialogVisible = ref(false)
+const deleteTarget = ref<UserData | null>(null)
+const deleteConfirmUsername = ref('')
+const deleteReason = ref('')
 
 async function loadUsers(nextPage = page.value): Promise<void> {
   loading.value = true
@@ -121,7 +133,7 @@ async function submitEdit(): Promise<void> {
         await router.replace('/login')
         return
       }
-      authStore.currentUser = updated
+      authStore.currentUser = { ...authStore.currentUser, ...updated }
     }
     await loadUsers()
   } catch (error) {
@@ -149,6 +161,29 @@ async function submitReset(): Promise<void> {
       await authStore.handleTokenInvalid()
       await router.replace('/login')
     }
+  } catch (error) {
+    ElMessage.error(userMessage(error))
+  } finally {
+    submitting.value = false
+  }
+}
+
+function openDelete(user: UserData): void {
+  deleteTarget.value = user
+  deleteConfirmUsername.value = ''
+  deleteReason.value = ''
+  deleteDialogVisible.value = true
+}
+
+async function submitDelete(): Promise<void> {
+  const target = deleteTarget.value
+  if (!target) return
+  submitting.value = true
+  try {
+    await deleteUser(target.id, deleteConfirmUsername.value, deleteReason.value)
+    ElMessage.success('用户已删除')
+    deleteDialogVisible.value = false
+    await loadUsers()
   } catch (error) {
     ElMessage.error(userMessage(error))
   } finally {
@@ -212,10 +247,18 @@ onMounted(() => {
         <el-table-column label="创建时间" width="190">
           <template #default="scope">{{ formatCreatedAt(scope.row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-button link @click="openReset(scope.row)">重置密码</el-button>
+            <el-tooltip
+              v-if="!scope.row.can_delete"
+              :content="cannotDeleteReasonLabel(scope.row.cannot_delete_reason) ?? ''"
+              placement="top"
+            >
+              <span><el-button link type="danger" disabled>删除</el-button></span>
+            </el-tooltip>
+            <el-button v-else link type="danger" @click="openDelete(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -303,6 +346,36 @@ onMounted(() => {
         :disabled="resetPassword.length < 8"
         @click="submitReset"
         >确认重置</el-button
+      >
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="deleteDialogVisible" title="删除用户" width="460px">
+    <el-alert type="error" :closable="false" show-icon>
+      <template #title>
+        此操作不可撤销，将永久删除 {{ deleteTarget?.display_name }}（@{{
+          deleteTarget?.username
+        }}）的账号。
+      </template>
+    </el-alert>
+    <el-form label-position="top" class="dialog-copy">
+      <el-form-item :label="`请输入完整用户名 “${deleteTarget?.username}” 以确认`">
+        <el-input v-model="deleteConfirmUsername" :placeholder="deleteTarget?.username" />
+      </el-form-item>
+      <el-form-item label="删除原因">
+        <el-input v-model="deleteReason" type="textarea" :rows="2" maxlength="500" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="deleteDialogVisible = false">取消</el-button>
+      <el-button
+        type="danger"
+        :loading="submitting"
+        :disabled="
+          deleteConfirmUsername !== deleteTarget?.username || deleteReason.trim().length === 0
+        "
+        @click="submitDelete"
+        >确认删除</el-button
       >
     </template>
   </el-dialog>

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 
 import * as authApi from '@renderer/api/auth'
 import { ApiError } from '@renderer/api/client'
-import type { UserData } from '@renderer/types/user'
+import type { MeData } from '@renderer/types/user'
 
 let initializationPromise: Promise<void> | null = null
 
@@ -16,7 +16,7 @@ export class SecureStorageUnavailableError extends Error {
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     accessToken: null as string | null,
-    currentUser: null as UserData | null,
+    currentUser: null as MeData | null,
     initialized: false,
     systemInitialized: null as boolean | null,
     secureStorageAvailable: true,
@@ -24,7 +24,8 @@ export const useAuthStore = defineStore('auth', {
   }),
   getters: {
     isAuthenticated: (state): boolean => state.currentUser !== null,
-    isAdmin: (state): boolean => state.currentUser?.role === 'admin'
+    isAdmin: (state): boolean => state.currentUser?.role === 'admin',
+    mustChangePassword: (state): boolean => state.currentUser?.must_change_password === true
   },
   actions: {
     async initialize(): Promise<void> {
@@ -75,7 +76,7 @@ export const useAuthStore = defineStore('auth', {
       password: string
       display_name: string
     }): Promise<void> {
-      await authApi.bootstrapAdmin(payload)
+      await authApi.bootstrap(payload)
       this.systemInitialized = true
     },
 

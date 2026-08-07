@@ -599,6 +599,20 @@
   white-space: pre-wrap;
 }
 
+.weekly-day-entry {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px dashed #e7e2d7;
+}
+
+.weekly-day-entry-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .weekly-edit-form {
   display: grid;
   gap: 4px;
@@ -661,6 +675,201 @@
     grid-template-columns: 1fr;
   }
   .history-card {
+    position: static;
+  }
+}
+
+.stats-grid {
+  grid-template-columns: repeat(4, 1fr);
+  margin-bottom: 24px;
+}
+
+.stats-grid .feature-card {
+  min-height: 150px;
+}
+
+.stats-grid .feature-card h2 {
+  margin: 14px 0 8px;
+  font-size: 30px;
+}
+
+@media (max-width: 1100px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.daily-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 20px;
+  align-items: start;
+}
+
+.calendar-card {
+  padding: 22px 26px 8px;
+}
+
+.calendar-card .el-calendar-table .el-calendar-day {
+  height: auto;
+  padding: 4px;
+}
+
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.calendar-toolbar-nav {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.calendar-title {
+  min-width: 84px;
+  font-family: Georgia, 'Songti SC', serif;
+  font-size: 18px;
+  text-align: center;
+}
+
+.calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 18px;
+}
+
+.day-cell {
+  display: grid;
+  gap: 2px;
+  min-height: 64px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.day-cell:hover {
+  background: rgb(23 105 92 / 6%);
+}
+
+.day-cell-date {
+  font-family: Georgia, 'Songti SC', serif;
+  font-size: 15px;
+}
+
+.day-cell-status {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.day-cell-count {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.day-cell-selected {
+  background: rgb(23 105 92 / 12%);
+  outline: 2px solid var(--accent);
+}
+
+.day-cell-outside-month {
+  opacity: 0.4;
+}
+
+.day-cell-draft .day-cell-status,
+.day-cell-mixed .day-cell-status {
+  color: #b8860b;
+}
+
+.day-cell-submitted .day-cell-status {
+  color: #2b6cb0;
+}
+
+.day-cell-archived .day-cell-status {
+  color: #2b8a67;
+}
+
+.daily-detail-panel {
+  position: sticky;
+  top: 28px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow: 0 16px 45px rgb(50 55 48 / 6%);
+}
+
+.detail-panel-header {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.detail-panel-header h2 {
+  margin: 4px 0 0;
+  font-family: Georgia, 'Songti SC', serif;
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.detail-panel-body {
+  min-height: 160px;
+}
+
+.day-entry-card {
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  border: 1px solid #e7e2d7;
+  border-radius: 12px;
+  background: #fdfbf6;
+}
+
+.day-entry-card header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.day-entry-card dl {
+  margin: 0;
+}
+
+.day-entry-card dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.day-entry-card dd {
+  margin: 0 0 8px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.day-entry-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.day-panel-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+@media (max-width: 1100px) {
+  .daily-workspace-layout {
+    grid-template-columns: 1fr;
+  }
+  .daily-detail-panel {
     position: static;
   }
 }

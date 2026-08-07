@@ -9,12 +9,14 @@ interface ApiEnvelope<DataT> {
 interface AuthClientHooks {
   getAccessToken: () => string | null
   onTokenInvalid: () => void | Promise<void>
+  onPasswordChangeRequired: () => void | Promise<void>
 }
 
 let cachedClient: Promise<AxiosInstance> | null = null
 let authHooks: AuthClientHooks = {
   getAccessToken: () => null,
-  onTokenInvalid: () => undefined
+  onTokenInvalid: () => undefined,
+  onPasswordChangeRequired: () => undefined
 }
 
 export class ApiError extends Error {
@@ -43,9 +45,7 @@ export async function requestData<DataT>(request: AxiosRequestConfig): Promise<D
     return response.data.data
   } catch (error) {
     const apiError = normalizeApiError(error)
-    if (apiError.code === 40102) {
-      await authHooks.onTokenInvalid()
-    }
+    await handleAuthErrorCodes(apiError)
     throw apiError
   }
 }
@@ -71,10 +71,16 @@ export async function requestBinary(request: AxiosRequestConfig): Promise<Binary
       error.response.data = decodeArrayBufferErrorBody(error.response.data)
     }
     const apiError = normalizeApiError(error)
-    if (apiError.code === 40102) {
-      await authHooks.onTokenInvalid()
-    }
+    await handleAuthErrorCodes(apiError)
     throw apiError
+  }
+}
+
+async function handleAuthErrorCodes(error: ApiError): Promise<void> {
+  if (error.code === 40102) {
+    await authHooks.onTokenInvalid()
+  } else if (error.code === 40303) {
+    await authHooks.onPasswordChangeRequired()
   }
 }
 

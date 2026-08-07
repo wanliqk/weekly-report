@@ -58,7 +58,11 @@ describe('API client authentication', () => {
   })
 
   it('adds the in-memory bearer token alongside the runtime secret', async () => {
-    configureApiAuth({ getAccessToken: () => 'access-token', onTokenInvalid: vi.fn() })
+    configureApiAuth({
+      getAccessToken: () => 'access-token',
+      onTokenInvalid: vi.fn(),
+      onPasswordChangeRequired: vi.fn()
+    })
     axiosMock.request.mockResolvedValue({
       status: 200,
       data: { code: 0, msg: 'success', data: { ok: true } }
@@ -79,7 +83,11 @@ describe('API client authentication', () => {
 
   it('invokes the token-invalid callback for a 40102 response', async () => {
     const onTokenInvalid = vi.fn()
-    configureApiAuth({ getAccessToken: () => 'expired-token', onTokenInvalid })
+    configureApiAuth({
+      getAccessToken: () => 'expired-token',
+      onTokenInvalid,
+      onPasswordChangeRequired: vi.fn()
+    })
     axiosMock.request.mockRejectedValue({
       __axios: true,
       response: {
@@ -95,8 +103,34 @@ describe('API client authentication', () => {
     expect(onTokenInvalid).toHaveBeenCalledOnce()
   })
 
+  it('invokes the password-change-required callback for a 40303 response', async () => {
+    const onPasswordChangeRequired = vi.fn()
+    configureApiAuth({
+      getAccessToken: () => 'temp-password-token',
+      onTokenInvalid: vi.fn(),
+      onPasswordChangeRequired
+    })
+    axiosMock.request.mockRejectedValue({
+      __axios: true,
+      response: {
+        status: 403,
+        data: { code: 40303, msg: '请先修改临时密码', data: {} }
+      }
+    })
+
+    await expect(requestData({ method: 'GET', url: '/probe' })).rejects.toHaveProperty(
+      'code',
+      40303
+    )
+    expect(onPasswordChangeRequired).toHaveBeenCalledOnce()
+  })
+
   it('returns the raw bytes and file name for a binary download', async () => {
-    configureApiAuth({ getAccessToken: () => 'access-token', onTokenInvalid: vi.fn() })
+    configureApiAuth({
+      getAccessToken: () => 'access-token',
+      onTokenInvalid: vi.fn(),
+      onPasswordChangeRequired: vi.fn()
+    })
     const bytes = new Uint8Array([1, 2, 3]).buffer
     axiosMock.request.mockResolvedValue({
       status: 200,
@@ -111,7 +145,11 @@ describe('API client authentication', () => {
   })
 
   it('decodes a JSON error body returned as an ArrayBuffer into the real business code', async () => {
-    configureApiAuth({ getAccessToken: () => 'access-token', onTokenInvalid: vi.fn() })
+    configureApiAuth({
+      getAccessToken: () => 'access-token',
+      onTokenInvalid: vi.fn(),
+      onPasswordChangeRequired: vi.fn()
+    })
     const errorBody = new TextEncoder().encode(
       JSON.stringify({ code: 40401, msg: '导出任务不存在', data: {} })
     ).buffer

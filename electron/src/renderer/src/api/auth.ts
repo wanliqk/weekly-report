@@ -1,5 +1,5 @@
 import { requestData } from './client'
-import type { UserData } from '../types/user'
+import type { MeData, UserData } from '../types/user'
 
 export interface BootstrapStatusData {
   initialized: boolean
@@ -14,19 +14,19 @@ export function getBootstrapStatus(): Promise<BootstrapStatusData> {
   return requestData({ method: 'GET', url: '/api/v1/system/bootstrap-status' })
 }
 
-export function bootstrapAdmin(payload: {
+export function bootstrap(payload: {
   username: string
   password: string
   display_name: string
 }): Promise<UserData> {
-  return requestData({ method: 'POST', url: '/api/v1/system/bootstrap-admin', data: payload })
+  return requestData({ method: 'POST', url: '/api/v1/system/bootstrap', data: payload })
 }
 
 export function login(payload: { username: string; password: string }): Promise<LoginData> {
   return requestData({ method: 'POST', url: '/api/v1/auth/login', data: payload })
 }
 
-export function getMe(): Promise<UserData> {
+export function getMe(): Promise<MeData> {
   return requestData({ method: 'GET', url: '/api/v1/auth/me' })
 }
 

@@ -1,19 +1,23 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { userMessage } from '@renderer/api/client'
-import { getCapabilities, getMySettings, updateMySettings } from '@renderer/api/settings'
+import { getCapabilities, getMySettings } from '@renderer/api/settings'
 import { createManualBackup, downloadManualBackupFile } from '@renderer/api/system'
 import { useAuthStore } from '@renderer/stores/auth'
 import type { CapabilitiesData, SettingsData } from '@renderer/types/settings'
 
 const authStore = useAuthStore()
+const router = useRouter()
 const loading = ref(true)
 const settings = ref<SettingsData | null>(null)
 const capabilities = ref<CapabilitiesData | null>(null)
-const savingArchiveSetting = ref(false)
 const creatingBackup = ref(false)
+
+const passwordForm = reactive({ currentPassword: '', newPassword: '' })
+const changingPassword = ref(false)
 
 onMounted(load)
 
@@ -30,20 +34,16 @@ async function load(): Promise<void> {
   }
 }
 
-async function toggleAutoArchive(enabled: boolean): Promise<void> {
-  if (!settings.value) {
-    return
-  }
-  const previous = settings.value.auto_archive_on_submit
-  settings.value.auto_archive_on_submit = enabled
-  savingArchiveSetting.value = true
+async function submitPasswordChange(): Promise<void> {
+  changingPassword.value = true
   try {
-    settings.value = await updateMySettings(enabled)
+    await authStore.changePassword(passwordForm.currentPassword, passwordForm.newPassword)
+    ElMessage.success('密码已修改，请重新登录')
+    await router.replace({ path: '/login', query: { passwordChanged: '1' } })
   } catch (error) {
-    settings.value.auto_archive_on_submit = previous
     ElMessage.error(userMessage(error))
   } finally {
-    savingArchiveSetting.value = false
+    changingPassword.value = false
   }
 }
 
@@ -94,8 +94,8 @@ async function createAndSaveBackup(): Promise<void> {
     <header class="page-heading">
       <div>
         <span class="eyebrow">SETTINGS</span>
-        <h1>个人设置</h1>
-        <p>管理归档方式与同步能力；管理员可在本页创建整库备份。</p>
+        <h1>设置</h1>
+        <p>修改登录密码、查看同步能力；管理员可在本页创建整库备份。</p>
       </div>
     </header>
 
@@ -103,17 +103,41 @@ async function createAndSaveBackup(): Promise<void> {
       <div class="editor-card">
         <div class="section-heading">
           <div>
-            <span>ARCHIVE</span>
-            <h2>提交后自动归档</h2>
+            <span>SECURITY</span>
+            <h2>修改密码</h2>
           </div>
-          <el-switch
-            :model-value="settings?.auto_archive_on_submit ?? false"
-            :loading="savingArchiveSetting"
-            :disabled="!settings"
-            @change="(value) => toggleAutoArchive(Boolean(value))"
-          />
         </div>
-        <p class="field-hint">开启后，提交日报会在同一操作中直接归档，无需再手动归档一次。</p>
+        <el-form label-position="top" @submit.prevent="submitPasswordChange">
+          <el-form-item label="当前密码">
+            <el-input v-model="passwordForm.currentPassword" type="password" show-password />
+          </el-form-item>
+          <el-form-item label="新密码">
+            <el-input
+              v-model="passwordForm.newPassword"
+              type="password"
+              show-password
+              maxlength="128"
+            />
+            <span class="field-hint">至少 8 位，修改后所有旧 Token 立即失效，需要重新登录。</span>
+          </el-form-item>
+          <el-button
+            type="primary"
+            :loading="changingPassword"
+            :disabled="!passwordForm.currentPassword || passwordForm.newPassword.length < 8"
+            @click="submitPasswordChange"
+          >
+            确认修改
+          </el-button>
+        </el-form>
+      </div>
+
+      <div class="editor-card">
+        <div class="section-heading">
+          <div>
+            <span>TIMEZONE</span>
+            <h2>时区</h2>
+          </div>
+        </div>
         <p class="field-hint">当前时区固定为 {{ settings?.timezone ?? 'Asia/Shanghai' }}。</p>
       </div>
 

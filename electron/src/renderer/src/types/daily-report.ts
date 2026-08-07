@@ -4,8 +4,15 @@ export type DailyStatus = 'draft' | 'submitted' | 'archived'
 export type DailyFieldValue = string | number | string[] | null
 export type DailyContent = Record<string, DailyFieldValue>
 
+export interface DailyRevocationData {
+  reason: string
+  revoked_at: string
+  actor_username: string
+}
+
 export interface DailyReportListItemData {
   id: string
+  day_id: string
   work_date: string
   status: DailyStatus
   version: number
@@ -23,6 +30,7 @@ export interface DailyReportListData {
 
 export interface DailyReportData {
   id: string
+  day_id: string
   work_date: string
   status: DailyStatus
   template_version_id: string
@@ -33,6 +41,11 @@ export interface DailyReportData {
   archived_at: string | null
   created_at: string
   updated_at: string
+  last_revocation: DailyRevocationData | null
+}
+
+export interface DailyReportCreateData extends DailyReportData {
+  created: boolean
 }
 
 export interface DailyReportQuery {

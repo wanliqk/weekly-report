@@ -35,6 +35,11 @@ export function dailyStatusLabel(status: DailyStatus): string {
   return { draft: '草稿', submitted: '已提交', archived: '已归档' }[status]
 }
 
+/** One `client_request_id` per creation intent (`docs/方案设计.md` §6.2): generated once when the user starts creating an entry, then reused across retries of that same intent so a network retry never produces a duplicate entry. */
+export function generateClientRequestId(): string {
+  return crypto.randomUUID()
+}
+
 export function todayInShanghai(): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Shanghai',
@@ -51,6 +56,16 @@ export function formatShanghaiTime(value: string | null): string {
     return '—'
   }
   return new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+}
+
+export function formatDailyFieldValue(value: DailyFieldValue): string {
+  if (value === null) {
+    return '—'
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join('、') : '—'
+  }
+  return String(value)
 }
 
 function cloneDailyValue(value: DailyFieldValue | undefined): DailyFieldValue {

@@ -6,10 +6,16 @@ export interface WeeklyDayField {
   value: string | number | string[] | null
 }
 
+export interface WeeklyDayEntry {
+  daily_report_id: string
+  submitted_at: string | null
+  fields: WeeklyDayField[]
+}
+
 export interface WeeklyDay {
   work_date: string
-  daily_report_id: string
-  fields: WeeklyDayField[]
+  daily_report_day_id: string
+  entries: WeeklyDayEntry[]
 }
 
 export interface WeeklyContent {

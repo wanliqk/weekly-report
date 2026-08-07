@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, userMessage } from '@renderer/api/client'
 import { createDailyReport } from '@renderer/api/daily-reports'
-import { todayInShanghai } from '@renderer/utils/daily-form'
+import { generateClientRequestId, todayInShanghai } from '@renderer/utils/daily-form'
 
+const route = useRoute()
 const router = useRouter()
-const workDate = ref(todayInShanghai())
+const workDate = ref(
+  typeof route.query.work_date === 'string' ? route.query.work_date : todayInShanghai()
+)
 const submitting = ref(false)
 
 async function create(): Promise<void> {
@@ -18,34 +21,18 @@ async function create(): Promise<void> {
   }
   submitting.value = true
   try {
-    const report = await createDailyReport(workDate.value)
+    const report = await createDailyReport(workDate.value, generateClientRequestId())
     await router.replace(`/daily/${report.id}`)
   } catch (error) {
-    const existingId = existingReportId(error)
-    if (existingId) {
-      ElMessage.info('该日期已有日报，已为你打开')
-      await router.replace(`/daily/${existingId}`)
+    if (error instanceof ApiError && error.code === 40905) {
+      ElMessage.error('该日期已归档，无法新增日报')
+      await router.replace({ path: '/daily', query: { date: workDate.value } })
       return
     }
     ElMessage.error(userMessage(error))
   } finally {
     submitting.value = false
   }
-}
-
-function existingReportId(error: unknown): string | null {
-  if (!(error instanceof ApiError) || error.code !== 40901) {
-    return null
-  }
-  if (
-    typeof error.data === 'object' &&
-    error.data !== null &&
-    'existing_report_id' in error.data &&
-    typeof error.data.existing_report_id === 'string'
-  ) {
-    return error.data.existing_report_id
-  }
-  return null
 }
 </script>
 
@@ -55,7 +42,10 @@ function existingReportId(error: unknown): string | null {
       <div>
         <span class="eyebrow">NEW DAILY REPORT</span>
         <h1>新建日报</h1>
-        <p>日期以 Asia/Shanghai 为准。允许补写历史日报，也允许提前创建未来计划。</p>
+        <p>
+          日期以 Asia/Shanghai
+          为准。日期未归档时可以创建多篇独立日报；可补写历史日报，也可提前创建未来计划。
+        </p>
       </div>
     </header>
 
@@ -63,7 +53,7 @@ function existingReportId(error: unknown): string | null {
       <div class="create-card-copy">
         <span>工作日期</span>
         <h2>这份日报记录哪一天？</h2>
-        <p>每个账号同一天只能创建一份日报；创建时会锁定当前模板版本。</p>
+        <p>同一天可以创建多篇日报，提交后由你在“我的日报”中手动发起当天归档。</p>
       </div>
       <el-date-picker
         v-model="workDate"
@@ -73,7 +63,9 @@ function existingReportId(error: unknown): string | null {
         placeholder="选择工作日期"
       />
       <div class="create-card-actions">
-        <el-button @click="router.push('/daily')">返回</el-button>
+        <el-button @click="router.push({ path: '/daily', query: { date: workDate } })">
+          返回
+        </el-button>
         <el-button type="primary" :loading="submitting" @click="create">创建并填写</el-button>
       </div>
     </section>

@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, userMessage } from '@renderer/api/client'
 import {
-  archiveDailyReport,
+  deleteDailyReport,
   getDailyReport,
   saveDailyReport,
   submitDailyReport
@@ -56,6 +56,10 @@ function assignReport(nextReport: DailyReportData): void {
   fieldErrors.value = {}
 }
 
+function backToCalendar(): void {
+  router.push({ path: '/daily', query: { date: report.value?.work_date } })
+}
+
 function updateField(fieldKey: string, value: DailyFieldValue): void {
   content.value[fieldKey] = value
   delete fieldErrors.value[fieldKey]
@@ -88,7 +92,7 @@ async function submit(): Promise<void> {
   }
   try {
     await ElMessageBox.confirm(
-      '提交后正文不可继续编辑；是否自动归档由你的个人设置决定。',
+      '提交后正文不可继续编辑；需要在“我的日报”中手动发起当天归档才会生成正式日报。',
       '确认提交日报',
       { confirmButtonText: '提交', cancelButtonText: '取消', type: 'warning' }
     )
@@ -102,7 +106,7 @@ async function submit(): Promise<void> {
   try {
     const submitted = await submitDailyReport(report.value.id, report.value.version)
     assignReport(submitted)
-    ElMessage.success(submitted.status === 'archived' ? '日报已提交并自动归档' : '日报已提交')
+    ElMessage.success('日报已提交')
   } catch (error) {
     handleOperationError(error)
   } finally {
@@ -110,24 +114,25 @@ async function submit(): Promise<void> {
   }
 }
 
-async function archive(): Promise<void> {
-  if (!report.value || report.value.status !== 'submitted') {
+async function removeDraft(): Promise<void> {
+  if (!report.value || report.value.status !== 'draft') {
     return
   }
   try {
-    await ElMessageBox.confirm('归档后日报将保持只读。', '确认归档日报', {
-      confirmButtonText: '归档',
+    await ElMessageBox.confirm('确认删除这份草稿吗？此操作不可撤销。', '删除草稿', {
+      confirmButtonText: '删除',
       cancelButtonText: '取消',
-      type: 'warning'
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger'
     })
   } catch {
     return
   }
   actionRunning.value = true
   try {
-    const archived = await archiveDailyReport(report.value.id, report.value.version)
-    assignReport(archived)
-    ElMessage.success('日报已归档')
+    await deleteDailyReport(report.value.id, report.value.version)
+    ElMessage.success('草稿已删除')
+    backToCalendar()
   } catch (error) {
     handleOperationError(error)
   } finally {
@@ -143,6 +148,13 @@ function handleOperationError(error: unknown): void {
       '版本冲突',
       { confirmButtonText: '知道了', type: 'warning' }
     )
+    return
+  }
+  if (error instanceof ApiError && error.code === 40905) {
+    void ElMessageBox.alert('这一天已经被归档，这份草稿已不再可操作。', '日期已归档', {
+      confirmButtonText: '返回我的日报',
+      type: 'warning'
+    }).then(() => backToCalendar())
     return
   }
   ElMessage.error(userMessage(error))
@@ -173,7 +185,7 @@ function handleOperationError(error: unknown): void {
         >
           {{ dailyStatusLabel(report.status) }}
         </el-tag>
-        <el-button @click="router.push('/daily')">返回列表</el-button>
+        <el-button @click="backToCalendar">返回我的日报</el-button>
       </div>
     </header>
 
@@ -184,11 +196,18 @@ function handleOperationError(error: unknown): void {
           :title="
             report.status === 'archived'
               ? '这份日报已经归档，只能查看。'
-              : '这份日报已经提交，只能查看或归档。'
+              : '这份日报已经提交，只能查看，等待当天归档或管理员撤销。'
           "
           type="info"
           :closable="false"
           show-icon
+        />
+        <el-alert
+          v-if="report.last_revocation"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`管理员 ${report.last_revocation.actor_username} 于 ${formatShanghaiTime(report.last_revocation.revoked_at)} 撤销了此前的提交：${report.last_revocation.reason}`"
         />
 
         <el-form class="dynamic-report-form" label-position="top">
@@ -211,6 +230,15 @@ function handleOperationError(error: unknown): void {
 
         <footer class="report-actions">
           <div class="report-primary-actions">
+            <el-button
+              v-if="editable"
+              type="danger"
+              plain
+              :loading="actionRunning"
+              @click="removeDraft"
+            >
+              删除草稿
+            </el-button>
             <el-button v-if="editable" :loading="saving" @click="save()">保存草稿</el-button>
             <el-button
               v-if="editable"
@@ -220,14 +248,6 @@ function handleOperationError(error: unknown): void {
               @click="submit"
             >
               提交日报
-            </el-button>
-            <el-button
-              v-if="report.status === 'submitted'"
-              type="primary"
-              :loading="actionRunning"
-              @click="archive"
-            >
-              归档日报
             </el-button>
           </div>
         </footer>

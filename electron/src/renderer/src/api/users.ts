@@ -32,3 +32,15 @@ export function resetUserPassword(userId: string, newPassword: string): Promise<
     data: { new_password: newPassword }
   })
 }
+
+export function deleteUser(
+  userId: string,
+  confirmUsername: string,
+  reason: string
+): Promise<Record<string, never>> {
+  return requestData({
+    method: 'DELETE',
+    url: `/api/v1/users/${userId}`,
+    data: { confirm_username: confirmUsername, reason }
+  })
+}

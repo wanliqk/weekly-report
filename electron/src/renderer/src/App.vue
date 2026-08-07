@@ -25,7 +25,14 @@ async function resolveEntryRoute(): Promise<void> {
       await router.replace('/setup')
     } else if (!authStore.isAuthenticated) {
       if (route.path !== '/login') await router.replace('/login')
-    } else if (route.path === '/' || route.path === '/login' || route.path === '/setup') {
+    } else if (authStore.mustChangePassword) {
+      if (route.path !== '/change-password') await router.replace('/change-password')
+    } else if (
+      route.path === '/' ||
+      route.path === '/login' ||
+      route.path === '/setup' ||
+      route.path === '/change-password'
+    ) {
       await router.replace('/daily')
     } else if (route.meta.requiresAdmin && !authStore.isAdmin) {
       await router.replace('/daily')

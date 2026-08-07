@@ -132,16 +132,30 @@ function handleOperationError(error: unknown): void {
           <article v-for="day in report.content.days" :key="day.work_date" class="weekly-day-card">
             <header>
               <strong>{{ day.work_date }}</strong>
-              <el-button link type="primary" @click="router.push(`/daily/${day.daily_report_id}`)">
-                查看来源日报
+              <el-button
+                link
+                type="primary"
+                @click="router.push({ path: '/daily', query: { date: day.work_date } })"
+              >
+                查看当天日报
               </el-button>
             </header>
-            <dl>
-              <template v-for="field in day.fields" :key="field.field_key">
-                <dt>{{ field.label }}</dt>
-                <dd>{{ formatWeeklyFieldValue(field.value) }}</dd>
-              </template>
-            </dl>
+            <p class="field-hint">共 {{ day.entries.length }} 篇来源</p>
+            <section
+              v-for="(entry, index) in day.entries"
+              :key="entry.daily_report_id"
+              class="weekly-day-entry"
+            >
+              <strong class="weekly-day-entry-label">
+                来源 {{ index + 1 }} · {{ formatShanghaiTime(entry.submitted_at) }}
+              </strong>
+              <dl>
+                <template v-for="field in entry.fields" :key="field.field_key">
+                  <dt>{{ field.label }}</dt>
+                  <dd>{{ formatWeeklyFieldValue(field.value) }}</dd>
+                </template>
+              </dl>
+            </section>
           </article>
         </div>
 

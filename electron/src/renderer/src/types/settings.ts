@@ -1,5 +1,4 @@
 export interface SettingsData {
-  auto_archive_on_submit: boolean
   timezone: string
 }
 

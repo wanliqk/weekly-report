@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const authApi = vi.hoisted(() => ({
   getBootstrapStatus: vi.fn(),
-  bootstrapAdmin: vi.fn(),
+  bootstrap: vi.fn(),
   login: vi.fn(),
   getMe: vi.fn(),
   changePassword: vi.fn(),
@@ -14,15 +14,18 @@ vi.mock('@renderer/api/auth', () => authApi)
 
 import { ApiError } from '@renderer/api/client'
 import { SecureStorageUnavailableError, useAuthStore } from '@renderer/stores/auth'
-import type { UserData } from '@renderer/types/user'
+import type { MeData } from '@renderer/types/user'
 
-const user: UserData = {
+const user: MeData = {
   id: '01K000000000000000000000',
   username: 'admin',
   display_name: 'Admin',
   role: 'admin',
   is_active: true,
-  created_at: '2026-08-05T00:00:00+00:00'
+  created_at: '2026-08-05T00:00:00+00:00',
+  can_delete: true,
+  cannot_delete_reason: null,
+  must_change_password: false
 }
 
 function tokenBridge(options: { available?: boolean; token?: string | null } = {}): {

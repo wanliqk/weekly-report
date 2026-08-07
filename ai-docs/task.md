@@ -178,10 +178,10 @@ uv sync --directory backend --frozen
 | BE-10A | 主 Agent | 第二版迁移与认证基线 | DESIGN-10 | DONE | 日期/审计模型与迁移、周报 V2 快照迁移、双账号 bootstrap、强制改密、自动归档移除均已实现；旧库升级/受限降级和认证测试通过 |
 | BE-10B | 主 Agent | 日报聚合、管理员撤销与用户安全删除 | BE-10A | DONE | 同日多篇、幂等创建、草稿删除/提交、日期级归档、最小权限撤销/审计、安全删除及并发测试均已实现、自测、质量门禁与独立安全审查通过 |
 | BE-10C | 主 Agent | 周报、导出与统计适配 | BE-10B | DONE | 日期正式来源、周报 JSON、Excel 多来源列、月历/统计 API 及跨年/闰日测试均已实现、自测、质量门禁通过 |
-| FE-10 | 主 Agent | 第二版 Electron/Vue 界面实现 | BE-10A、BE-10B、BE-10C 契约 | TODO | 强制改密、菜单改名、我的日报月历/归档、我的周报适配、设置收口、管理员入口、用户删除和统计页 |
-| QA-10 | 主 Agent | 第二版迁移、权限、并发、统计与 E2E 验收 | BE-10A..BE-10C、FE-10 | TODO | 旧库迁移、同日并发、汇总原子性、权限隔离、删除保护、跨月/闰日统计及完整桌面流程通过门禁 |
+| FE-10 | 主 Agent | 第二版 Electron/Vue 界面实现 | BE-10A、BE-10B、BE-10C 契约 | DONE | 强制改密、菜单改名、我的日报月历/归档、我的周报适配、设置收口、管理员入口、用户删除和统计页均已实现、自测、质量门禁与真实 Electron 冒烟通过 |
+| QA-10 | 主 Agent | 第二版迁移、权限、并发、统计与 E2E 验收 | BE-10A..BE-10C、FE-10 | TODO | 旧库迁移、同日并发、汇总原子性、权限隔离、删除保护、跨月/闰日统计及完整桌面流程通过门禁；另需重写 `electron/e2e/*.spec.ts`（当前套件仍是 V1 UI 形状，见 `issues.md` ISS-024） |
 
-第二版需求、方案、`BE-10A`、`BE-10B` 和 `BE-10C` 均已完成；日报条目已是真正的同日多篇 + 日期级归档，V1 单篇兼容桥已移除；周报、导出和统计后端均已切换为读取日期级正式快照（`daily_report_days.archive_snapshot_json`），不再读取条目级 `archived` 状态。全部第二版 Electron/Vue 界面适配等待 `FE-10` 接管。
+第二版需求、方案、`BE-10A`、`BE-10B`、`BE-10C` 和 `FE-10` 均已完成；日报条目已是真正的同日多篇 + 日期级归档，V1 单篇兼容桥已移除；周报、导出和统计后端均已切换为读取日期级正式快照（`daily_report_days.archive_snapshot_json`），不再读取条目级 `archived` 状态；全部第二版 Electron/Vue 界面（强制改密、我的日报月历、我的周报多来源展示、统计页、管理员日报管理/用户删除、设置收口）均已实现并通过真实 Electron 冒烟验证。仅剩 `QA-10` 的迁移/并发/权限专项验收和 E2E 套件重建待完成。
 
 ## 4. 当前可领取任务
 
@@ -199,7 +199,7 @@ uv sync --directory backend --frozen
 
 阶段 9 四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。V1 全部 9 个阶段现已交付完毕。
 
-第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C` 均为 `DONE`。当前可领取且仅可领取 `FE-10`；后续严格按 FE-10 -> QA-10 的依赖推进。
+第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10` 均为 `DONE`。当前可领取且仅可领取 `QA-10`。
 
 ### 第二版阶段 10A 验证记录
 
@@ -228,6 +228,22 @@ uv sync --directory backend --frozen
 - `git diff --check` 通过（仅常规 LF→CRLF 提示）。
 - 独立安全专项审查（沙盒 Agent 独立读取 diff，未采信本 Agent 的实现结论）：逐项核查所有权隔离（`WeeklyReportService`/`ExportService`/`StatisticsService` 全部新增/改写查询按 `owner_id` 过滤）、导出 `daily_report_day_ids` 越权隔离、统计跨用户泄露、SQL 注入、多来源单元格公式注入防护回归，未发现 P0/P1。发现并修复一项真实的 LOW 严重度问题：`app/core/month_range.py::parse_month_range()` 对 `9999-12`（`date.MAXYEAR` 的 12 月）会在 `try/except` 之外计算下月首日导致未捕获 `ValueError`（原本返回 500 而非预期的 `40001`），已把该计算移入 `try` 块并补充 `tests/test_month_range.py`（10 项，含该回归场景）。
 - 已知的 ISS-013（`test_tampered_access_token_is_rejected`/`test_expired_and_tampered_tokens_map_to_40102` 偶发假阳性）在本阶段全量跑批中复现一次，单独重跑通过，与本阶段改动无关，不阻塞交付。
+
+### 第二版阶段 10D 验证记录（FE-10）
+
+- 契约核对：全部改动依据 `docs/方案设计.md` 第二版 §7～§11 和当前后端 schema/route 源码（`backend/app/schemas/*.py`、`backend/app/api/v1/*.py`）逐字段核对，未仅依赖 `ai-docs/api.md` 摘要（吸取 ISS-023 的教训）。
+- 路由与守卫：新增 `/change-password`（`forcedPasswordChangeOnly` 元字段，仅在 `must_change_password=true` 时可进入，非强制状态下访问会被重定向到 `/daily`）、`/statistics`、`/admin/daily-reports`；`router.beforeEach` 新增强制改密拦截，`api/client.ts` 新增 `onPasswordChangeRequired` 钩子，命中 `40303` 时自动跳转，双重保证（路由预判 + 运行期兜底）。菜单改名为“我的日报/我的周报/统计/模板管理/设置”，新增“日报管理”“用户管理”两个仅 admin 可见入口。
+- 我的日报：`DailyListView.vue` 改为月历（`el-calendar` + 自定义 `date-cell`/`header` 插槽）+ 选中日期详情两栏布局；月历读取 `GET /daily-report-days?month=`，逐日状态由纯函数 `dayCellStatus()` 派生为 `none/draft/submitted/mixed/archived` 五态，图例和单元格均同时用文字+色块（不仅靠颜色）。创建改为 `client_request_id`（`crypto.randomUUID()`，每次新建操作生成一次）；新增草稿删除（`DELETE /daily-reports/{id}`，删除后若日期容器清空由后端自动移除）；新增日期级归档按钮（`can_archive=false` 时用 `el-tooltip` 展示服务端给出的中文禁用原因，不需要前端再维护一套原因文案）；归档后展示 `archive_snapshot.entries[]` 的多来源正式日报卡片。移除了 V1 的单篇归档接口调用。导出交互从 V1 的表格勾选迁移到日历页：页头“导出本月已归档日报”按当前显示月的日期范围 + `status=archived` 筛选，归档日期详情面板的“导出当天正式日报”按该日期的 `daily_report_day_ids` 单点导出，均复用 `ExportFileSaver` 白名单保存流程；首次实现时遗漏了导出入口（旧列表视图整体被日历替换时未搬迁），在质量门禁通过后、真实 Electron 冒烟验证阶段发现并补回，属于同一阶段内的自查修正，未产生独立提交。
+- 日报详情页：`DailyDetailView.vue` 移除单篇归档按钮和逻辑（日期级归档收口到日历页）；新增草稿删除按钮；新增 `last_revocation` 提示（展示管理员撤销的操作者、时间、原因）；`40905`（日期已归档）错误统一提示并跳回日历。
+- 我的周报：`WeeklyDetailView.vue` 的按日期卡片改为在每个日期下渲染 `entries[]` 的多个来源子卡片（各自的 `submitted_at`+`fields`），来源跳转从 `/daily/{entry_id}` 改为 `/daily?date={work_date}`（跳回日历并定位到该日期），不再假设一天只有一个来源。`WeeklyListView.vue` 的可用性状态展示未变（后端 `WeeklyAvailabilityDay.status` 枚举值不变，仍是 `draft/submitted/archived/null`）。
+- 统计页：新增 `StatisticsView.vue`，月份选择复用与“我的日报”一致的月历组件（只读、点击日期跳转 `/daily?date=...`）；四张指标卡（完成率、已写日报、已写周报、当前连续记录）；`completion_rate=null`（未来月）显示 `--` 而非 `NaN`/`0%`（`formatCompletionRate()` 纯函数，含专项测试）。
+- 管理员：新增 `AdminDailyReportsView.vue`（`/admin/daily-reports`），含“待归档条目”（仅展示账号/日期/版本/提交时间等最小元数据，不含任何正文字段）+ 撤销弹窗（必填原因）两个板块，以及“审计记录”（按动作/日期筛选，展示操作者、目标类型/ID、原因、时间）。`UsersView.vue` 新增删除按钮，`can_delete=false` 时按 `cannot_delete_reason`（`self`/`last_active_admin`/`has_business_records`）展示对应中文提示并禁用按钮；真正删除要求输入完整原始用户名（精确匹配，非规范化）和原因，服务端仍独立重新校验全部条件。
+- 设置页：移除“提交后自动归档”开关（对应 `SettingsData.auto_archive_on_submit` 字段和 `PATCH /settings/me` 已随 BE-10A 从后端移除）；新增“修改密码”卡片（原 `AppLayout.vue` 头部的弹窗式改密已删除，改密统一收口到 `/settings`，`/change-password` 路由专用于强制改密场景）。
+- 全局：`main.ts` 新增 `ElementPlus` 的 `zh-cn` locale 配置（`element-plus/es/locale/lang/zh-cn`），否则新引入的 `el-calendar` 会展示英文星期表头，与全局中文界面不一致；此前 V1 阶段未配置 locale 是因为尚未使用任何依赖 locale 文案的组件。
+- 实际门禁：`npm run lint`（0 error/0 warning，`eslint --fix` 清理格式化告警后复核）、`npm run typecheck`、`npm test`（**22 个文件 125 项测试全部通过**，阶段 9 遗留 108 项 + 本阶段新增 17 项：`generateClientRequestId`/`formatDailyFieldValue`、`dayCellStatus`/`dayCellStatusLabel`/`dayCellStatusTagType`/`currentMonthInShanghai`、`cannotDeleteReasonLabel`、`auditActionLabel`、`formatCompletionRate`、`onPasswordChangeRequired` 40303 回调、`invalidExportDayIds` 改名后的等价覆盖）、`npm run test:integration`（真实 sidecar，2 项）、`npm run build`（含 `typecheck`）均实际执行并通过；`git diff --check` 通过（仅 LF→CRLF 提示）。后端未改动，`uv run pytest` 等门禁沿用 `BE-10C` 的 280 项结果，未重新执行（无代码变化）。
+- 真实环境验证：用项目既有的 Playwright `_electron` 驱动能力（`electron/e2e/helpers/app.ts`，隔离临时数据目录，全程未触碰仓库 `.local-data/`）编写了两次一次性冒烟脚本（均未纳入正式套件，验证后已删除，重建正式 V2 E2E 覆盖是 `QA-10` 的范围）：① 主链路——双账号首次初始化 → 默认 `admin` 用 bootstrap 密码登录被强制跳转到 `/change-password` 且导航栏不可见 → 修改密码后要求重新登录 → 新密码登录进入日历 → 确认无残留英文星期表头 → 新建/保存/提交日报条目 → 返回日历发起日期级归档并看到合并后的正式日报卡片 → 生成本周周报并确认条目内容出现在来源卡片中 → 统计页无 `NaN` → 设置页无“提交后自动归档”文案且含“修改密码”“整库手动备份” → 管理员“日报管理”页可打开 → “用户管理”页当前账号删除按钮禁用、另一账号可删除按钮可用；② 导出——补充发现导出入口缺失后专门验证“导出当天正式日报”和“导出本月已归档日报”两个按钮均能触发真实 `POST /daily-report-exports`、下载并通过 `exportFile.save` 落盘，磁盘文件头校验为合法 xlsx（`PK\x03\x04`）。
+- 安全审查：对本次实际改动范围（渲染进程 TypeScript/Vue 文件）执行了聚焦安全检查（未使用 `security-review` 技能默认抓取的全分支历史 diff，因其包含已在阶段 6/7/8/`BE-10B`/`BE-10C` 审查过的无关代码）：确认新增代码无 `v-html`/`innerHTML`/`eval`、无 `localStorage`/`sessionStorage` 写入、`el-tooltip` 的 `:content` 绑定均未设置 `raw-content`（按纯文本渲染）、管理员页面展示字段与后端最小元数据类型逐一对应（类型定义中不存在任何正文/模板快照字段，前端无法展示不存在的数据）、用户删除确认与所有权/角色相关的客户端校验均只是 UX 提示，真正的授权判定仍全部在后端。未发现 P0/P1；本次审查为主 Agent 直接执行，未额外派发独立沙盒 Agent 复核（与阶段 6/7/8/`BE-10B`/`BE-10C` 的沙盒 Agent 独立审查模式不同，如实记录该差异）。
+- 已知非阻塞缺口（记录供 `QA-10` 承接）：`electron/e2e/*.spec.ts`（`primary-path`/`auth-failures`/`daily-validation`/`admin-guard`/`stale-version-conflict`）仍是 V1 UI 断言（如 `bootstrapAdmin` 用户名 `'admin'` 会命中新的保留用户名拒绝、页面标题“日报工作台”已改名“我的日报”、单篇归档按钮已不存在），运行 `npm run test:e2e` 现在会失败；这是 FE-10 改变 UI 形状后的预期结果，不是本阶段引入的回归，已记入 `issues.md` ISS-024，重写正式 V2 E2E 套件是 `QA-10` 的既定范围。
 
 ## 5. 实际验证记录
 

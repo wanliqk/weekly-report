@@ -7,7 +7,7 @@ export interface ExportFilter {
 }
 
 export interface ExportCreateRequest {
-  report_ids?: string[]
+  daily_report_day_ids?: string[]
   filter?: ExportFilter
 }
 

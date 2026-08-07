@@ -2,6 +2,7 @@ import './assets/main.css'
 import 'element-plus/dist/index.css'
 
 import ElementPlus from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 import { configureApiAuth } from './api/client'
@@ -20,7 +21,12 @@ configureApiAuth({
     if (router.currentRoute.value.path !== '/login') {
       await router.replace('/login')
     }
+  },
+  onPasswordChangeRequired: async () => {
+    if (router.currentRoute.value.path !== '/change-password') {
+      await router.replace('/change-password')
+    }
   }
 })
 
-application.use(router).use(ElementPlus).mount('#app')
+application.use(router).use(ElementPlus, { locale: zhCn }).mount('#app')
