@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, userMessage } from '@renderer/api/client'
 import {
+  createDailyReport,
   deleteDailyReport,
   getDailyReport,
   saveDailyReport,
@@ -16,7 +17,9 @@ import {
   dailyFieldErrors,
   dailyStatusLabel,
   formatShanghaiTime,
-  initializeDailyContent
+  generateClientRequestId,
+  initializeDailyContent,
+  todayInShanghai
 } from '@renderer/utils/daily-form'
 
 const route = useRoute()
@@ -29,6 +32,10 @@ const content = ref<DailyContent>({})
 const fieldErrors = ref<Record<string, string>>({})
 
 const reportId = computed(() => String(route.params.id))
+const isCreating = computed(() => reportId.value === 'new')
+const workDateFromQuery = computed(() =>
+  typeof route.query.work_date === 'string' ? route.query.work_date : todayInShanghai()
+)
 const editable = computed(() => report.value?.status === 'draft')
 const visibleFields = computed(() =>
   [...(report.value?.template_snapshot ?? [])]
@@ -41,9 +48,20 @@ onMounted(load)
 async function load(): Promise<void> {
   loading.value = true
   try {
+    if (isCreating.value) {
+      const created = await createDailyReport(workDateFromQuery.value, generateClientRequestId())
+      assignReport(created)
+      await router.replace(`/daily/${created.id}`)
+      return
+    }
     const loadedReport = await getDailyReport(reportId.value)
     assignReport(loadedReport)
   } catch (error) {
+    if (isCreating.value && error instanceof ApiError && error.code === 40905) {
+      ElMessage.error('该日期已归档，无法新增日报')
+      await router.replace({ path: '/daily', query: { date: workDateFromQuery.value } })
+      return
+    }
     ElMessage.error(userMessage(error))
   } finally {
     loading.value = false
