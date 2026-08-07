@@ -84,3 +84,16 @@ class UserUpdateRequest(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
+
+
+class UserDeleteRequest(BaseModel):
+    confirm_username: str = Field(min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _strip_non_blank_reason(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped

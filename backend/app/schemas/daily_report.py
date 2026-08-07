@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from app.schemas.template import TemplateFieldData
 
@@ -21,6 +21,15 @@ def _utc_iso(value: datetime | None) -> str | None:
 
 class DailyCreateRequest(BaseModel):
     work_date: date
+    client_request_id: str = Field(min_length=1, max_length=64)
+
+    @field_validator("client_request_id")
+    @classmethod
+    def _strip_non_blank_client_request_id(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
 
 
 class DailySaveRequest(BaseModel):
@@ -30,6 +39,15 @@ class DailySaveRequest(BaseModel):
 
 class DailyVersionRequest(BaseModel):
     version: int = Field(ge=1)
+
+
+class DailyRevocationData(BaseModel):
+    reason: str
+    revoked_at: datetime
+
+    @field_serializer("revoked_at")
+    def _serialize_revoked_at(self, value: datetime) -> str:
+        return _utc_iso(value) or ""
 
 
 class DailyReportListItemData(BaseModel):
@@ -65,6 +83,7 @@ class DailyReportData(BaseModel):
     archived_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    last_revocation: DailyRevocationData | None = None
 
     @field_serializer("submitted_at", "archived_at", "created_at", "updated_at")
     def _serialize_datetimes(self, value: datetime | None) -> str | None:

@@ -7,7 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.health import router as health_router
+from app.api.v1.admin_daily_reports import router as admin_daily_reports_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.daily_report_days import router as daily_report_days_router
 from app.api.v1.daily_reports import router as daily_reports_router
 from app.api.v1.exports import router as exports_router
 from app.api.v1.settings import router as settings_router
@@ -84,6 +86,8 @@ def create_app(settings: Settings | None = None, *, jwt_secret: str | None = Non
     application.include_router(templates_router)
     application.include_router(settings_router)
     application.include_router(daily_reports_router)
+    application.include_router(daily_report_days_router)
+    application.include_router(admin_daily_reports_router)
     application.include_router(exports_router)
     application.include_router(weekly_reports_router)
     return application

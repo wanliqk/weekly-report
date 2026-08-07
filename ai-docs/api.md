@@ -1,12 +1,12 @@
 # API 接口规范
 
-> 状态：V1 API 历史契约已实现；第二版 BE-10A 初始化/认证/设置基线已实现，其余待后续阶段
+> 状态：V1 API 历史契约已实现；第二版 BE-10A/BE-10B 已实现，BE-10C/FE-10 待后续阶段
 > 更新日期：2026-08-07
 > 基础路径：`/api/v1`
 
 ## 0. 契约状态与当前实现
 
-> **CR-20260807-01 事实边界**：第 1～12 节主要保留 V1 历史契约；第 13 节描述第二版契约。BE-10A 已实现 13.1 的 bootstrap/强制改密（用户删除除外）并移除设置 PATCH，其余目标仍不得视为完成。
+> **CR-20260807-01 事实边界**：第 1～12 节主要保留 V1 历史契约（第 7 节日报接口已被第 13.2 节取代，见下）；第 13 节描述第二版契约。BE-10A 已实现 13.1 的 bootstrap/强制改密（用户删除除外）并移除设置 PATCH；BE-10B 已实现 13.1 的 `DELETE /users/{user_id}`、13.2 全部日报条目/日期接口、13.3 全部管理员日报/审计接口；13.4（统计、周报/导出的日期级来源适配）仍待 `BE-10C`。
 
 本文件定义 V1 目标接口。接口出现在表格中不代表路由已经存在；联调和验收必须以当前代码、自动化测试与 `progress.md` 为准。
 
@@ -21,6 +21,7 @@
 - 第 8 节三个导出接口已在阶段 6 `EXPORT-01`/`EXPORT-02` 实现（细节见该节末尾说明）。
 - 第 9 节六个周报接口已在阶段 7 `WEEKLY-01`/`WEEKLY-02` 实现（细节见该节末尾说明）。
 - 第 4.1 节两个手动整库备份接口已在阶段 8 `BACKUP-01` 实现（细节见该节末尾说明）。
+- 第 13.1 节 `DELETE /users/{user_id}`、第 13.2 节全部日报条目/日期容器接口、第 13.3 节全部管理员日报/审计接口已在 `BE-10B` 实现（细节见该节末尾说明）；第 7 节描述的 V1 日报接口（同日一篇、单篇归档）已被取代，不再是当前实现契约。
 
 本文后续示例均为目标契约；实现任务不得为了匹配“已存在”的假象跳过测试或状态更新。
 
@@ -290,6 +291,8 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 
 移除 `/system/bootstrap-admin`。除 `/auth/me`、`PUT /auth/password`、`POST /auth/logout` 外，`must_change_password=true` 调用业务接口返回 `40303`。管理员重置密码后目标用户也进入强制改密状态。
 
+`DELETE /users/{user_id}` 已在 `BE-10B` 实现：拒绝删除当前登录账号，`confirm_username` 须与目标账号原始 `username` 精确匹配（非规范化比较），无业务记录（`daily_report_days`/`weekly_reports`/`export_jobs`）时物理删除并清理默认关联资源，否则返回 `40910`；末位有效管理员保护复用 `USER-01` 的条件更新模式，已用真实并发测试验证只保留一个活跃管理员；成功删除写入 `admin_audit_events`（`action=user_deleted`）。
+
 ### 13.2 日报条目与日期
 
 | 方法 | 路径 | 权限 | 第二版语义 |
@@ -306,6 +309,8 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 
 删除单篇 `/daily-reports/{id}/archive`。月历摘要返回草稿/已提交/归档/总数、能否创建/归档及禁用原因；日期已归档时重复归档幂等返回已有正式结果，不改写归档时间。
 
+上述九个接口均已在 `BE-10B` 实现。创建按 `client_request_id` 幂等：同一 key 且所有者/日期一致返回既有条目，跨用户或跨日期复用同一 key 返回 `40908`（不泄露对方条目内容）。日期容器与全部子写操作（创建/保存/删除/提交/归档）共用同一并发互斥点：归档在读取当天条目前先对日期行做条件 `UPDATE` 占用 SQLite 写锁，创建改用 `INSERT ... SELECT ... WHERE EXISTS` 单语句关闭"日期是否仍为 open"的检查竞态；均已用真实 `asyncio.gather` 并发测试验证（含创建与归档并发时二者互斥、双管理员并发互删只保留一个活跃管理员）。归档按 `submitted_at ASC, id ASC` 聚合当天全部已提交条目为不可变 `archive_snapshot_json`，并把这些条目的状态一并翻转为 `archived`。
+
 ### 13.3 管理员日报与审计
 
 | 方法 | 路径 | 权限 | 第二版语义 |
@@ -315,6 +320,8 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 | GET | `/admin/audit-events` | admin | 按动作/日期分页查白名单审计 |
 
 撤销只允许 open 日期下 submitted 条目；成功后清空提交时间、保留正文、版本加一，所有者详情返回最近撤销原因和时间。
+
+上述三个接口均已在 `BE-10B` 实现。待归档列表和撤销均通过原始列 SQL 选择返回，服务端从不加载 `content_json`/`template_snapshot_json`（不依赖响应 schema 兜底过滤，已通过独立安全审查确认）；撤销的 `reason` 服务端去空白后校验非空，写入 `admin_audit_events` 的 `metadata_json` 只含 `work_date` 等白名单字段。审计事件查询支持按 `action`（`daily_submission_revoked`/`user_deleted`）和日期范围过滤。
 
 ### 13.4 统计、设置、周报和导出
 

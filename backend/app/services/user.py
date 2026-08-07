@@ -8,10 +8,13 @@ from app.core.clock import Clock, utc_now
 from app.core.errors import AppError
 from app.core.security import hash_password
 from app.core.ulid import generate_ulid
-from app.models import ReportTemplate, TemplateVersion, User, UserSettings
+from app.models import AdminAuditEvent, ReportTemplate, TemplateVersion, User, UserSettings
+from app.repositories.admin_audit import AdminAuditRepository
 from app.repositories.template import TemplateRepository
 from app.repositories.user import UserRepository
 from app.repositories.user_settings import UserSettingsRepository
+
+_USER_DELETED_ACTION = "user_deleted"
 
 DEFAULT_TEMPLATE_NAME = "日报模板"
 
@@ -29,6 +32,21 @@ class UserNotFoundError(AppError):
 class LastActiveAdminError(AppError):
     def __init__(self) -> None:
         super().__init__(code=40001, http_status=400, message="不能禁用或降级最后一个有效管理员")
+
+
+class CannotDeleteSelfError(AppError):
+    def __init__(self) -> None:
+        super().__init__(code=40001, http_status=400, message="不能删除当前登录账号")
+
+
+class UsernameConfirmationMismatchError(AppError):
+    def __init__(self) -> None:
+        super().__init__(code=40001, http_status=400, message="确认用户名不匹配")
+
+
+class UserHasBusinessRecordsError(AppError):
+    def __init__(self) -> None:
+        super().__init__(code=40910, http_status=409, message="账号存在业务记录 无法删除 只能停用")
 
 
 def normalize_username(username: str) -> str:
@@ -91,6 +109,7 @@ class UserService:
         self._session = session
         self._clock = clock
         self._users = UserRepository(session)
+        self._audit = AdminAuditRepository(session)
 
     async def list_users(self, *, page: int, page_size: int) -> tuple[list[User], int]:
         return await self._users.list_page(page=page, page_size=page_size)
@@ -158,3 +177,54 @@ class UserService:
             raise UserNotFoundError()
         await self._session.commit()
         return await self.get_user(user_id)
+
+    async def delete_user(
+        self,
+        actor: User,
+        user_id: str,
+        *,
+        confirm_username: str,
+        reason: str,
+    ) -> None:
+        if user_id == actor.id:
+            raise CannotDeleteSelfError()
+        target = await self.get_user(user_id)
+        if target.username != confirm_username:
+            raise UsernameConfirmationMismatchError()
+        if await self._users.has_business_records(user_id):
+            raise UserHasBusinessRecordsError()
+
+        now = self._clock()
+        try:
+            deleted = await self._users.delete_if_no_business_records(user_id)
+        except IntegrityError as error:
+            # A business record was created concurrently between the check
+            # above and this DELETE; `ON DELETE RESTRICT` is the final
+            # backstop `database.md` §8.4 requires for that race.
+            await self._session.rollback()
+            raise UserHasBusinessRecordsError() from error
+        if not deleted:
+            await self._session.rollback()
+            if await self._users.get_by_id(user_id) is None:
+                raise UserNotFoundError()
+            raise LastActiveAdminError()
+
+        await self._audit.add(
+            AdminAuditEvent(
+                id=generate_ulid(),
+                action=_USER_DELETED_ACTION,
+                actor_user_id=actor.id,
+                actor_username_snapshot=actor.username,
+                target_type="user",
+                target_id=target.id,
+                target_owner_id=target.id,
+                reason=reason,
+                metadata_json=json.dumps(
+                    {"deleted_username": target.username, "deleted_role": target.role},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+                created_at=now,
+            )
+        )
+        await self._session.commit()

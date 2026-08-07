@@ -1,12 +1,12 @@
 # 系统架构基线
 
-> 状态：V1 架构已实现；第二版方案已确认，BE-10A 数据与认证基线已实现
+> 状态：V1 架构已实现；第二版方案已确认，BE-10A 数据/认证基线与 BE-10B 日报聚合/管理员撤销/用户安全删除均已实现
 > 更新日期：2026-08-07
 > 原始方案：`docs/方案设计.md`
 
 ## 0. 文档定位与事实边界
 
-> **第二版事实边界**：第 1.1 节和 `progress.md` 仍描述当前 V1 实现；第二版目标以本文第 13 节和 `docs/方案设计.md` 的 2026-08-07 增量为准。方案已完成但待用户确认，且不等于代码已实现。
+> **第二版事实边界**：第 1.1 节和 `progress.md` 仍描述当前 V1 实现快照（截至阶段 9）；第二版目标以本文第 13 节和 `docs/方案设计.md` 的 2026-08-07 增量为准，BE-10A/BE-10B 的真实落地事实见 `progress.md` 对应章节。BE-10C/FE-10/QA-10 仍是尚未实现的目标，不得视为完成。
 
 - 本文件描述 V1 的目标架构、依赖方向和不可突破的安全边界，不以“已批准”表示代码已经完成。
 - 产品范围以 `docs/需求理解.md` 为准，技术设计以 `docs/方案设计.md` 为准；本文件是供 Agent 快速恢复上下文的提炼版，不得反向覆盖上游文档。
@@ -208,29 +208,31 @@ Electron Main
 
 ## 13. 第二版目标架构（CR-20260807-01）
 
+> **实现状态**：13.1～13.3（除周报/导出/统计改读日期级正式快照外）已随 `BE-10A`/`BE-10B` 落地；13.4 的一致性机制已实现，迁移部分随 `BE-10A` 落地。`WeeklyReportService`/`ExportService`/`StatisticsService` 改读 `daily_report_days` 正式快照仍是 `BE-10C` 的未完成目标。
+
 ### 13.1 领域拆分
 
-- `daily_reports` 变为同日可多篇的来源条目；保留 `draft/submitted/archived` 以兼容追溯，但不再提供单篇归档入口。
-- 新增 `daily_report_days`，以 `(user_id, work_date)` 唯一表示日期容器和不可变正式日报；`open/archived` 是日期关闭状态。
-- 日期行是创建、保存、删除、提交、admin 撤销和日期级归档的共同写入互斥点。SQLite 下通过短事务中的条件 `UPDATE` 取得写锁并复查状态。
-- 新增 `admin_audit_events` 记录撤销提交和用户删除；只存白名单元数据和原因，禁止正文/模板快照。
-- 周报、导出和完成日期统计只读取 `daily_report_days.status=archived` 的正式快照；来源条目不重复参与正式结果。
+- `daily_reports` 变为同日可多篇的来源条目；保留 `draft/submitted/archived` 以兼容追溯，但不再提供单篇归档入口。**已实现**：`POST /daily-reports/{id}/archive` 已随 `BE-10B` 移除。
+- 新增 `daily_report_days`，以 `(user_id, work_date)` 唯一表示日期容器和不可变正式日报；`open/archived` 是日期关闭状态。**已实现**（`BE-10A` 建表，`BE-10B` 落地归档事务）。
+- 日期行是创建、保存、删除、提交、admin 撤销和日期级归档的共同写入互斥点。SQLite 下通过短事务中的条件 `UPDATE` 取得写锁并复查状态。**已实现**：`DailyReportDayRepository.touch_open_for_write`/`insert_entry_if_day_open`，已用真实并发测试验证创建与归档互斥、双管理员并发互删末位保护。
+- 新增 `admin_audit_events` 记录撤销提交和用户删除；只存白名单元数据和原因，禁止正文/模板快照。**已实现**（`BE-10A` 建表，`BE-10B` 落地两类写入事务）。
+- 周报、导出和完成日期统计只读取 `daily_report_days.status=archived` 的正式快照；来源条目不重复参与正式结果。**未实现**：`WeeklyReportService`/`ExportService` 仍读取条目级 `daily_reports.status='archived'`，是 `BE-10C` 的核心工作。
 
 ### 13.2 服务和依赖
 
 ```text
 API
-├─ DailyReportService          # 条目创建幂等、保存、删除、提交
-├─ DailyReportDayService       # 月历、日期详情、正式归档事务
-├─ AdminDailyReportService     # 最小元数据、撤销与审计
-├─ StatisticsService          # 当前用户月份聚合和连续天数
-├─ WeeklyReportService         # 读取日期级正式快照
-└─ ExportService               # 一日期一正式记录
+├─ DailyReportService          # 条目创建幂等、保存、删除、提交（已实现）
+├─ DailyReportDayService       # 月历、日期详情、正式归档事务（已实现）
+├─ AdminDailyReportService     # 最小元数据、撤销与审计（已实现）
+├─ StatisticsService          # 当前用户月份聚合和连续天数（未实现，BE-10C）
+├─ WeeklyReportService         # 读取日期级正式快照（未适配，仍读条目级状态，BE-10C）
+└─ ExportService               # 一日期一正式记录（未适配，仍读条目级状态，BE-10C）
         ↓
 Repository -> Model/SQLite
 ```
 
-模块仍严格遵循 API -> Service -> Repository -> Model/DB。管理员跨所有者的撤销是专用 Service/Repository 的窄权限例外，普通 Daily Repository 继续强制 owner 过滤；管理员查询 SQL 不选择正文列。
+模块仍严格遵循 API -> Service -> Repository -> Model/DB。管理员跨所有者的撤销是专用 Service/Repository 的窄权限例外，普通 Daily Repository 继续强制 owner 过滤；管理员查询 SQL 不选择正文列（`AdminSubmittedEntry` dataclass 由原始列选择构造，已通过独立安全审查确认）。
 
 ### 13.3 认证与安全
 
@@ -250,9 +252,9 @@ Repository -> Model/SQLite
 
 | ADR | 决策 | 状态 | 约束理由 |
 |---|---|---|---|
-| ADR-014 | 日期容器 1:n 日报来源条目 | Proposed for V2 | 表达同日多篇、日期关闭、唯一正式结果和来源追溯 |
-| ADR-015 | 日期行保存版本化不可变正式快照 | Proposed for V2 | 周报/导出稳定且不依赖模板后续变化 |
-| ADR-016 | 日期行作为该日全部写操作的并发互斥点 | Proposed for V2 | SQLite 下确定地协调创建、撤销与归档 |
-| ADR-017 | admin 撤销使用专用最小元数据查询和独立审计 | Proposed for V2 | 满足操作能力而不扩大正文权限 |
-| ADR-018 | 有业务账号不物理删除，只允许停用 | Proposed for V2 | 避免级联数据损失并保持外键追溯 |
-| ADR-019 | 周报、导出和完成统计只读取日期级正式日报 | Proposed for V2 | 每个完成日期只参与一次，消除重复汇总 |
+| ADR-014 | 日期容器 1:n 日报来源条目 | Accepted for V2（`BE-10B`） | 表达同日多篇、日期关闭、唯一正式结果和来源追溯 |
+| ADR-015 | 日期行保存版本化不可变正式快照 | Accepted for V2（`BE-10B`） | 周报/导出稳定且不依赖模板后续变化（周报/导出改读仍是 `BE-10C`） |
+| ADR-016 | 日期行作为该日全部写操作的并发互斥点 | Accepted for V2（`BE-10B`） | SQLite 下确定地协调创建、撤销与归档；已用并发测试验证 |
+| ADR-017 | admin 撤销使用专用最小元数据查询和独立审计 | Accepted for V2（`BE-10B`） | 满足操作能力而不扩大正文权限；已通过独立安全审查 |
+| ADR-018 | 有业务账号不物理删除，只允许停用 | Accepted for V2（`BE-10B`） | 避免级联数据损失并保持外键追溯 |
+| ADR-019 | 周报、导出和完成统计只读取日期级正式日报 | Proposed for V2 | 每个完成日期只参与一次，消除重复汇总；待 `BE-10C` 实现 |

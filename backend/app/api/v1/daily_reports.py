@@ -7,12 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import get_current_user
 from app.db.session import get_db_session
 from app.models import DailyReport, User
+from app.schemas.auth import EmptyData
 from app.schemas.common import ApiResponse
 from app.schemas.daily_report import (
     DailyCreateRequest,
     DailyReportData,
     DailyReportListData,
     DailyReportListItemData,
+    DailyRevocationData,
     DailySaveRequest,
     DailyStatus,
     DailyVersionRequest,
@@ -26,7 +28,13 @@ from app.services.template import parse_template_fields
 router = APIRouter(prefix="/api/v1/daily-reports", tags=["daily-reports"])
 
 
-def _report_data(report: DailyReport) -> DailyReportData:
+async def _report_data(session: AsyncSession, report: DailyReport) -> DailyReportData:
+    revocation = await DailyReportService(session).last_revocation(report.id)
+    last_revocation = (
+        DailyRevocationData(reason=revocation.reason, revoked_at=revocation.created_at)
+        if revocation is not None
+        else None
+    )
     return DailyReportData(
         id=report.id,
         work_date=report.work_date,
@@ -39,6 +47,7 @@ def _report_data(report: DailyReport) -> DailyReportData:
         archived_at=report.archived_at,
         created_at=report.created_at,
         updated_at=report.updated_at,
+        last_revocation=last_revocation,
     )
 
 
@@ -88,8 +97,12 @@ async def create_daily_report(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ApiResponse[DailyReportData]:
-    report = await DailyReportService(session).create(current_user.id, work_date=payload.work_date)
-    return ApiResponse(data=_report_data(report))
+    report = await DailyReportService(session).create(
+        current_user.id,
+        work_date=payload.work_date,
+        client_request_id=payload.client_request_id,
+    )
+    return ApiResponse(data=await _report_data(session, report))
 
 
 @router.get("/{report_id}", response_model=ApiResponse[DailyReportData])
@@ -99,7 +112,7 @@ async def get_daily_report(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ApiResponse[DailyReportData]:
     report = await DailyReportService(session).get(current_user.id, report_id)
-    return ApiResponse(data=_report_data(report))
+    return ApiResponse(data=await _report_data(session, report))
 
 
 @router.patch("/{report_id}", response_model=ApiResponse[DailyReportData])
@@ -115,7 +128,20 @@ async def save_daily_report(
         expected_version=payload.version,
         content=payload.content,
     )
-    return ApiResponse(data=_report_data(report))
+    return ApiResponse(data=await _report_data(session, report))
+
+
+@router.delete("/{report_id}", response_model=ApiResponse[EmptyData])
+async def delete_daily_report(
+    report_id: str,
+    payload: DailyVersionRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ApiResponse[EmptyData]:
+    await DailyReportService(session).delete(
+        current_user.id, report_id, expected_version=payload.version
+    )
+    return ApiResponse(data=EmptyData())
 
 
 @router.post("/{report_id}/submit", response_model=ApiResponse[DailyReportData])
@@ -128,17 +154,4 @@ async def submit_daily_report(
     report = await DailyReportService(session).submit(
         current_user.id, report_id, expected_version=payload.version
     )
-    return ApiResponse(data=_report_data(report))
-
-
-@router.post("/{report_id}/archive", response_model=ApiResponse[DailyReportData])
-async def archive_daily_report(
-    report_id: str,
-    payload: DailyVersionRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> ApiResponse[DailyReportData]:
-    report = await DailyReportService(session).archive(
-        current_user.id, report_id, expected_version=payload.version
-    )
-    return ApiResponse(data=_report_data(report))
+    return ApiResponse(data=await _report_data(session, report))

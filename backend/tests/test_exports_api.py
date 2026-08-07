@@ -7,10 +7,15 @@ from conftest import STAGE5_RUNTIME_HEADERS
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
+from app.core.ulid import generate_ulid
 
 
 def _create(client: TestClient, headers: dict[str, str], work_date: str) -> dict[str, Any]:
-    response = client.post("/api/v1/daily-reports", headers=headers, json={"work_date": work_date})
+    response = client.post(
+        "/api/v1/daily-reports",
+        headers=headers,
+        json={"work_date": work_date, "client_request_id": generate_ulid()},
+    )
     assert response.status_code == 200, response.text
     return cast(dict[str, Any], response.json()["data"])
 
@@ -37,13 +42,15 @@ def _archive(client: TestClient, headers: dict[str, str], work_date: str) -> dic
         json={"version": save.json()["data"]["version"]},
     )
     assert submit.status_code == 200, submit.text
-    archived = client.post(
-        f"/api/v1/daily-reports/{report['id']}/archive",
+    archived_day = client.post(
+        f"/api/v1/daily-report-days/{work_date}/archive",
         headers=headers,
-        json={"version": submit.json()["data"]["version"]},
+        json={"confirm_archive": True},
     )
-    assert archived.status_code == 200, archived.text
-    return cast(dict[str, Any], archived.json()["data"])
+    assert archived_day.status_code == 200, archived_day.text
+    entry = client.get(f"/api/v1/daily-reports/{report['id']}", headers=headers)
+    assert entry.status_code == 200, entry.text
+    return cast(dict[str, Any], entry.json()["data"])
 
 
 def _create_user_headers(client: TestClient, admin_headers: dict[str, str]) -> dict[str, str]:

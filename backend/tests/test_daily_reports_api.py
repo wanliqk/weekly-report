@@ -5,14 +5,23 @@ from conftest import STAGE5_RUNTIME_HEADERS
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
+from app.core.ulid import generate_ulid
 
 
 def _create(
     client: TestClient,
     headers: dict[str, str],
     work_date: str = "2026-08-05",
+    client_request_id: str | None = None,
 ) -> dict[str, Any]:
-    response = client.post("/api/v1/daily-reports", headers=headers, json={"work_date": work_date})
+    response = client.post(
+        "/api/v1/daily-reports",
+        headers=headers,
+        json={
+            "work_date": work_date,
+            "client_request_id": client_request_id or generate_ulid(),
+        },
+    )
     assert response.status_code == 200, response.text
     return cast(dict[str, Any], response.json()["data"])
 
@@ -69,22 +78,60 @@ def _create_user_headers(client: TestClient, admin_headers: dict[str, str]) -> d
 
 
 @pytest.mark.parametrize("work_date", ["2024-02-29", "2030-12-31", "2020-01-01"])
-def test_create_supports_leap_future_and_historical_dates_and_rejects_duplicates(
+def test_create_supports_leap_future_and_historical_dates_and_allows_same_day_multiples(
     stage5_context: tuple[TestClient, dict[str, str], Settings], work_date: str
 ) -> None:
     client, headers, _settings = stage5_context
     created = _create(client, headers, work_date)
 
-    duplicate = client.post("/api/v1/daily-reports", headers=headers, json={"work_date": work_date})
+    second_entry = _create(client, headers, work_date)
 
     assert created["work_date"] == work_date
     assert created["status"] == "draft"
-    assert duplicate.status_code == 409
-    assert duplicate.json() == {
-        "code": 40901,
-        "msg": "该工作日期已存在日报",
-        "data": {"existing_report_id": created["id"]},
-    }
+    assert second_entry["id"] != created["id"]
+    assert second_entry["work_date"] == work_date
+
+
+def test_create_replaying_the_same_client_request_id_is_idempotent(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    key = generate_ulid()
+
+    first = _create(client, headers, "2026-08-05", key)
+    second = _create(client, headers, "2026-08-05", key)
+
+    assert first["id"] == second["id"]
+
+
+def test_create_reusing_client_request_id_for_a_different_date_is_rejected(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    key = generate_ulid()
+    _create(client, headers, "2026-08-05", key)
+
+    conflict = client.post(
+        "/api/v1/daily-reports",
+        headers=headers,
+        json={"work_date": "2026-08-06", "client_request_id": key},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == 40908
+
+
+def test_create_rejects_blank_client_request_id(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    response = client.post(
+        "/api/v1/daily-reports",
+        headers=headers,
+        json={"work_date": "2026-08-05", "client_request_id": "   "},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == 40001
 
 
 def test_save_list_filter_and_detail_restore_draft_content(
@@ -170,50 +217,10 @@ def test_submit_validates_required_fields_and_preserves_draft_on_failure(
     assert _get(client, headers, report["id"])["status"] == "draft"
 
 
-def test_manual_submit_and_archive_follow_the_state_machine(
+def test_submit_does_not_auto_archive_and_leaves_the_day_open(
     stage5_context: tuple[TestClient, dict[str, str], Settings],
 ) -> None:
     client, headers, _settings = stage5_context
-    report = _create(client, headers)
-    report = _save(client, headers, report, _default_content(report))
-
-    submitted_response = client.post(
-        f"/api/v1/daily-reports/{report['id']}/submit",
-        headers=headers,
-        json={"version": report["version"]},
-    )
-    submitted = cast(dict[str, Any], submitted_response.json()["data"])
-    archived_response = client.post(
-        f"/api/v1/daily-reports/{report['id']}/archive",
-        headers=headers,
-        json={"version": submitted["version"]},
-    )
-    archived = cast(dict[str, Any], archived_response.json()["data"])
-
-    assert submitted["status"] == "submitted"
-    assert submitted["submitted_at"] is not None
-    assert submitted["archived_at"] is None
-    assert archived["status"] == "archived"
-    assert archived["archived_at"] is not None
-    invalid_save = client.patch(
-        f"/api/v1/daily-reports/{report['id']}",
-        headers=headers,
-        json={"version": archived["version"], "content": archived["content"]},
-    )
-    assert invalid_save.status_code == 409
-    assert invalid_save.json()["code"] == 40902
-
-
-def test_removed_auto_archive_setting_cannot_change_submit_transition(
-    stage5_context: tuple[TestClient, dict[str, str], Settings],
-) -> None:
-    client, headers, _settings = stage5_context
-    removed_setting = client.patch(
-        "/api/v1/settings/me",
-        headers=headers,
-        json={"auto_archive_on_submit": True},
-    )
-    assert removed_setting.status_code == 405
     report = _create(client, headers)
     report = _save(client, headers, report, _default_content(report))
 
@@ -227,6 +234,62 @@ def test_removed_auto_archive_setting_cannot_change_submit_transition(
     assert submitted["status"] == "submitted"
     assert submitted["submitted_at"] is not None
     assert submitted["archived_at"] is None
+    day = client.get("/api/v1/daily-report-days/2026-08-05", headers=headers).json()["data"]
+    assert day["status"] == "open"
+    assert day["can_archive"] is True
+
+
+def test_removed_auto_archive_setting_returns_405(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    removed_setting = client.patch(
+        "/api/v1/settings/me",
+        headers=headers,
+        json={"auto_archive_on_submit": True},
+    )
+    assert removed_setting.status_code == 405
+
+
+def test_draft_can_be_deleted_and_then_no_longer_exists(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    report = _create(client, headers)
+
+    deleted = client.request(
+        "DELETE",
+        f"/api/v1/daily-reports/{report['id']}",
+        headers=headers,
+        json={"version": report["version"]},
+    )
+    assert deleted.status_code == 200
+
+    missing = client.get(f"/api/v1/daily-reports/{report['id']}", headers=headers)
+    assert missing.status_code == 404
+    assert missing.json()["code"] == 40401
+
+
+def test_submitted_entry_cannot_be_deleted(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    report = _create(client, headers)
+    report = _save(client, headers, report, _default_content(report))
+    submitted = client.post(
+        f"/api/v1/daily-reports/{report['id']}/submit",
+        headers=headers,
+        json={"version": report["version"]},
+    ).json()["data"]
+
+    response = client.request(
+        "DELETE",
+        f"/api/v1/daily-reports/{report['id']}",
+        headers=headers,
+        json={"version": submitted["version"]},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == 40902
 
 
 def test_stale_version_cannot_overwrite_newer_draft_content(

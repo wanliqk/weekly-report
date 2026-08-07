@@ -6,11 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import get_current_admin
 from app.db.session import get_db_session
 from app.models import User
+from app.schemas.auth import EmptyData
 from app.schemas.common import ApiResponse
 from app.schemas.user import (
     PasswordResetRequest,
     UserCreateRequest,
     UserData,
+    UserDeleteRequest,
     UserListData,
     UserUpdateRequest,
 )
@@ -87,3 +89,19 @@ async def reset_password(
 ) -> ApiResponse[UserData]:
     user = await UserService(session).reset_password(user_id, new_password=payload.new_password)
     return ApiResponse(data=UserData.model_validate(user))
+
+
+@router.delete("/{user_id}", response_model=ApiResponse[EmptyData])
+async def delete_user(
+    user_id: str,
+    payload: UserDeleteRequest,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ApiResponse[EmptyData]:
+    await UserService(session).delete_user(
+        admin,
+        user_id,
+        confirm_username=payload.confirm_username,
+        reason=payload.reason,
+    )
+    return ApiResponse(data=EmptyData())

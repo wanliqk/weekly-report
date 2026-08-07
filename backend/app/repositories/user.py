@@ -1,9 +1,17 @@
 from datetime import datetime
 
-from sqlalchemy import exists, func, insert, literal, or_, select, update
+from sqlalchemy import delete, exists, func, insert, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User
+from app.models import (
+    DailyReportDay,
+    ExportJob,
+    ReportTemplate,
+    TemplateVersion,
+    User,
+    UserSettings,
+    WeeklyReport,
+)
 
 
 class UserRepository:
@@ -134,4 +142,61 @@ class UserRepository:
             ).where(~select(User.id).exists()),
         )
         result = await self._session.execute(stmt)
+        return bool(result.rowcount == 1)
+
+    async def has_business_records(self, user_id: str) -> bool:
+        """Checks the three business tables `database.md` §8.4 names.
+
+        `daily_reports` is deliberately not queried directly: every entry
+        belongs to a `daily_report_days` row for the same owner, so the day
+        container count already covers it transitively. Default resources
+        every account gets at creation time (`user_settings`,
+        `report_templates`/`template_versions`) are intentionally excluded —
+        they are scaffolding, not the user's own business data, and would
+        otherwise make every account permanently undeletable.
+        """
+        result = await self._session.execute(
+            select(
+                exists(select(DailyReportDay.id).where(DailyReportDay.user_id == user_id))
+                | exists(select(WeeklyReport.id).where(WeeklyReport.user_id == user_id))
+                | exists(select(ExportJob.id).where(ExportJob.user_id == user_id))
+            )
+        )
+        return bool(result.scalar_one())
+
+    async def delete_if_no_business_records(self, user_id: str) -> bool:
+        """Physically removes a user and their default scaffolding.
+
+        Conditioned on no other active admin being required (mirrors
+        `update_account`'s last-active-admin guard) so a concurrent
+        deletion/demotion of the only other admin cannot leave the system
+        without one. The caller must already have verified
+        `has_business_records` is `False` inside the same transaction;
+        `daily_report_days`/`weekly_reports`/`export_jobs` all reference
+        `users.id` with `ON DELETE RESTRICT`, so a business record created
+        concurrently after that check would make the final `DELETE FROM
+        users` fail loudly (`IntegrityError`) rather than silently succeed.
+        """
+        another_active_admin_exists = exists(
+            select(User.id).where(
+                User.id != user_id,
+                User.role == "admin",
+                User.is_active.is_(True),
+            )
+        )
+        await self._session.execute(delete(UserSettings).where(UserSettings.user_id == user_id))
+        await self._session.execute(
+            delete(TemplateVersion).where(
+                TemplateVersion.template_id.in_(
+                    select(ReportTemplate.id).where(ReportTemplate.user_id == user_id)
+                )
+            )
+        )
+        await self._session.execute(delete(ReportTemplate).where(ReportTemplate.user_id == user_id))
+        result = await self._session.execute(
+            delete(User).where(
+                User.id == user_id,
+                or_(User.role != "admin", another_active_admin_exists),
+            )
+        )
         return bool(result.rowcount == 1)

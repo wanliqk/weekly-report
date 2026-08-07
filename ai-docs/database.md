@@ -1,16 +1,16 @@
 # 数据库设计
 
-> 状态：第二版 BE-10A 数据模型与 V1→V2 迁移已实现；日期聚合和下游查询待 BE-10B/BE-10C
+> 状态：第二版 BE-10A 数据模型与 V1→V2 迁移、BE-10B 日期聚合与审计写入均已实现；周报/导出/统计下游查询待 BE-10C
 > 更新日期：2026-08-07
 > 数据库：SQLite（SQLAlchemy 2.x + Alembic）
 
 ## 0. 当前实现状态
 
-> **CR-20260807-01 事实边界**：第 1～7 节保留 V1 历史结构；第 8 节是当前 V2 数据契约。BE-10A 已落地 8.1、8.3 与认证/设置字段，8.2 的完整多条目事务和 8.4 仍待后续阶段。
+> **CR-20260807-01 事实边界**：第 1～7 节保留 V1 历史结构；第 8 节是当前 V2 数据契约。BE-10A 已落地 8.1、8.3 与认证/设置字段；BE-10B 已落地 8.2 的完整多条目事务与 8.4 的删除策略。周报/导出/统计仍按条目级查询读取 `daily_reports.status='archived'`，尚未切换为读取 `daily_report_days.archive_snapshot_json`（BE-10C 范围）。
 
 - 当前共有 10 张业务表的 SQLAlchemy Model；Alembic 初始迁移 `3f6f955b87bb` 与 V2 迁移 `8b1d4e6f2a90` 均已落地，启动时迁移前备份/轮转保持不变，未使用 `create_all()` 代替迁移。
 - 下列表、约束、索引、事务与备份**规则**仍是权威契约来源；实现细节（如具体文件路径）以代码为准，本节只记录"哪些已经真实存在"，不重复描述设计意图。
-- 现有 Repository/Service 已适配日期容器所有权连接和周报日期来源 FK；`admin_audit_events` 仅完成模型/迁移，写入事务属于 BE-10B。
+- 现有 Repository/Service 已适配日期容器所有权连接和周报日期来源 FK；`admin_audit_events` 的模型/迁移随 BE-10A 落地，写入事务（撤销提交、用户删除）随 `BE-10B` 实现。
 - 迁移与备份基础设施验证方式：`backend/tests/test_migrations.py`（空库 upgrade/降级/幂等）、`backend/tests/test_migrate_backup.py`（备份触发条件、轮转、路径边界、失败停止启动）、`backend/tests/test_db_engine.py`（PRAGMA 实际连接值）。
 - 实现后以 migration、Model、自动化测试和 `progress.md` 共同证明状态；若代码与本文冲突，先修正文档或请求确认。
 
@@ -293,6 +293,8 @@ users 1 --- n admin_audit_events (actor 可 SET NULL，目标仅保存逻辑标�
 
 日期级归档事务必须锁定/条件触碰日期行，复查 open、无 draft 且至少一个 submitted；同一事务构造快照、把全部 submitted 改为 archived、写同一归档时间并关闭日期。更新行数不一致立即回滚。创建、保存、删除、提交和 admin 撤销也必须先锁定同一日期行，以协调与归档的竞态。
 
+**已实现（BE-10B）**：`DailyReportDayService.archive()`（`backend/app/services/daily_report_day.py`）用两段式实现锁定——先对日期行做 `status='open'` 条件 `UPDATE`（`touch_open_for_write`）抢占 SQLite 单写者锁并复查仍为 open，再读取当天条目决策（有 draft 返回 `40906`、无 submitted 返回 `40907`），最后批量翻转条目并翻转日期行为 archived；日期已归档时重复调用幂等返回既有结果。创建条目改用 `insert_entry_if_day_open`（`INSERT ... SELECT ... WHERE EXISTS`）单语句关闭"日期是否仍为 open"的检查竞态，与 `AUTH-01` 的 `create_if_no_users_exist` 同一模式；已用真实 `asyncio.gather` 验证创建与归档并发时二者互斥（XOR：要么创建的草稿使归档失败，要么归档已完成使创建返回 `40905`）。
+
 ### 8.3 V1 升级映射
 
 1. 每个旧日报创建 `daily_report_days.id=old_daily_report.id`；旧 archived 变为 archived 日期和单来源正式快照，旧 draft/submitted 变为 open 日期。
@@ -308,3 +310,5 @@ downgrade 只有在每日期最多一条且周报快照可无损还原时允许�
 - 只允许物理删除 draft；删除最后条目后可在同事务清理空 open 日期行。submitted/archived 和 archived 日期均不可删除。
 - 用户物理删除前检查日报日期/条目、周报、导出及其他业务记录；有任一业务记录返回冲突，只能停用。外键 RESTRICT 是并发最终防线。
 - 月历、统计、周报和导出均按 `user_id + 日期范围` 收敛查询；完成日期只认 archived 日期，日报篇数按 submitted/archived 来源条目计数。
+
+**已实现（BE-10B，删除部分）**：`DailyReportService.delete()` 条件删除 `status='draft'` 的条目，删除后若 `daily_report_days` 下无剩余条目则同事务删除该空 open 日期行（`DailyReportDayRepository.delete_if_empty_open`）。`UserService.delete_user()` 检查 `daily_report_days`/`weekly_reports`/`export_jobs`（`daily_reports` 通过日期容器传递覆盖，无需单独查询）；无记录时同事务清理 `user_settings`/`template_versions`/`report_templates` 默认关联资源后物理删除 `users` 行；检查后并发产生业务记录的场景由外键 `RESTRICT` 触发 `IntegrityError` 兜底捕获为 `40910`。月历、统计、周报和导出的日期级正式来源查询仍待 `BE-10C`。

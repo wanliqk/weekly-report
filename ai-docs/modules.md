@@ -182,6 +182,21 @@ app/
 | M16 Admin/Settings UI | 日报管理、用户删除、设置与备份 | M06、M19、M10、M12 | 普通用户显示 admin 入口 |
 | M22 Statistics UI | 月历、指标卡、口径说明与日期跳转 | M20、M12 | 客户端自行聚合全量正文 |
 
+### 9.1a 第二版模块实现状态（2026-08-07，随 `BE-10B` 更新）
+
+| 模块 | 状态 | 事实 |
+|---|---|---|
+| M05 Auth | DONE（后端） | 双账号 bootstrap、固定 admin、强制改密依赖已随 `BE-10A` 实现；Electron 强制改密页面待 `FE-10` |
+| M06 User Admin | DONE（后端） | 原 CRUD（`USER-01`）+ 安全删除（`BE-10B`：无业务记录物理删除、有记录 `40910`、当前账号/末位管理员保护、确认用户名精确匹配）均已实现；Electron 用户删除入口待 `FE-10` |
+| M08 Daily Entry | DONE（后端） | `client_request_id` 幂等创建（跨用户/跨日期复用返回 `40908`）、草稿保存/物理删除（含清理空日期容器）、提交不自动归档均已实现并通过并发测试 |
+| M18 Daily Day | DONE（后端） | 月历摘要（`GET /daily-report-days?month=`）、日期详情（含正式快照）、日期级归档事务（日期行并发互斥、聚合全部已提交条目）均已实现；Electron 月历 UI 待 `FE-10` |
+| M19 Admin Daily | DONE（后端） | 待撤销元数据列表（原始列选择不触碰正文）、撤销提交（`{version,reason}`）、审计查询（按 action/日期过滤）均已实现并通过独立安全审查；Electron 管理界面待 `FE-10` |
+| M20 Statistics | 未实现 | 待 `BE-10C` |
+| M21 Audit | DONE（后端） | `daily_submission_revoked`/`user_deleted` 两类白名单审计写入均已实现，`metadata_json` 只含结构化白名单字段 |
+| M09 Weekly Report | 未适配 | 仍读取条目级 `daily_reports.status='archived'`，未切换为日期级正式快照；待 `BE-10C` |
+| M11 Export | 未适配 | 仍按条目级 ID/筛选选择，未切换为 `daily_report_day_ids`；待 `BE-10C` |
+| M13/M15/M16/M22 UI | 未实现 | 全部第二版 Electron/Vue 页面待 `FE-10` |
+
 ### 9.2 第二版路由
 
 | 路由 | 页面 | 权限 |

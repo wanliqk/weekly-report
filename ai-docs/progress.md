@@ -8,7 +8,7 @@
 
 - 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存、阶段 7 周报闭环、阶段 8 设置能力与受控备份、阶段 9 质量与发布。V1 规划的全部 9 个阶段均已交付。
 - 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）、`346b0ea`（周报闭环）、`2584133`（关闭阶段 7 并回填提交号）、`00caa33`（设置能力与受控备份）、`0148171`（质量与发布）、`a866872`（第二版增量需求）、`e767ebd`（第二版技术方案）。
-- 当前所在阶段：CR-20260807-01 的 `REQ-10`、`DESIGN-10`、`BE-10A` 已完成；当前可进入 `BE-10B`。
+- 当前所在阶段：CR-20260807-01 的 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B` 已完成；当前可进入 `BE-10C`。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
 - 阶段 4 实现状态：六项任务均已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
 - 阶段 5 实现状态：七项任务均已完成实现、自测、质量门禁、独立审查与提交 `1d965fe`，统一为 `DONE`。
@@ -16,8 +16,8 @@
 - 阶段 7 实现状态：四项任务（`WEEKLY-01`/`WEEKLY-02`/`FE-06`/`QA-07`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
 - 阶段 8 实现状态：三项任务（`BACKUP-01`/`FE-07`/`QA-08`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
 - 阶段 9 实现状态：四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。真实安装/升级/卸载验证在本机（无独立干净虚拟机）完成，该限制已在阶段开工前与用户确认。
-- 当前阻塞：无技术阻塞；ISS-020 已随 BE-10A 后端实现关闭，ISS-018/019/021/022 继续由后续阶段跟踪。
-- 第二版需求与设计事实：增量需求和方案已确认；日期/审计表、V1 数据迁移、周报 JSON V2 化、双账号初始化、强制改密和自动归档移除已落地。日报同日多条目、管理员撤销、安全删除、下游/统计和 Electron 页面仍待后续阶段。
+- 当前阻塞：无技术阻塞；ISS-020 已随 BE-10A 后端实现关闭；ISS-018/019/021 的后端部分已随 BE-10B 关闭（仍 MITIGATED，因 Electron/E2E 尚未跟进，见下）；ISS-022 继续由 BE-10C/FE-10 跟踪。
+- 第二版需求与设计事实：增量需求和方案已确认；日期/审计表、V1 数据迁移、周报 JSON V2 化、双账号初始化、强制改密和自动归档移除（BE-10A）以及同日多条目、幂等创建、草稿删除、日期级归档、管理员最小权限撤销/审计、用户安全删除（BE-10B）均已在后端落地。周报/导出/统计的日期级正式来源适配、月历/统计 API 和全部 Electron 页面仍待 BE-10C/FE-10。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 
 ## 2. 已实现事实
@@ -311,12 +311,24 @@
 - `auto_archive_on_submit` 已从模型、设置 API 和数据库移除，日报提交固定停在 `submitted`。为保持 BE-10A 阶段兼容，旧日报 API 暂时仍维持同日一篇，旧单篇归档会同时关闭日期并生成正式单来源快照；BE-10B 将替换为真正的同日多条目/日期级事务。
 - 实际门禁：后端 Ruff、mypy、pytest 199 项、`git diff --check`；根工作区 lint、typecheck、Vitest 108 项和生产 build 均通过。
 
+### 第二版日报聚合、管理员撤销与用户安全删除（阶段 10B，BE-10B）
+
+- `backend/app/repositories/daily_report_day.py`（新增 `DailyReportDayRepository`）：`get_for_owner_by_date`/`list_month` 只读查询；`touch_open_for_write` 是日期行并发互斥的核心——对 `status='open'` 做条件 `UPDATE`，作为调用方事务内的第一条写语句提前抢占 SQLite 单写者锁，之后再读取当天条目即可保证不被并发创建/提交打断（`database.md` §8.2/ADR-016）；`finalize_archive` 完成状态翻转；`delete_if_empty_open` 供草稿删除后清理空日期容器。
+- `backend/app/repositories/daily_report.py` 新增/替换：`get_by_client_request_id`、`list_by_day`、`insert_entry_if_day_open`（复用 `AUTH-01` 的 `INSERT ... SELECT ... WHERE EXISTS` 单语句模式，把"日期是否仍为 open"的判断折进插入语句本身，关闭创建与归档之间的竞态窗口）、`delete_draft`、`count_by_day`、`archive_entries`（批量把当天全部 `submitted` 条目翻为 `archived`）、`revoke_submission`、`list_submitted_awaiting_archive`/`get_submitted_metadata`（管理员专用，只做原始列选择，SQL 层面就不触碰 `content_json`/`template_snapshot_json`，返回 `AdminSubmittedEntry` dataclass）。移除了 V1 兼容桥的 `archive_submitted`/`archive_day`/`get_by_work_date`。
+- `backend/app/services/daily_report.py::DailyReportService.create()`：先按 `client_request_id` 查已有条目，同用户同日期则幂等返回，跨日期/跨用户复用同一 key 返回 `40908`；否则获取或创建当天的 `DailyReportDay`（`UNIQUE(user_id, work_date)` 冲突时捕获 `IntegrityError` 重试，最多 3 次），再用 `insert_entry_if_day_open` 原子写入新草稿；日期已归档返回 `40905`。新增 `delete()`（仅 `draft` 可删，删除后若日期容器已无任何条目则一并清理该空 `open` 日期行）；`submit()` 保持不自动归档；旧的单篇 `archive()` 方法已删除。
+- `backend/app/services/daily_report_day.py`（新增 `DailyReportDayService`）：`month_summary()` 逐日返回状态、草稿/已提交/归档计数、能否创建/归档及禁用原因（`disabled_reason`）；`get_detail()` 对开放日期返回条目列表，对已归档日期额外返回不可变 `archive_snapshot`（`build_day_archive_snapshot` 纯函数按 `submitted_at ASC, id ASC` 折叠全部已提交条目）；`archive()` 实现日期级归档事务——`touch_open_for_write` 抢锁复查 `open` → 读取当天条目 → 有草稿则 `40906`、无已提交条目则 `40907` → 构造快照、批量翻转条目为 `archived`、翻转日期容器为 `archived` 并写入 `source_count`/`archived_by`/`archived_at`；日期已归档时重复调用幂等返回既有结果而不改写归档时间（与 `api.md` §13.2 一致）。
+- `backend/app/services/admin_daily_report.py`（新增 `AdminDailyReportService`）：`list_submitted()`/`revoke_submission()`/`list_audit_events()`。撤销要求 `{version,reason}`，条件 `UPDATE` 命中即把条目由 `submitted` 打回 `draft`（清空 `submitted_at`、版本 +1），同一事务写入 `admin_audit_events`（`action=daily_submission_revoked`，`metadata_json` 只含 `work_date` 白名单字段，正文/模板快照绝不写入）；所有者一侧 `GET /daily-reports/{id}` 通过 `DailyReportService.last_revocation()` 查询同一张审计表，向本人展示最近一次撤销原因和时间。
+- `backend/app/services/user.py::UserService.delete_user()`：自我删除直接拒绝；确认用户名须与目标账号 `username` 精确一致（非规范化比较）；`has_business_records()` 检查 `daily_report_days`/`weekly_reports`/`export_jobs` 三张表（`daily_reports` 通过日期容器传递覆盖）；无业务记录时在同一事务内先删除 `user_settings`/`template_versions`/`report_templates` 脚手架数据，再对 `users` 做条件 `DELETE`（复用 `update_account` 同款末位有效管理员保护谓词）；末位管理员保护和业务记录检查均以数据库当前状态为准，且捕获检查后仍发生业务记录写入的并发场景（`IntegrityError` → `40910`，`ON DELETE RESTRICT` 兜底）。删除成功写入 `admin_audit_events`（`action=user_deleted`）。
+- API 层新增/变更：`app/api/v1/daily_reports.py` 的 `POST`/`PATCH` 已改为要求 `client_request_id`，新增 `DELETE /daily-reports/{id}`，移除 `POST /daily-reports/{id}/archive`；新增 `app/api/v1/daily_report_days.py`（`GET ''`月历、`GET '/{work_date}'`详情、`POST '/{work_date}/archive'`）；新增 `app/api/v1/admin_daily_reports.py`（`GET /admin/daily-reports/submitted`、`POST /admin/daily-reports/{id}/revoke-submission`、`GET /admin/audit-events`）；`app/api/v1/users.py` 新增 `DELETE /users/{id}`。均已接入 `main.py` 并校验 `get_current_user`/`get_current_admin`。
+- 已知范围边界（记录供 `BE-10C` 承接，非本阶段缺陷）：`WeeklyReportService`/`ExportService` 仍读取 `daily_reports.status=='archived'` 的条目级查询，尚未切换为按 `daily_report_days.archive_snapshot_json` 的日期级正式快照聚合；真实多条目日期归档后，周报/导出在同一日期出现多条 `archived` 条目时的聚合语义尚不正确（`weekly_report_sources` 按 `daily_report_day_id` 主键会与多来源写入冲突）。`test_exports_api.py`/`test_weekly_reports_api.py` 的 `_archive` 测试夹具已同步改为调用新的 `POST /daily-report-days/{work_date}/archive`，但覆盖场景仍是每日单条目，未验证多条目下游行为。
+- 实际门禁：后端 `uv run ruff check .`、`ruff format --check .`、`mypy`（strict，115 个源文件）、`pytest`（**242 项通过**，阶段 10A 遗留 199 项 + 本阶段新增 43 项）均通过；根工作区 `npm run lint`、`npm run typecheck`、`npm test`（18 文件 108 项）、`npm run build` 作为回归检查全部通过（未修改任何 Electron/Vue 文件）；`git diff --check` 通过（仅 LF→CRLF 提示）。独立安全专项审查（沙盒 Agent 独立读取 diff）逐项核查所有权隔离、管理员正文泄露、SQL 注入、用户删除权限提升、确认/原因绕过、`client_request_id` 跨用户信息泄露、审计日志注入，未发现 P0/P1；识别一项低置信度（4/10）非漏洞信息项已记录不阻塞交付。实现提交待创建，阶段 10B 正式关闭。
+
 ## 3. 尚未实现
 
 以下均为设计目标，当前不得标记为完成：
 
-- CR-20260807-01 的剩余能力：同日多日报条目、草稿物理删除、admin 撤销提交、日期级聚合归档、用户安全删除、周报/导出正式适配、月历/统计 API、菜单改名和 Electron 页面。
-- 第二版迁移与认证基线已完成；BE-10B/BE-10C/FE-10/QA-10 尚未实现。当前 renderer 仍使用 V1 初始化和设置契约，因此在 FE-10 完成前不作为可交付的完整第二版桌面流程。
+- CR-20260807-01 的剩余能力：周报/导出正式来源适配（改读日期级 `archive_snapshot_json`）、月历/统计 API、菜单改名和全部 Electron 页面。同日多日报条目、草稿物理删除、admin 撤销提交、日期级聚合归档、用户安全删除的后端已随 `BE-10B` 完成。
+- 第二版迁移与认证基线（BE-10A）、日报聚合/管理员撤销/用户安全删除后端（BE-10B）已完成；BE-10C/FE-10/QA-10 尚未实现。当前 renderer 仍使用 V1 初始化、设置和日报创建契约（未传 `client_request_id`、无月历/管理员撤销/用户删除界面），因此在 FE-10 完成前不作为可交付的完整第二版桌面流程。
 - AI 周报生成仍为 P2，仅记录扩展边界；当前不得接入模型或保存模型密钥。
 
 - Windows Job Object 级别的孤儿进程彻底防护（ISS-010，非阻塞）。
@@ -332,13 +344,16 @@
 
 ## 5. 下一检查点
 
-第二版的下一检查点是 `BE-10B`：
+第二版的下一检查点是 `BE-10C`：
 
-1. 将日报创建切换为显式 `client_request_id` 幂等和同日多条目。
-2. 实现草稿物理删除、提交、管理员撤销与最小权限审计。
-3. 实现日期级归档事务和正式快照读取，替换 10A 的 V1 单篇兼容桥。
-4. 实现受保护的用户安全删除及权限/并发/回滚测试。
-5. 10B 独立提交完成前，不开始 BE-10C 的统计/导出适配或 Electron 页面。
+1. 周报生成/重生成改为读取 `daily_report_days.status='archived'` 的日期级正式快照，替代当前仍在用的条目级 `daily_reports.status='archived'` 查询，正确支持一个日期下多条来源被聚合为单一正式记录后的展示。
+2. 导出改为按 `daily_report_day_ids` 选择正式记录，动态列/多来源值渲染基于日期级快照而非单条目内容。
+3. 新增月历/统计 API（`GET /statistics/monthly`），实现自然日完成率、来源条目篇数、连续记录天数等既定口径（`decisions.md` PROD-014）。
+4. 补充跨年周、闰日、多来源聚合的自动化测试；10C 独立提交完成前不开始 `FE-10` 的 Electron 页面。
+
+阶段 10B（日报聚合、管理员撤销与用户安全删除）已在本次实现、自测、质量门禁与独立安全审查通过，实现提交待创建（见下方“当前运行方式”前的实现记录一节）。
+
+阶段 3 已满足以下目标，独立提交 `8480515` 已创建：
 
 阶段 3 已满足以下目标，独立提交 `8480515` 已创建：
 

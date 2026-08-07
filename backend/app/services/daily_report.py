@@ -1,7 +1,7 @@
 import json
 import math
 from collections.abc import Mapping
-from datetime import UTC, date, datetime
+from datetime import date
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -10,13 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import Clock, utc_now
 from app.core.errors import AppError
 from app.core.ulid import generate_ulid
-from app.models import DailyReport, DailyReportDay
+from app.models import AdminAuditEvent, DailyReport, DailyReportDay
+from app.repositories.admin_audit import AdminAuditRepository
 from app.repositories.daily_report import DailyReportRepository
+from app.repositories.daily_report_day import DailyReportDayRepository
 from app.schemas.daily_report import DailyContent, DailyInputContent
 from app.schemas.template import TemplateFieldData
 from app.services.template import TemplateService, parse_template_fields
 
 _CONTENT_ADAPTER: TypeAdapter[DailyContent] = TypeAdapter(DailyContent)
+_MAX_CREATE_ATTEMPTS = 3
+_REVOCATION_ACTION = "daily_submission_revoked"
 
 
 class DailyReportNotFoundError(AppError):
@@ -24,14 +28,14 @@ class DailyReportNotFoundError(AppError):
         super().__init__(code=40401, http_status=404, message="日报不存在")
 
 
-class DailyReportAlreadyExistsError(AppError):
-    def __init__(self, existing_report_id: str) -> None:
-        super().__init__(
-            code=40901,
-            http_status=409,
-            message="该工作日期已存在日报",
-            data={"existing_report_id": existing_report_id},
-        )
+class DailyReportDayArchivedError(AppError):
+    def __init__(self) -> None:
+        super().__init__(code=40905, http_status=409, message="日期已归档")
+
+
+class DailyReportIdempotencyConflictError(AppError):
+    def __init__(self) -> None:
+        super().__init__(code=40908, http_status=409, message="创建幂等键已被用于另一个日期")
 
 
 class DailyReportStateError(AppError):
@@ -59,31 +63,6 @@ def parse_daily_content(content_json: str) -> DailyContent:
         return _CONTENT_ADAPTER.validate_json(content_json)
     except ValidationError as error:
         raise RuntimeError("stored daily content is invalid") from error
-
-
-def _utc_iso(value: datetime) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(UTC).isoformat()
-
-
-def build_single_entry_archive_snapshot(report: DailyReport) -> str:
-    if report.submitted_at is None:
-        raise RuntimeError("submitted daily report is missing submitted_at")
-    snapshot = {
-        "schema_version": 2,
-        "work_date": report.work_date.isoformat(),
-        "entries": [
-            {
-                "daily_report_id": report.id,
-                "submitted_at": _utc_iso(report.submitted_at),
-                "template_version_id": report.template_version_id,
-                "template_snapshot": json.loads(report.template_snapshot_json),
-                "content": json.loads(report.content_json),
-            }
-        ],
-    }
-    return json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
 
 
 def _value_error(field: TemplateFieldData, value: object) -> str | None:
@@ -151,12 +130,19 @@ class DailyReportService:
         self._session = session
         self._clock = clock
         self._reports = DailyReportRepository(session)
+        self._days = DailyReportDayRepository(session)
+        self._audit = AdminAuditRepository(session)
 
     async def get(self, owner_id: str, report_id: str) -> DailyReport:
         report = await self._reports.get_for_owner(report_id, owner_id)
         if report is None:
             raise DailyReportNotFoundError()
         return report
+
+    async def last_revocation(self, report_id: str) -> AdminAuditEvent | None:
+        return await self._audit.get_latest_for_target(
+            action=_REVOCATION_ACTION, target_id=report_id
+        )
 
     async def list_reports(
         self,
@@ -179,42 +165,76 @@ class DailyReportService:
             page_size=page_size,
         )
 
-    async def create(self, owner_id: str, *, work_date: date) -> DailyReport:
+    async def create(
+        self, owner_id: str, *, work_date: date, client_request_id: str
+    ) -> DailyReport:
+        existing_by_key = await self._reports.get_by_client_request_id(client_request_id)
+        if existing_by_key is not None:
+            return self._resolve_idempotent_create(
+                existing_by_key, owner_id=owner_id, work_date=work_date
+            )
+
         _template, version, fields = await TemplateService(self._session).get_current(owner_id)
-        report_id = generate_ulid()
-        day = DailyReportDay(
-            id=report_id,
-            user_id=owner_id,
-            work_date=work_date,
-            status="open",
-            source_count=0,
-            version=1,
+        template_snapshot_json = json.dumps(
+            [field.model_dump(mode="json") for field in fields],
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
-        report = DailyReport(
-            id=report_id,
-            day_id=day.id,
-            client_request_id=report_id,
-            status="draft",
-            template_version_id=version.id,
-            template_snapshot_json=json.dumps(
-                [field.model_dump(mode="json") for field in fields],
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ),
-            content_json="{}",
-            version=1,
-            day=day,
-        )
-        try:
-            await self._reports.add(report)
-            await self._session.commit()
-        except IntegrityError as error:
+
+        for _attempt in range(_MAX_CREATE_ATTEMPTS):
+            day = await self._days.get_for_owner_by_date(owner_id, work_date)
+            if day is None:
+                day = DailyReportDay(
+                    id=generate_ulid(),
+                    user_id=owner_id,
+                    work_date=work_date,
+                    status="open",
+                    source_count=0,
+                    version=1,
+                )
+                try:
+                    await self._days.add(day)
+                except IntegrityError:
+                    await self._session.rollback()
+                    continue
+            elif day.status == "archived":
+                raise DailyReportDayArchivedError()
+
+            report = DailyReport(
+                id=generate_ulid(),
+                day_id=day.id,
+                client_request_id=client_request_id,
+                status="draft",
+                template_version_id=version.id,
+                template_snapshot_json=template_snapshot_json,
+                content_json="{}",
+                version=1,
+            )
+            try:
+                inserted = await self._reports.insert_entry_if_day_open(report)
+            except IntegrityError as error:
+                await self._session.rollback()
+                existing_by_key = await self._reports.get_by_client_request_id(client_request_id)
+                if existing_by_key is not None:
+                    return self._resolve_idempotent_create(
+                        existing_by_key, owner_id=owner_id, work_date=work_date
+                    )
+                raise RuntimeError("daily report insert failed") from error
+            if inserted:
+                await self._session.commit()
+                created = await self._reports.get_for_owner(report.id, owner_id)
+                assert created is not None
+                return created
             await self._session.rollback()
-            existing = await self._reports.get_by_work_date(owner_id, work_date)
-            if existing is not None:
-                raise DailyReportAlreadyExistsError(existing.id) from error
-            raise RuntimeError("daily report insert failed") from error
-        return report
+        raise RuntimeError("daily report creation failed after retrying the open-day race")
+
+    @staticmethod
+    def _resolve_idempotent_create(
+        existing: DailyReport, *, owner_id: str, work_date: date
+    ) -> DailyReport:
+        if existing.day.user_id == owner_id and existing.work_date == work_date:
+            return existing
+        raise DailyReportIdempotencyConflictError()
 
     async def save(
         self,
@@ -243,6 +263,22 @@ class DailyReportService:
         await self._session.commit()
         return await self.get(owner_id, report_id)
 
+    async def delete(self, owner_id: str, report_id: str, *, expected_version: int) -> None:
+        report = await self.get(owner_id, report_id)
+        self._require_state_and_version(report, state="draft", expected_version=expected_version)
+        day_id = report.day_id
+        deleted = await self._reports.delete_draft(
+            report_id=report_id,
+            owner_id=owner_id,
+            expected_version=expected_version,
+        )
+        if not deleted:
+            await self._raise_after_failed_update(owner_id, report_id, required_state="draft")
+        remaining = await self._reports.count_by_day(day_id)
+        if remaining == 0:
+            await self._days.delete_if_empty_open(day_id=day_id, owner_id=owner_id)
+        await self._session.commit()
+
     async def submit(self, owner_id: str, report_id: str, *, expected_version: int) -> DailyReport:
         report = await self.get(owner_id, report_id)
         self._require_state_and_version(report, state="draft", expected_version=expected_version)
@@ -260,32 +296,6 @@ class DailyReportService:
         )
         if not updated:
             await self._raise_after_failed_update(owner_id, report_id, required_state="draft")
-        await self._session.commit()
-        return await self.get(owner_id, report_id)
-
-    async def archive(self, owner_id: str, report_id: str, *, expected_version: int) -> DailyReport:
-        report = await self.get(owner_id, report_id)
-        self._require_state_and_version(
-            report, state="submitted", expected_version=expected_version
-        )
-        now = self._clock()
-        updated = await self._reports.archive_submitted(
-            report_id=report_id,
-            owner_id=owner_id,
-            expected_version=expected_version,
-            archived_at=now,
-        )
-        if not updated:
-            await self._raise_after_failed_update(owner_id, report_id, required_state="submitted")
-        day_updated = await self._reports.archive_day(
-            day_id=report.day_id,
-            owner_id=owner_id,
-            archive_snapshot_json=build_single_entry_archive_snapshot(report),
-            archived_at=now,
-        )
-        if not day_updated:
-            await self._session.rollback()
-            raise DailyReportStateError("日报日期已关闭")
         await self._session.commit()
         return await self.get(owner_id, report_id)
 

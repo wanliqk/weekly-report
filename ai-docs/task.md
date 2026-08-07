@@ -176,12 +176,12 @@ uv sync --directory backend --frozen
 | REQ-10 | 主 Agent | 整理同日多条目、日期级归档、管理员撤销、双账号初始化、菜单与统计需求 | 用户新需求 | DONE | 增量需求、覆盖规则、Given-When-Then 与推荐口径已确认并提交 `a866872` |
 | DESIGN-10 | 主 Agent | 第二版方案设计与迁移评审 | REQ-10、ISS-018..ISS-022 | DONE | 日期容器 1:n 条目、正式快照、日期互斥事务、最小权限审计、统计、V1 迁移/受限 downgrade、API 与 Electron 路由已确认并提交 `e767ebd` |
 | BE-10A | 主 Agent | 第二版迁移与认证基线 | DESIGN-10 | DONE | 日期/审计模型与迁移、周报 V2 快照迁移、双账号 bootstrap、强制改密、自动归档移除均已实现；旧库升级/受限降级和认证测试通过 |
-| BE-10B | 主 Agent | 日报聚合、管理员撤销与用户安全删除 | BE-10A | TODO | 同日多篇、幂等创建、草稿删除/提交、日期级归档、最小权限撤销/审计、安全删除及并发测试 |
+| BE-10B | 主 Agent | 日报聚合、管理员撤销与用户安全删除 | BE-10A | DONE | 同日多篇、幂等创建、草稿删除/提交、日期级归档、最小权限撤销/审计、安全删除及并发测试均已实现、自测、质量门禁与独立安全审查通过 |
 | BE-10C | 主 Agent | 周报、导出与统计适配 | BE-10B | TODO | 日期正式来源、周报 JSON、Excel 多来源列、月历/统计 API 及跨年/闰日测试 |
 | FE-10 | 主 Agent | 第二版 Electron/Vue 界面实现 | BE-10A、BE-10B、BE-10C 契约 | TODO | 强制改密、菜单改名、我的日报月历/归档、我的周报适配、设置收口、管理员入口、用户删除和统计页 |
 | QA-10 | 主 Agent | 第二版迁移、权限、并发、统计与 E2E 验收 | BE-10A..BE-10C、FE-10 | TODO | 旧库迁移、同日并发、汇总原子性、权限隔离、删除保护、跨月/闰日统计及完整桌面流程通过门禁 |
 
-第二版需求、方案和 `BE-10A` 已完成；当前数据与认证基线为 V2，日报多条目业务仍由 V1 兼容桥限制为同日一篇，等待 `BE-10B` 接管。
+第二版需求、方案、`BE-10A` 和 `BE-10B` 均已完成；日报条目已是真正的同日多篇 + 日期级归档，V1 单篇兼容桥已移除。周报/导出/统计仍按 BE-10A 遗留方式读取条目级 `archived` 状态，尚未切换到日期级正式快照，等待 `BE-10C` 接管。
 
 ## 4. 当前可领取任务
 
@@ -199,7 +199,7 @@ uv sync --directory backend --frozen
 
 阶段 9 四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。V1 全部 9 个阶段现已交付完毕。
 
-第二版 `REQ-10`、`DESIGN-10`、`BE-10A` 均为 `DONE`。当前可领取且仅可领取 `BE-10B`；后续严格按 BE-10B -> BE-10C -> FE-10 -> QA-10 的依赖推进。
+第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B` 均为 `DONE`。当前可领取且仅可领取 `BE-10C`；后续严格按 BE-10C -> FE-10 -> QA-10 的依赖推进。
 
 ### 第二版阶段 10A 验证记录
 
@@ -207,6 +207,15 @@ uv sync --directory backend --frozen
 - 前端/桌面回归：`npm run lint`、`npm run typecheck`、`npm test`（18 文件、108 项）、`npm run build` 全部通过。
 - 数据迁移：空库升级、V1 真实结构副本升级、三态日报、多个用户/模板版本、跨年周、闰日、未来日期、导出任务、停用账号、三列周报 JSON V2 化、逐字节正文/模板保留、行数与外键检查、无损 downgrade、同日多条目/审计事件拒绝 downgrade、坏 JSON 在 DDL 前中止均有自动化测试。
 - `git diff --check` 通过；本阶段未开始 BE-10B 的同日多篇/删除/撤销/日期归档 API，也未修改 Electron 页面。
+
+### 第二版阶段 10B 验证记录
+
+- 后端：`uv run --directory backend ruff check .`、`ruff format --check .`、`uv run --directory backend mypy`（strict，115 个源文件）、`uv run --directory backend pytest`（**242 项通过**，阶段 10A 遗留 199 项 + 本阶段新增 43 项：`client_request_id` 幂等/冲突、同日多篇并发创建、创建与日期归档并发互斥（XOR 结果）、草稿删除清空日期容器、日期级归档聚合多条目快照/幂等/草稿阻塞/无可归档阻塞、月历摘要、日期详情、admin 撤销权限/版本冲突/审计、用户安全删除（业务记录阻塞、确认用户名不匹配、自我删除保护、末位管理员并发保护、非管理员越权）等）均已实际执行并通过。
+- 前端/桌面回归（未修改 Electron/Vue 代码，用于确认未破坏既有链路）：`npm run lint`、`npm run typecheck`、`npm test`（18 文件 108 项）、`npm run build` 均实际执行并通过。
+- `git diff --check` 通过（仅常规 LF→CRLF 提示）。
+- 独立安全专项审查（沙盒 Agent 独立读取 diff，未采信本 Agent 的实现结论）：逐项核查所有权隔离（日报条目/日期容器全部按 `owner_id` 过滤）、admin 查询是否泄露正文（`list_submitted_awaiting_archive`/`get_submitted_metadata` 均为原始列选择，不选择 `content_json`/`template_snapshot_json`）、SQL 注入（全部走 SQLAlchemy Core/ORM 构造）、用户删除权限提升路径（非管理员 403、自我删除阻断、末位管理员条件 `DELETE` 且已用并发测试验证、`has_business_records` 覆盖三张业务表并有外键 RESTRICT 兜底）、确认/原因绕过（用户名精确匹配、原因去空白后非空校验）、`client_request_id` 幂等键跨用户信息泄露（跨用户复用返回 40908 冲突而非泄露对方日报）、审计日志注入（`metadata_json` 全部走 `json.dumps` 结构化写入）。未发现 P0/P1 级可利用漏洞；识别出一项低置信度（4/10）信息项（`client_request_id` 跨用户存在性探测，无数据泄露，不构成漏洞）已记录但不阻塞交付。
+- 关键实现事实：`daily_report_days`/`daily_reports` 的所有写操作复用 SQLite 单写者锁作为日期行并发互斥点（`touch_open_for_write` 在归档前率先获取写锁并复查 `open` 状态，`insert_entry_if_day_open` 用 `INSERT ... SELECT ... WHERE EXISTS` 单语句关闭创建与归档之间的竞态窗口，与 `AUTH-01` 的 `create_if_no_users_exist` 同一模式）；`DELETE /daily-reports/{id}/archive` 单篇归档接口已按 `api.md` §13.2 移除，替换为 `POST /daily-report-days/{work_date}/archive` 的日期级归档；用户安全删除的业务记录检查覆盖 `daily_report_days`/`weekly_reports`/`export_jobs`（`daily_reports` 通过日期容器传递覆盖），默认关联资源（`user_settings`/`report_templates`/`template_versions`）作为脚手架数据被显式清理而非阻塞删除。
+- 已知范围边界（非缺陷，记录供 BE-10C 承接）：周报生成/重生成（`WeeklyReportService`）与导出（`ExportService`）仍读取 `daily_reports.status == 'archived'` 的条目级查询，未切换到 `daily_report_days.archive_snapshot_json` 的日期级正式快照；在真实多条目场景下对同一日期归档后，周报/导出的多条目聚合语义尚不正确（`weekly_report_sources` 按 `daily_report_day_id` 去重会在多条目场景下与来源假设冲突），已记录为 BE-10C 的既定范围而非本阶段回归；`test_exports_api.py`/`test_weekly_reports_api.py` 的测试夹具已同步改为调用新的日期级归档接口，但其覆盖场景仍是每日单条目，未验证多条目下的周报/导出行为。
 
 ## 5. 实际验证记录
 
