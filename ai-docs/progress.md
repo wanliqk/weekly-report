@@ -457,3 +457,14 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 3. ✅ electron-builder Windows x64 安装包：`extraResources` 正确放置 sidecar、安装目录只读（sidecar 与主程序均不写安装目录）、`userData` 数据保留均已实现并验证。
 4. ✅ 本机安装/升级/卸载全链路真实验证完成（含发现并修复三个真实缺陷，其中一个 P0）；独立干净虚拟机验证受限于当前环境，已提前与用户确认并记录该限制。
 5. ✅ 后端 186 项、前端 108 项、真实 sidecar 集成 2 项、Playwright E2E 5 项及生产/打包构建全部通过；独立审查完成，无未解决 P0/P1。实现提交 `0148171`，阶段 9 正式关闭——V1 规划的全部 9 个阶段至此交付完毕。
+
+## 6. 发布记录
+
+对外发布的 GitHub Release（公开可下载的 Windows 安装包，区别于内部阶段提交）：<https://github.com/wanliqk/weekly-report/releases>
+
+| 版本 | 标签提交 | 发布时间（UTC） | 说明 |
+|---|---|---|---|
+| `v0.1.0` | `0306cb3` | 2026-08-06T14:50:25Z | V1 首个正式版本：首次初始化/登录、用户管理、模板不可变版本、日报草稿-提交-归档（含提交后自动归档）、按自然周汇总周报、已归档日报导出 Excel、管理员整库手动备份、企业微信占位。安装包未签名。 |
+| `v0.2.0` | `95bdbf0` | 2026-08-07T07:57:47Z | CR-20260807-01 第二版增量：双账号初始化（固定 `admin`）与首登强制改密、日报同日多篇与日期级归档（移除单篇归档与自动归档）、管理员撤销提交与操作审计、用户安全删除、周报/导出/统计改读日期级正式来源、新增"我的日报"月历与"统计"页。安装包未签名（沿用 `RISK-003`）。 |
+
+发布流程：`package.json`/`electron/package.json`/`backend/pyproject.toml`/`backend/app/main.py` 的版本号需同步更新（`FastAPI(version=...)` 是 `/health` 版本号的单一来源），并重新执行 `uv lock` 和根 `npm install` 刷新锁文件；随后重建 PyInstaller sidecar 与 electron-builder 安装包，在本机做真实安装/启动/卸载冒烟后再创建 GitHub Release 并上传安装包资产。每个版本对应一个独立的 `chore(release): 发布 vX.Y.Z` 提交与同名 annotated tag。
