@@ -12,7 +12,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-REPORT_TITLE = "每日工作日报"
+REPORT_TITLE = "每日工作汇报"
 
 _FONT_NAME = "微软雅黑"
 _BRAND_COLOR = "FF1F3864"
