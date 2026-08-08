@@ -183,6 +183,20 @@ uv sync --directory backend --frozen
 
 第二版需求、方案、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均已完成；日报条目已是真正的同日多篇 + 日期级归档，V1 单篇兼容桥已移除；周报、导出和统计后端均已切换为读取日期级正式快照（`daily_report_days.archive_snapshot_json`），不再读取条目级 `archived` 状态；全部第二版 Electron/Vue 界面（强制改密、我的日报月历、我的周报多来源展示、统计页、管理员日报管理/用户删除、设置收口）均已实现并通过真实 Electron 冒烟验证、真实生产打包安装验证和重写后的 Playwright E2E 全量验证。CR-20260807-01 第二版增量至此全部交付完毕。
 
+### 第三版增量：企业微信日报反向同步（CR-20260808-02）
+
+| ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
+|---|---|---|---|---|---|
+| WECOM-00 | 主 Agent | 敏感样例治理 | 用户提供资料 | TODO | 精确忽略原始 HTTP/Cookie 文件，生成全合成脱敏 fixture，敏感扫描证明不会入 Git/构建产物 |
+| WECOM-01 | 主 Agent | 需求与技术方案文档 | 用户需求、当前代码与样例分析 | DONE | 正式需求/方案、架构/API/数据库/模块摘要、决策/风险和任务拆分已更新；未修改代码或原始资料 |
+| WECOM-02 | 主 Agent | 企业微信数据基础 | WECOM-00、WECOM-01 | TODO | 三张 ORM 表、Repository、Pydantic 配置、Alembic 迁移和约束/迁移测试 |
+| WECOM-03 | 主 Agent | Electron 登录与凭证桥 | WECOM-00、WECOM-01 | TODO | Main-only secret、安全登录窗口、`safeStorage` Cookie jar、窄 IPC/内部鉴权和构建产物扫描 |
+| WECOM-04 | 主 Agent | 企业微信内部协议 Client | WECOM-00、WECOM-02、WECOM-03 | TODO | 模板/列表/提交 Client、Cookie URL 筛选、协议 DTO、脱敏 fixture 合同测试 |
+| WECOM-05 | 主 Agent | 字段映射与预览 | WECOM-02 | TODO | 正式快照 Mapper、动态 `field_key` 配置、`PROJECT_LIST`、结构/载荷指纹与边界测试 |
+| WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | TODO | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
+| WECOM-07 | 主 Agent | Electron/Vue 交互 | WECOM-03、WECOM-06 | TODO | 设置连接/映射、日报预览/同步、历史/重试 UI 及前端测试 |
+| WECOM-08 | 主 Agent | 全链路验收与发布 | WECOM-02..07 | TODO | 全量门禁、E2E、受控企业微信测试账号冒烟、生产打包升级、凭证扫描和独立安全审查 |
+
 ## 4. 当前可领取任务
 
 阶段 3（`DB-01`/`DB-02`/`DB-03`/`API-01`/`QA-03`）已实现、通过质量门禁并创建独立提交 `8480515`；独立 Reviewer 审查仍待补齐（非阻塞）。
@@ -200,6 +214,8 @@ uv sync --directory backend --frozen
 阶段 9 四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。V1 全部 9 个阶段现已交付完毕。
 
 第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均为 `DONE`。CR-20260807-01 第二版增量的全部任务已交付完毕，当前无可领取的第二版任务。
+
+企业微信增量 `WECOM-01` 文档阶段已完成。下一可领取任务只能是 `WECOM-00` 敏感样例治理；`WECOM-02` 及后续实现不得绕过该前置。当前产品仍为占位，不得把方案描述为已实现。
 
 ### 第二版阶段 10A 验证记录
 

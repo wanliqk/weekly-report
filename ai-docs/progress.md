@@ -474,3 +474,10 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 | `v0.2.0` | `95bdbf0` | 2026-08-07T07:57:47Z | CR-20260807-01 第二版增量：双账号初始化（固定 `admin`）与首登强制改密、日报同日多篇与日期级归档（移除单篇归档与自动归档）、管理员撤销提交与操作审计、用户安全删除、周报/导出/统计改读日期级正式来源、新增"我的日报"月历与"统计"页。安装包未签名（沿用 `RISK-003`）。 |
 
 发布流程：`package.json`/`electron/package.json`/`backend/pyproject.toml`/`backend/app/main.py` 的版本号需同步更新（`FastAPI(version=...)` 是 `/health` 版本号的单一来源），并重新执行 `uv lock` 和根 `npm install` 刷新锁文件；随后重建 PyInstaller sidecar 与 electron-builder 安装包，在本机做真实安装/启动/卸载冒烟后再创建 GitHub Release 并上传安装包资产。每个版本对应一个独立的 `chore(release): 发布 vX.Y.Z` 提交与同名 annotated tag。
+
+## 7. 企业微信同步文档阶段（CR-20260808-02，WECOM-01）
+
+- 2026-08-08：已读取当前日报日期级正式快照、Model/Service/Controller/Repository/数据库契约，并分析用户提供的 `wx-ribao.py` 及真实 HTTP 样例的登录、Cookie、模板/列表/提交请求和响应结构；分析过程未把真实 Cookie、账号标识或日报正文写入文档。
+- 正式文档已新增第三版需求和技术方案：只手动同步本人已归档正式日报；Electron Main 安全登录 + `safeStorage` Cookie jar；FastAPI Mapper/Sync Service/内部协议 Client；三张非敏感元数据表；Main-only secret；动态字段映射；`uncertain` 保守重试语义。
+- `ai-docs` 已同步需求、架构、模块、数据库、API、决策、风险和 `WECOM-00..08` 任务。`WECOM-01` 仅交付文档，没有修改后端/前端/数据库、依赖、能力开关或原始资料，也没有发起企业微信网络请求。
+- 当前实现事实仍是 `wecom_sync=false` 和设置页占位。下一步必须先做 `WECOM-00` 敏感样例治理，再进入数据或登录实现。

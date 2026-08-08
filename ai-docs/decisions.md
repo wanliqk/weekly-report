@@ -82,6 +82,17 @@
 | GOV-002 | 每个技术阶段通过质量门禁后创建独立 Conventional Commit | Accepted | 用户指令、`AGENTS.md` | 当前阶段不得混入下一阶段；本地提交不代表允许推送 |
 | GOV-003 | 任务可按 Agent A/B/C 划分，每项只有一个主责 Agent | Accepted planning convention | 用户指令、`modules.md` | 依赖未满足不得抢跑，共享文件改动先协调 |
 
+## 3.1 企业微信同步决策（CR-20260808-02）
+
+| ID | 决策 | 状态 | 来源 | 约束 |
+|---|---|---|---|---|
+| PROD-027 | 首版只允许当前用户手动同步本人已归档的日期级正式日报 | Accepted for design | `docs/需求理解.md` CR-20260808-02 | 不同步草稿/开放日期，不在归档事务中发外部请求，不允许 admin 同步他人日报 |
+| PROD-028 | 每用户首版只维护一个启用目标，字段按稳定 `field_key` 映射 | Accepted for design | `docs/方案设计.md` CR-20260808-02 | 标签只做首次建议；未映射非空字段阻止提交 |
+| PROD-029 | 同步幂等以“日期正式日报 + 目标表单/模板指纹”为准 | Accepted for design | `docs/方案设计.md` §6/§10 | 同一目标成功后不重复，不同目标可以显式创建新记录 |
+| SEC-013 | Cookie jar 只由 Electron Main 用 `safeStorage` 保存，SQLite 仅存随机凭证槽位 | Accepted for design | `docs/方案设计.md` §3/§6/§12 | Cookie 不进入 renderer、数据库备份、日志、错误响应或 Git |
+| SEC-014 | 携带 Cookie 的内部端点使用独立 `main_bridge_secret` + 用户 JWT | Accepted for design | `docs/方案设计.md` §3.1/§9 | 现有 runtime secret 对 renderer 可见，不能作为唯一保护 |
+| SEC-015 | `uncertain` 不自动重试，只能先远端对账 | Accepted for design | `docs/方案设计.md` §10.3/§11 | 网络超时或崩溃可能已受理，自动重试会制造重复日报 |
+
 ## 4. 决策变更流程
 
 以下变化必须先记录动机、备选方案、兼容性和迁移影响，并由技术负责人批准：

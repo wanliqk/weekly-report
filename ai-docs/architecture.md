@@ -258,3 +258,45 @@ Repository -> Model/SQLite
 | ADR-017 | admin 撤销使用专用最小元数据查询和独立审计 | Accepted for V2（`BE-10B`） | 满足操作能力而不扩大正文权限；已通过独立安全审查 |
 | ADR-018 | 有业务账号不物理删除，只允许停用 | Accepted for V2（`BE-10B`） | 避免级联数据损失并保持外键追溯 |
 | ADR-019 | 周报、导出和完成统计只读取日期级正式日报 | Proposed for V2 | 每个完成日期只参与一次，消除重复汇总；待 `BE-10C` 实现 |
+
+## 14. 企业微信同步目标架构（CR-20260808-02）
+
+> 实现状态：仅完成需求/方案文档，所有组件均为目标设计。当前 `wecom_sync=false` 和占位 UI 不变。
+
+```text
+Renderer --公开 REST--> WeCom API/Service --> Repository/SQLite
+   │                              │
+   └--窄 IPC--> Electron Main     └--> integrations/wecom Client
+                   │                          ▲
+                   ├─安全登录窗口             │ 单次内存 Cookie jar
+                   └─safeStorage 凭证----------┘
+```
+
+### 14.1 分层
+
+- Electron Main：`WeComAuthWindowController`、`WeComCredentialStore`、`WeComBridgeClient`；只负责登录、系统加密和凭证桥，不承载同步状态机。
+- FastAPI：`WeComConnectionService`、`WeComDailyMapper`、`WeComSyncService`；所有写操作继续遵循 API -> Service -> Repository -> Model/DB。
+- 出站适配：`backend/app/integrations/wecom` 集中实现模板组合、日报列表和 multipart 提交三个内部接口。
+- Renderer：公开 REST 负责业务数据，`runtimeBridge.wecom` 只暴露连接、断开和按 `record_id` 执行，不能读取 Cookie 或发送任意 URL。
+
+### 14.2 凭证与内部鉴权
+
+- Cookie jar 以完整结构保存到 Electron `safeStorage` 加密文件；SQLite 只存随机 `credential_slot`。
+- 新增每次启动随机的 `main_bridge_secret`，只存在 Electron Main 和 sidecar 内存。携带 Cookie 的 `/api/v1/internal/wecom/**` 同时校验 Main-only secret 与用户 JWT。
+- 现有 runtime secret 对 renderer 可见，因此不得复用为 Cookie 端点的唯一保护。
+- 企业微信外部调用在 SQLite 事务外执行；状态预留和最终落库分别使用短事务与 `attempt_token` 条件写。
+
+### 14.3 同步状态
+
+`pending -> syncing -> succeeded/failed/auth_required/schema_changed/duplicate_detected/uncertain`。只有能证明远端未受理的 `failed` 可人工重试；超时、崩溃或提交响应契约异常进入 `uncertain`，必须先远端对账。
+
+### 14.4 新增 ADR
+
+| ADR | 决策 | 状态 | 理由 |
+|---|---|---|---|
+| ADR-020 | 生产登录使用 Electron 隔离 BrowserWindow，不打包 Python Playwright | Accepted for design | 复用现有 Chromium 和生命周期，同时保留人工验证 |
+| ADR-021 | Cookie 用 `safeStorage`，业务库只存凭证槽位 | Accepted for design | 数据库备份不应携带可用会话 |
+| ADR-022 | 新增 Main-only secret，凭证执行端点同时校验 JWT | Accepted for design | runtime secret 已进入 renderer，不能保护 Cookie |
+| ADR-023 | FastAPI 出站 Client + Electron 凭证桥 | Accepted for design | 业务幂等/状态集中在 Service，Main 不承载业务状态机 |
+| ADR-024 | 日期正式日报 + 目标指纹为同步幂等键 | Accepted for design | 同目标不重复，不同目标可显式同步 |
+| ADR-025 | 可能已受理的失败统一进入 `uncertain` | Accepted for design | 防止自动重试制造重复日报 |

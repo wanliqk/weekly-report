@@ -314,3 +314,35 @@ downgrade 只有在每日期最多一条且周报快照可无损还原时允许�
 **已实现（BE-10B，删除部分）**：`DailyReportService.delete()` 条件删除 `status='draft'` 的条目，删除后若 `daily_report_days` 下无剩余条目则同事务删除该空 open 日期行（`DailyReportDayRepository.delete_if_empty_open`）。`UserService.delete_user()` 检查 `daily_report_days`/`weekly_reports`/`export_jobs`（`daily_reports` 通过日期容器传递覆盖，无需单独查询）；无记录时同事务清理 `user_settings`/`template_versions`/`report_templates` 默认关联资源后物理删除 `users` 行；检查后并发产生业务记录的场景由外键 `RESTRICT` 触发 `IntegrityError` 兜底捕获为 `40910`。
 
 **已实现（BE-10C，统计/周报/导出部分）**：月历、周报和导出均已改为按 `user_id + 日期范围` 查询 `daily_report_days`（`list_in_range`/`list_archived_in_range`/`get_by_ids_for_owner_archived`），不再查询条目级 `daily_reports` 表；完成日期只认 `daily_report_days.status='archived'`；`daily_report_count` 按工作日期归属月份统计 `daily_reports.status IN ('submitted','archived')` 的来源条目（`DailyReportRepository.count_submitted_or_archived_in_range`），`weekly_report_count` 按 `weekly_reports.week_start` 所在月统计（`WeeklyReportRepository.count_by_week_start_range`），`current_streak_days` 按 `daily_report_days.status='archived'` 的 `work_date` 集合用今天/昨天规则向前查询（`DailyReportDayRepository.list_archived_work_dates_on_or_before`，无窗口限制，个人数据规模下可接受全量查询）。
+
+## 9. 企业微信同步数据库目标（CR-20260808-02）
+
+> 以下三张表尚未实现，进入 `WECOM-02` 后才创建迁移。
+
+### 9.1 `wecom_user_bindings`
+
+- `id` ULID PK；`user_id` FK/UNIQUE/RESTRICT。
+- `credential_slot` UNIQUE，只是不透明随机槽位，不是路径，不含 Cookie。
+- `wecom_vid`、`display_name`、可空 `corp_id`。
+- `status in (connected,expired,disconnected)`、`last_validated_at`、`last_auth_error_at`、正整数 `version`、时间戳。
+
+### 9.2 `wecom_sync_profiles`
+
+- 每用户唯一一行；`form_id`、`template_id`、可空 `journal_uuid`。
+- `destination_fingerprint`、`schema_fingerprint` 均为规范化 SHA-256。
+- `question_mapping_json`、`recipient_config_json`、`field_mapping_json` 必须有 `schema_version` 并经 Pydantic 校验。
+- 正整数 `version`、`is_active`、时间戳。该表即模板/映射配置，不再重复建模板配置表。
+
+### 9.3 `wecom_daily_sync_records`
+
+- owner、`daily_report_day_id`、`profile_id/profile_version`、目标和载荷指纹。
+- 状态：`pending/syncing/succeeded/failed/auth_required/schema_changed/duplicate_detected/uncertain`。
+- `attempt_count`、`attempt_token`、必要远端 ID、脱敏错误类型/短消息和尝试/成功时间。
+- UNIQUE `(daily_report_day_id,destination_fingerprint)`；索引 `(user_id,status,updated_at)`。
+- 不保存 payload/response 原文；同步正文可从不可变正式快照重建。
+
+### 9.4 凭证与删除
+
+- 不新增 Cookie 表。加密 Cookie 文件不属于 SQLite 备份；数据库只持有 `credential_slot`。
+- 无同步历史用户可在删除用户事务中显式清理 profile/binding；有同步记录继续触发 `40910` 业务数据保护。
+- 外部 HTTP 调用不持有数据库事务；状态预留和按 `attempt_token` 完成使用两个短事务。

@@ -216,3 +216,22 @@ app/
 | `/admin/users` | 用户增删改查 | admin |
 
 第二版代码完成状态以 `task.md`/`progress.md` 为准；BE-10A 之外的模块职责仍是待实现契约，禁止提前标作 DONE。
+
+## 10. 企业微信同步目标模块（CR-20260808-02）
+
+| 模块 | 目标职责 | 依赖 | 禁止事项 | 状态 |
+|---|---|---|---|---|
+| M23 WeCom Auth Bridge | 受控登录窗口、Cookie 提取、`safeStorage`、Main-only 调用 | M02、M03、M05 | Cookie 进入 renderer/SQLite、任意 URL IPC | DESIGN |
+| M24 WeCom Connection | 账号校验、模板发现、绑定/配置版本 | M05、M23、M27 | 保存 Cookie、admin 读取他人配置 | DESIGN |
+| M25 WeCom Mapper | 正式快照到日期/今日/明日的确定性转换与预览 | M18、M07 | 读取开放日期、按标签运行时猜测 | DESIGN |
+| M26 WeCom Sync | 幂等记录、状态机、重复检查、结果对账 | M18、M24、M25、M27 | 自动重试 `uncertain`、修改本地日报 | DESIGN |
+| M27 WeCom Client | 内部模板/列表/提交协议和错误分类 | M03 | 协议散落 Service、记录 header/body | DESIGN |
+| M28 WeCom UI | 设置连接/映射、日报预览/同步、历史状态 | M12、M23～M26 | Web Storage 凭证、前端自行判断所有权 | DESIGN |
+
+主要代码落点：
+
+- Electron Main：`electron/src/main/wecom/**`、`electron/src/main/security/wecom-credential-store.ts`、受限 IPC/preload。
+- Backend：`app/models/wecom.py`、`repositories/wecom_*.py`、`services/wecom_*.py`、`integrations/wecom/**`、公开与 Main-only Router。
+- Renderer：`api/wecom.ts`、`components/wecom/**`，并接入现有 `/settings` 与 `/daily`。
+
+实现顺序和验收门禁以 `task.md` 的 `WECOM-00..08` 为准。

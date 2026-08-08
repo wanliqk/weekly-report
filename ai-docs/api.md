@@ -358,3 +358,45 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 | 40910 | 409 | 用户已有业务记录不能删除 |
 
 创建请求的 `client_request_id` 由 renderer 生成并在同一意图重试时复用；同键返回既有条目，不同键可创建同日新条目。现有 404 所有权隐藏、40902 状态冲突、40904 乐观锁和 50301 数据库繁忙继续使用。
+
+## 14. 企业微信同步目标 API（CR-20260808-02）
+
+> 尚未实现；当前 `GET /capabilities` 仍返回 `wecom_sync:false`。
+
+### 14.1 公开 REST
+
+| 方法 | 路径 | 权限/用途 |
+|---|---|---|
+| GET | `/wecom/connection` | 本人连接状态和非敏感账号摘要 |
+| GET/PUT | `/wecom/profile` | 本人读取/版本化更新映射配置 |
+| POST | `/wecom/previews` | 本人预览指定日期正式日报的转换结果 |
+| POST | `/daily-report-days/{work_date}/wecom-syncs` | 本人幂等创建/取得同步记录 |
+| GET | `/wecom/sync-records` | 本人按日期/状态查询历史 |
+| GET | `/wecom/sync-records/{record_id}` | 本人同步详情，不含请求/响应原文 |
+| POST | `/wecom/sync-records/{record_id}/retry` | 只允许明确可重试状态 |
+
+所有公开接口继续使用 `/api/v1` 前缀，同时校验 runtime secret、JWT、强制改密状态和 owner；越权统一 `40401`。
+
+### 14.2 Main-only REST
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| POST | `/internal/wecom/connections/validate` | Main 传入单次内存 Cookie jar，验证并保存非敏感绑定 |
+| POST | `/internal/wecom/sync-records/{record_id}/execute` | Main 解密凭证后执行已预留记录 |
+| POST | `/internal/wecom/connections/disconnect` | 标记断开；凭证由 Main 删除 |
+
+路径仍位于 `/api/v1` 下，但同时要求用户 JWT 和 `X-Main-Bridge-Secret`，默认不进入公开 OpenAPI。只接受结构化 Cookie jar，不接受原始 Cookie header、文件路径或任意目标 URL。
+
+### 14.3 拟新增错误码
+
+| code | HTTP | 含义 |
+|---:|---:|---|
+| 40911 | 409 | 企业微信未连接或登录已失效 |
+| 40912 | 409 | 模板结构已变化 |
+| 40913 | 409 | 正式日报已成功同步 |
+| 40914 | 409 | 结果不确定，禁止直接重试 |
+| 40915 | 409 | 检测到可能重复日报 |
+| 50201 | 502 | 内部协议不符合已知契约 |
+| 50302 | 503 | 企业微信暂时不可用且可确认未受理 |
+
+远端响应、Cookie、请求体和日报正文不得透传。最终字段契约以 `docs/方案设计.md` CR-20260808-02 §9 为准。

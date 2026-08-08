@@ -1,6 +1,6 @@
 # 问题、风险与阻塞记录
 
-> 更新日期：2026-08-07
+> 更新日期：2026-08-08
 > 严重度：P0 安全/数据损失；P1 核心功能/契约；P2 可维护性/体验；P3 建议
 > 状态：`OPEN`、`MITIGATED`、`RESOLVED`、`BLOCKED`
 
@@ -34,6 +34,10 @@
 | ISS-023 | P2 | RESOLVED | BE-10B 实现时只依据 `ai-docs/api.md`/`database.md` 的精简摘要，未完整核对 `docs/方案设计.md` 第二版章节全文，导致五处响应契约与技术方案不一致：① 条目响应缺 `day_id`（方案 §8.2）；② 创建接口响应缺 `created` 幂等标记（方案 §6.2）；③ 月历摘要应只返回存在记录的日期且字段为 `archive_disabled_reason`/`day_id`，实现却返回整月含空日期且字段名为 `disabled_reason`（方案 §8.3）；④ 用户列表缺 `can_delete`/不可删除原因码（方案 §7.3）；⑤ 撤销信息缺操作者标识（方案 §6.4 第 5 点）。均在启动阶段 10C 前发现并核对方案原文确认 | 随阶段 10C 前置修正提交一并实现五项字段补齐，`ai-docs/api.md` 同步更新为完整契约；教训已记录：后续涉及已批准技术方案的字段级契约，必须直接核对 `docs/方案设计.md` 原文而非仅依赖 `ai-docs/` 摘要 |
 | ISS-024 | P2 | RESOLVED | FE-10 把 Electron/Vue 界面全面改为第二版形状后，既有 `electron/e2e/*.spec.ts`（`primary-path`/`auth-failures`/`daily-validation`/`admin-guard`/`stale-version-conflict`，共 5 个 QA-09 时期建立的 spec）断言仍是 V1 UI，`npm run test:e2e` 曾经会失败 | `QA-10` 已重写全部 5 个既有 spec 为第二版 UI/流程断言（`helpers/app.ts` 新增 `bootstrapFirstUser`/`completeForcedPasswordChange`/`bootstrapAndSignInAsAdmin` 等第二版专用 helper，替换掉只适用单账号 V1 的 `bootstrapAdmin`/`DEFAULT_ADMIN`），并新增 `user-deletion.spec.ts` 覆盖用户安全删除。`primary-path.spec.ts` 扩写为覆盖需求文档要求的完整链路：双账号初始化→admin 强制改密（含手动 hash 导航绕过被拦回的断言）→同日创建两篇→提交→admin 撤销一篇→所有者重新提交→日期级归档→统计→周报→导出，全部基于真实 UI 交互而非直接调 API。`npm run test:e2e` 连续 3 次全量重跑（6 个 spec）均 100% 通过，无 flaky | 已解决；`npm run test:e2e` 已重新成为可用的常规质量门禁 |
 | ISS-025 | P3 | OPEN | 生产打包的 sidecar 子进程环境变量（`paths.ts::productionDataDirEnv`）永远基于 `app.getPath('userData')` 重新计算，会无条件覆盖父进程环境里的同名 `WEEKLY_REPORT_*_DIR` 变量；这意味着无法通过设置环境变量来隔离/沙箱化一个已打包（`app.isPackaged=true`）二进制的运行数据目录，只对开发模式（`is.dev`）有效 | `QA-10` 验证生产打包产物时最初尝试用环境变量把 `win-unpacked` 产物的数据目录指向隔离临时目录（沿用 dev 模式 E2E 的隔离手法），实际运行后发现该二进制仍然读写了真实 `%APPDATA%\weekly-report-electron\`（阶段 9 `REL-01` 遗留的真实 V1 数据库因此被这次意外触发的启动做了一次真实迁移到 V2 头版本，逐项核对确认迁移正确——这本身是一次有价值的真实"安装环境下 V1→V2 升级"验证，而非缺陷）。这是 `SEC-010`/`PKG-DEC-*` 既定的安全设计（生产环境必须忽略外部环境变量，只信任真实安装位置），不是本次改动引入的问题，只是此前没有在真实打包产物上尝试过环境变量隔离，因此未被记录 | 非阻塞，是正确的安全行为而非缺陷；记录供以后需要给已打包二进制做隔离测试时参考——正确做法是走真实安装/卸载周期（`QA-10` 已采用），或改用 `--user-data-dir` 等 Electron 自身支持的隔离机制，而不是环境变量 |
+
+| ISS-026 | P1 | MITIGATED | CR-20260808-02 的企业微信真实同步与既有“只占位、零外部请求”文档/实现冲突 | `docs/需求理解.md` 和 `docs/方案设计.md` 已用第三版增量明确覆盖后续范围，并保留“代码交付前仍占位”的过渡状态；AI 上下文已同步 | `WECOM-08` 全链路完成且 capability 切换后才能 RESOLVED |
+| ISS-027 | P1 | OPEN | 企业微信日报使用非官方内部接口，协议、Cookie、风控或条款可能变化 | 若变化，可能导致认证失效、模板解析失败、重复提交风险或功能不可用；不得以猜测字段绕过 | `WECOM-04` 契约隔离与 fixture 测试，`WECOM-08` 受控测试账号真实冒烟；发布前确认组织制度/相关条款 |
+| ISS-028 | P0 | OPEN | `backend/wx-ribao/http_raw_request.txt` 和 `http_raw_response.txt` 是用户提供的真实协议样例，存在 Cookie、账号标识和日报正文被误提交/打包的风险 | 当前目录未跟踪，本文档阶段不修改原始资料；任何实现前不得暂存该目录或输出其内容 | `WECOM-00` 先建立精确忽略规则、全合成脱敏 fixture 和敏感扫描；必要时由资料提供方更新/失效相关会话 |
 
 ## 2. 非阻塞产品/发布风险
 
