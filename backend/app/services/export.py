@@ -3,7 +3,7 @@ import json
 import logging
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from io import BytesIO
@@ -26,7 +26,7 @@ from app.schemas.daily_report_day import DayArchiveSnapshotData
 from app.schemas.export import ExportFilter
 from app.schemas.template import TemplateFieldData
 from app.services.daily_report_day import parse_day_archive_snapshot
-from app.services.export_style import style_report_sheet
+from app.services.export_style import ProjectListBlockLayout, style_report_sheet
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,11 @@ class ExportColumn:
     header: str
 
 
-def plan_export_columns(snapshots: list[list[TemplateFieldData]]) -> list[ExportColumn]:
+def plan_export_columns(
+    snapshots: list[list[TemplateFieldData]],
+    *,
+    include: Callable[[TemplateFieldData], bool] = lambda _field: True,
+) -> list[ExportColumn]:
     """Merges every included entry's field snapshot into one ordered column list.
 
     `field_key` is immutable (database.md 3.4) so it is always the merge key;
@@ -76,12 +80,19 @@ def plan_export_columns(snapshots: list[list[TemplateFieldData]]) -> list[Export
     use lead and fields only old entries used trail after them. Two distinct
     `field_key`s that happen to end up with the same header text get a short
     `field_key` suffix appended so the generated columns stay unambiguous.
+
+    `include` lets a caller plan two disjoint column sets from the same
+    snapshots — e.g. the main table's columns (everything except
+    `PROJECT_LIST`) and the `PROJECT_LIST` block titles/headers — while
+    reusing the exact same ordering/label/dedup rules for both.
     """
     order: dict[str, int] = {}
     label_by_key: dict[str, str] = {}
     next_index = 0
     for snapshot in snapshots:
         for field in sorted(snapshot, key=lambda item: item.sort_order):
+            if not include(field):
+                continue
             if field.field_key not in order:
                 order[field.field_key] = next_index
                 next_index += 1
@@ -113,30 +124,14 @@ def _defuse_formula(text: str) -> str:
     return f"'{text}" if text.startswith("=") else text
 
 
-def _format_project_list(entries: list[ProjectListEntry]) -> str:
-    """Renders a `PROJECT_LIST` value as project-grouped bullet text.
-
-    Groups entries by project name (first-appearance order) instead of
-    listing them in raw entry order, so repeated work on the same project
-    within one report reads as one block; completion status is
-    intentionally omitted from the export, matching the requested format.
-    """
-    groups: dict[str, list[str]] = {}
-    for entry in entries:
-        groups.setdefault(entry.project, []).append(entry.content)
-    blocks = [
-        "\n".join([f"项目:{project}", *(f"- {line}" for line in lines)])
-        for project, lines in groups.items()
-    ]
-    return _defuse_formula("\n\n".join(blocks))
+_PROJECT_LIST_BLOCK_HEADERS = ["项目", "工作内容", "完成状态"]
+_PROJECT_TASK_STATUS_LABELS = {"TODO": "未开始", "DOING": "进行中", "DONE": "已完成"}
 
 
 def _single_source_cell(value: object) -> str | int | float | None:
     if value is None:
         return None
     if isinstance(value, list):
-        if value and isinstance(value[0], ProjectListEntry):
-            return _format_project_list(value)
         return _defuse_formula(_MULTISELECT_SEPARATOR.join(str(item) for item in value))
     if isinstance(value, bool):
         return str(value)
@@ -167,10 +162,27 @@ def _multi_source_cell(
     return "\n".join(f"[{position}] {value}" for position, value in present)
 
 
+def _project_list_entries(value: object) -> list[ProjectListEntry]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, ProjectListEntry)]
+
+
 def build_export_workbook(
-    days: list[DailyReportDay], columns: list[ExportColumn], *, owner_username: str
+    days: list[DailyReportDay],
+    columns: list[ExportColumn],
+    project_list_columns: list[ExportColumn],
+    *,
+    owner_username: str,
 ) -> bytes:
-    """Pure, blocking xlsx builder — callers must run it off the event loop."""
+    """Pure, blocking xlsx builder — callers must run it off the event loop.
+
+    `PROJECT_LIST` fields are excluded from `columns`/the main table (a
+    day with several projects cannot fit one cell) and instead rendered as
+    a real 2D sub-table appended below the main table: one titled block per
+    (day, field) that has at least one entry, with its own bold header row
+    (`项目`/`工作内容`/`完成状态`) and one data row per project entry.
+    """
     workbook = Workbook()
     sheet = workbook.active
     if sheet is None:  # pragma: no cover - a fresh Workbook() always has an active sheet
@@ -180,10 +192,12 @@ def build_export_workbook(
     header_row = 2
     sheet.append([None] * len(headers))  # row 1: title, filled in by style_report_sheet
     sheet.append(headers)  # row 2: header
+    day_snapshots: list[DayArchiveSnapshotData] = []
     for day in days:
         snapshot: DayArchiveSnapshotData = parse_day_archive_snapshot(
             day.archive_snapshot_json or ""
         )
+        day_snapshots.append(snapshot)
         entries = snapshot.entries
         row: list[str | int | float | None] = [
             day.work_date.isoformat(),
@@ -196,12 +210,47 @@ def build_export_workbook(
             ]
             row.append(_multi_source_cell(values_by_position))
         sheet.append(row)
+    last_data_row = header_row + len(days)
+
+    blocks: list[ProjectListBlockLayout] = []
+    for day, snapshot in zip(days, day_snapshots, strict=True):
+        for column in project_list_columns:
+            project_entries = [
+                item
+                for entry in snapshot.entries
+                for item in _project_list_entries(entry.content.get(column.field_key))
+            ]
+            if not project_entries:
+                continue
+            sheet.append([])  # blank row separates this block from whatever precedes it
+            sheet.append([f"{day.work_date.isoformat()} {owner_username} · {column.header}"])
+            title_row = sheet.max_row
+            sheet.append(_PROJECT_LIST_BLOCK_HEADERS)
+            block_header_row = sheet.max_row
+            for item in project_entries:
+                sheet.append(
+                    [
+                        _defuse_formula(item.project),
+                        _defuse_formula(item.content),
+                        _PROJECT_TASK_STATUS_LABELS[item.status],
+                    ]
+                )
+            blocks.append(
+                ProjectListBlockLayout(
+                    title_row=title_row,
+                    header_row=block_header_row,
+                    first_data_row=block_header_row + 1,
+                    last_data_row=sheet.max_row,
+                )
+            )
+
     style_report_sheet(
         sheet,
         header_row=header_row,
         first_data_row=header_row + 1,
-        last_data_row=header_row + len(days),
+        last_data_row=last_data_row,
         column_count=len(headers),
+        project_list_blocks=tuple(blocks),
     )
     buffer = BytesIO()
     workbook.save(buffer)
@@ -255,7 +304,12 @@ class ExportService:
             for day in days
             for entry in parse_day_archive_snapshot(day.archive_snapshot_json or "").entries
         ]
-        columns = plan_export_columns(snapshots)
+        columns = plan_export_columns(
+            snapshots, include=lambda field: field.field_type != "PROJECT_LIST"
+        )
+        project_list_columns = plan_export_columns(
+            snapshots, include=lambda field: field.field_type == "PROJECT_LIST"
+        )
 
         now = self._clock()
         job = ExportJob(
@@ -277,7 +331,11 @@ class ExportService:
         file_path = self._settings.export_temp_dir / f"{job.id}.xlsx"
         try:
             file_bytes = await asyncio.to_thread(
-                build_export_workbook, days, columns, owner_username=user.username
+                build_export_workbook,
+                days,
+                columns,
+                project_list_columns,
+                owner_username=user.username,
             )
             await asyncio.to_thread(file_path.write_bytes, file_bytes)
         except Exception:

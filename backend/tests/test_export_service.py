@@ -6,6 +6,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 from conftest import STAGE5_PASSWORD
+from openpyxl.worksheet.worksheet import Worksheet
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.config import Settings
@@ -174,6 +175,19 @@ def _workbook_path(job: ExportJob) -> Path:
     return Path(job.file_path)
 
 
+def _row_values(sheet: Worksheet, row: int) -> list[object]:
+    """Reads one row's cells, trimming the trailing `None` padding
+
+    `sheet.iter_rows()` adds once `sheet.max_column` grows past that row's
+    own real width (e.g. a 2-column main table row padded out once a
+    3-column `PROJECT_LIST` block is appended later in the same sheet).
+    """
+    values = [cell.value for cell in sheet[row]]
+    while values and values[-1] is None:
+        values.pop()
+    return values
+
+
 async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeeded(
     export_engine: AsyncEngine, export_settings: Settings
 ) -> None:
@@ -266,13 +280,15 @@ def _project_list_field(key: str, label: str) -> dict[str, object]:
     }
 
 
-async def test_create_renders_project_list_fields_grouped_by_project(
+async def test_create_excludes_project_list_from_the_main_table_and_appends_a_block_table(
     export_engine: AsyncEngine, export_settings: Settings
 ) -> None:
-    """`ai-docs/decisions.md` PROD-022: `PROJECT_LIST` cells group entries by
+    """`ai-docs/decisions.md` PROD-022 (revised): `PROJECT_LIST` is never a
 
-    project (not raw entry order) and omit completion status, per the
-    requested export format.
+    main-table cell — the field is dropped from the main header/columns and
+    instead becomes a titled 2D sub-table appended below the main table,
+    with one row per raw entry (not merged by project, since each entry
+    keeps its own independent `完成状态`).
     """
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
@@ -284,9 +300,8 @@ async def test_create_renders_project_list_fields_grouped_by_project(
             fields=[_project_list_field("k1", "今日工作")],
             content={
                 "k1": [
-                    {"project": "个人日报系统", "content": "完成Excel导出功能", "status": "DONE"},
-                    {"project": "能源管理平台", "content": "设计设备接口", "status": "DOING"},
-                    {"project": "个人日报系统", "content": "补充单元测试", "status": "DOING"},
+                    {"project": "个人日报系统", "content": "完成Excel导出优化", "status": "DONE"},
+                    {"project": "能源管理平台", "content": "设计设备接口方案", "status": "DOING"},
                 ]
             },
         )
@@ -299,23 +314,25 @@ async def test_create_renders_project_list_fields_grouped_by_project(
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    rows = list(sheet.iter_rows(values_only=True))
-    assert rows[1] == (*_BASE_HEADERS, "今日工作")
-    assert rows[2][2] == (
-        "项目:个人日报系统\n- 完成Excel导出功能\n- 补充单元测试"
-        "\n\n项目:能源管理平台\n- 设计设备接口"
-    )
+    assert _row_values(sheet, 2) == ["日期", "责任人"]  # no "今日工作" column
+    assert _row_values(sheet, 3) == ["2026-08-05", "owner"]  # one main-table data row
+    assert _row_values(sheet, 4) == []  # blank row separates the block from the main table
+    assert _row_values(sheet, 5) == ["2026-08-05 owner · 今日工作"]
+    assert _row_values(sheet, 6) == ["项目", "工作内容", "完成状态"]
+    assert _row_values(sheet, 7) == ["个人日报系统", "完成Excel导出优化", "已完成"]
+    assert _row_values(sheet, 8) == ["能源管理平台", "设计设备接口方案", "进行中"]
+    assert sheet.max_row == 8
+
+    assert sheet.cell(row=6, column=1).font.bold is True
 
 
-async def test_create_project_list_cells_cannot_become_live_formulas(
+async def test_create_defuses_formula_like_project_and_content_cells_in_a_block(
     export_engine: AsyncEngine, export_settings: Settings
 ) -> None:
-    """A `PROJECT_LIST` cell always starts with the literal "项目:" prefix, so
+    """Unlike the old single-cell-with-a-fixed-prefix rendering, `项目`/`工作内容`
 
-    even a project/content value starting with `=` cannot make the cell's
-    first character `=` and be promoted to an executable Excel formula —
-    unlike single-value text cells, which rely on `_defuse_formula`'s
-    explicit apostrophe escape for that same guarantee.
+    are now standalone cells, so each is independently at risk of Excel
+    formula promotion and must go through `_defuse_formula` on its own.
     """
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
@@ -329,7 +346,7 @@ async def test_create_project_list_cells_cannot_become_live_formulas(
                 "k1": [
                     {
                         "project": '=HYPERLINK("http://evil.example","x")',
-                        "content": "内容",
+                        "content": "=cmd|' /C calc'!A0",
                         "status": "DONE",
                     }
                 ]
@@ -344,15 +361,23 @@ async def test_create_project_list_cells_cannot_become_live_formulas(
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    rows = list(sheet.iter_rows(values_only=True))
-    assert rows[2][2] == '项目:=HYPERLINK("http://evil.example","x")\n- 内容'
-    formula_row = next(row for row in sheet.iter_rows() if row[0].value == "2026-08-05")
-    assert formula_row[2].data_type != "f"
+    assert _row_values(sheet, 7) == [
+        '\'=HYPERLINK("http://evil.example","x")',
+        "'=cmd|' /C calc'!A0",
+        "已完成",
+    ]
+    assert sheet.cell(row=7, column=1).data_type != "f"
+    assert sheet.cell(row=7, column=2).data_type != "f"
 
 
-async def test_create_numbers_project_list_values_across_multiple_sources(
+async def test_create_flattens_project_list_entries_from_every_source_into_one_block(
     export_engine: AsyncEngine, export_settings: Settings
 ) -> None:
+    """A day archived from several source entries still produces exactly one
+
+    block per field: all sources' entries appear as rows, in submission
+    order, with no `[N]`-style source numbering (unlike other field types).
+    """
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
         user = await _bootstrap_user(session)
@@ -380,8 +405,47 @@ async def test_create_numbers_project_list_values_across_multiple_sources(
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    rows = list(sheet.iter_rows(values_only=True))
-    assert rows[2][2] == "[1] 项目:项目A\n- 上午任务\n[2] 项目:项目B\n- 下午任务"
+    assert _row_values(sheet, 7) == ["项目A", "上午任务", "进行中"]
+    assert _row_values(sheet, 8) == ["项目B", "下午任务", "已完成"]
+    assert sheet.max_row == 8
+
+
+async def test_create_appends_one_block_per_day_in_main_table_order_and_skips_empty_days(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        older = await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 4),
+            fields=[_project_list_field("k1", "今日工作")],
+            content={"k1": []},
+        )
+        newer = await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 5),
+            fields=[_project_list_field("k1", "今日工作")],
+            content={"k1": [{"project": "项目A", "content": "内容A", "status": "TODO"}]},
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=[older.id, newer.id], filter_=None
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    assert _row_values(sheet, 3)[0] == "2026-08-04"
+    assert _row_values(sheet, 4)[0] == "2026-08-05"
+    # Only one block (for 2026-08-05); the empty-list 2026-08-04 day contributes none.
+    assert _row_values(sheet, 6) == ["2026-08-05 owner · 今日工作"]
+    assert _row_values(sheet, 7) == ["项目", "工作内容", "完成状态"]
+    assert _row_values(sheet, 8) == ["项目A", "内容A", "未开始"]
+    assert sheet.max_row == 8
 
 
 async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(
