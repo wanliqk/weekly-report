@@ -191,7 +191,7 @@ function updateProjectListStatus(index: number, value: unknown): void {
 
 .project-list-item {
   display: grid;
-  grid-template-columns: 1fr 2fr auto auto;
+  grid-template-columns: 1fr 2fr 1fr auto;
   align-items: start;
   gap: 8px;
 }
