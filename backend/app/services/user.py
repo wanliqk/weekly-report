@@ -55,13 +55,21 @@ def normalize_username(username: str) -> str:
 
 
 def default_template_fields() -> list[dict[str, Any]]:
+    """`今日工作内容` is not required (unlike `明日工作计划`): a user who adds a
+
+    `PROJECT_LIST` field already has a place to record today's work there,
+    so forcing this separate textarea too would be redundant
+    (`ai-docs/decisions.md` PROD-025). It stays `core_type="today_work"` —
+    still protected from deletion and still counted by the "at least one
+    core field enabled" rule — only its required default changed.
+    """
     return [
         {
             "field_key": generate_ulid(),
             "label": "今日工作内容",
             "description": "",
             "field_type": "textarea",
-            "required": True,
+            "required": False,
             "enabled": True,
             "sort_order": 10,
             "options": [],

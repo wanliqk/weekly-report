@@ -340,8 +340,17 @@ def test_project_list_field_submits_and_archives_with_multiple_entries(
 def test_submit_validates_required_fields_and_preserves_draft_on_failure(
     stage5_context: tuple[TestClient, dict[str, str], Settings],
 ) -> None:
+    """`今日工作内容` is not required by default (`ai-docs/decisions.md`
+
+    PROD-025), so an empty draft only fails on `明日工作计划`.
+    """
     client, headers, _settings = stage5_context
     report = _create(client, headers)
+    tomorrow_plan_key = next(
+        field["field_key"]
+        for field in report["template_snapshot"]
+        if field["core_type"] == "tomorrow_plan"
+    )
 
     response = client.post(
         f"/api/v1/daily-reports/{report['id']}/submit",
@@ -351,7 +360,7 @@ def test_submit_validates_required_fields_and_preserves_draft_on_failure(
 
     assert response.status_code == 422
     assert response.json()["code"] == 42201
-    assert len(response.json()["data"]["errors"]) == 2
+    assert [error["field"] for error in response.json()["data"]["errors"]] == [tomorrow_plan_key]
     assert _get(client, headers, report["id"])["status"] == "draft"
 
 
