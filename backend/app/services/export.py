@@ -35,7 +35,8 @@ EXPORT_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml
 
 _SHEET_TITLE = "日报导出"
 _MULTISELECT_SEPARATOR = "、"
-_BASE_HEADERS = ["日期", "责任人"]
+_DATE_HEADER = "日期"
+_OWNER_HEADER = "责任人"
 
 
 class ExportSelectionInvalidError(AppError):
@@ -170,6 +171,11 @@ def _project_list_entries(value: object) -> list[ProjectListEntry]:
 @dataclass(frozen=True)
 class _ColumnLayout:
     headers: list[str]
+    owner_column: int
+    """1-based column index of 责任人 — the last column, after every
+
+    template field (`ai-docs/decisions.md` PROD-026): only 日期 stays fixed
+    as the first column."""
     day_level_columns: list[int]
     """1-based column indices that hold one value per day (vertically merged
     across a day's rows when it has more than one `PROJECT_LIST` entry)."""
@@ -182,8 +188,8 @@ class _ColumnLayout:
 
 
 def _plan_column_layout(columns: list[ExportColumn]) -> _ColumnLayout:
-    headers = list(_BASE_HEADERS)
-    day_level_columns = [1, 2]
+    headers = [_DATE_HEADER]
+    day_level_columns = [1]
     regular_column_index: dict[str, int] = {}
     project_list_column_ranges: dict[str, tuple[int, int, int]] = {}
     for column in columns:
@@ -196,8 +202,12 @@ def _plan_column_layout(columns: list[ExportColumn]) -> _ColumnLayout:
             headers.append(column.header)
             day_level_columns.append(index)
             regular_column_index[column.field_key] = index
+    owner_column = len(headers) + 1
+    headers.append(_OWNER_HEADER)
+    day_level_columns.append(owner_column)
     return _ColumnLayout(
         headers=headers,
+        owner_column=owner_column,
         day_level_columns=day_level_columns,
         regular_column_index=regular_column_index,
         project_list_column_ranges=project_list_column_ranges,
@@ -252,7 +262,7 @@ def build_export_workbook(
             row: list[str | int | float | None] = [None] * len(layout.headers)
             if offset == 0:
                 row[0] = day.work_date.isoformat()
-                row[1] = owner_username
+                row[layout.owner_column - 1] = owner_username
                 for field_key, index in layout.regular_column_index.items():
                     row[index - 1] = regular_values[field_key]
             for field_key, items in project_rows.items():

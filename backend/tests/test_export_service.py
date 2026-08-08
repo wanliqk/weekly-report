@@ -30,7 +30,8 @@ from app.services.export import (
 from app.services.export_style import REPORT_TITLE
 
 _FIXED_NOW = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
-_BASE_HEADERS = ("日期", "责任人")
+_DATE_HEADER = "日期"
+_OWNER_HEADER = "责任人"
 
 
 def _past_clock() -> datetime:
@@ -223,13 +224,11 @@ async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeed
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
     assert rows[0][0] == REPORT_TITLE
-    assert rows[1] == (*_BASE_HEADERS, "今日工作内容", "明日计划", "风险")
+    assert rows[1] == (_DATE_HEADER, "今日工作内容", "明日计划", "风险", _OWNER_HEADER)
     assert rows[2][0] == "2026-08-03"
-    assert rows[2][1] == "owner"
-    assert rows[2][2:] == ("写文档", "写测试", None)
+    assert rows[2][1:] == ("写文档", "写测试", None, "owner")
     assert rows[3][0] == "2026-08-04"
-    assert rows[3][1] == "owner"
-    assert rows[3][2:] == ("评审代码", "发布", "无")
+    assert rows[3][1:] == ("评审代码", "发布", "无", "owner")
 
 
 async def test_create_merges_multiple_source_entries_for_one_day_into_numbered_lines(
@@ -260,8 +259,8 @@ async def test_create_merges_multiple_source_entries_for_one_day_into_numbered_l
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows[2][1] == "owner"
-    assert rows[2][2] == "[1] 上午写文档\n[2] 下午写测试"
+    assert rows[2][1] == "[1] 上午写文档\n[2] 下午写测试"
+    assert rows[2][2] == "owner"
 
 
 def _project_list_field(key: str, label: str) -> dict[str, object]:
@@ -341,24 +340,24 @@ async def test_create_merges_day_level_columns_across_several_project_rows(
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    assert _row_values(sheet, 2) == ["日期", "责任人", "项目", "工作内容", "进度", "明日工作计划"]
+    assert _row_values(sheet, 2) == ["日期", "项目", "工作内容", "进度", "明日工作计划", "责任人"]
     assert _row_values(sheet, 3) == [
         "2026-08-03",
-        "owner",
         "测试项目1",
         "测试测试",
         "已完成",
         "明天计划",
+        "owner",
     ]
-    assert _row_values(sheet, 4) == [None, None, "测试项目2", "测试测试", "已完成", None]
+    assert _row_values(sheet, 4) == [None, "测试项目2", "测试测试", "已完成", None, None]
     assert sheet.max_row == 4
 
     merges = _merge_ranges(sheet)
     assert "A3:A4" in merges  # 日期
-    assert "B3:B4" in merges  # 责任人
-    assert "F3:F4" in merges  # 明日工作计划
+    assert "E3:E4" in merges  # 明日工作计划
+    assert "F3:F4" in merges  # 责任人
     # 项目/工作内容/进度 vary per row and must never be merged.
-    assert not any(cell_range.startswith(("C3", "D3", "E3")) for cell_range in merges)
+    assert not any(cell_range.startswith(("B3", "C3", "D3")) for cell_range in merges)
 
 
 async def test_create_handles_a_single_project_without_merging(
@@ -384,7 +383,7 @@ async def test_create_handles_a_single_project_without_merging(
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    assert _row_values(sheet, 3) == ["2026-08-03", "owner", "测试项目1", "测试测试", "已完成"]
+    assert _row_values(sheet, 3) == ["2026-08-03", "测试项目1", "测试测试", "已完成", "owner"]
     assert sheet.max_row == 3
     # Only the title-row merge exists; no day-level merge was needed for one row.
     assert _merge_ranges(sheet) == {"A1:E1"}
@@ -416,7 +415,7 @@ async def test_create_handles_an_empty_project_list(
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    assert _row_values(sheet, 3) == ["2026-08-03", "owner", None, None, None]
+    assert _row_values(sheet, 3) == ["2026-08-03", None, None, None, "owner"]
     assert sheet.max_row == 3
     assert _merge_ranges(sheet) == {"A1:E1"}
 
@@ -456,8 +455,8 @@ async def test_create_flattens_project_list_entries_from_every_source_without_re
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    assert _row_values(sheet, 3) == ["2026-08-05", "owner", "项目A", "上午任务", "进行中"]
-    assert _row_values(sheet, 4) == [None, None, "项目B", "下午任务", "已完成"]
+    assert _row_values(sheet, 3) == ["2026-08-05", "项目A", "上午任务", "进行中", "owner"]
+    assert _row_values(sheet, 4) == [None, "项目B", "下午任务", "已完成", None]
     assert "A3:A4" in _merge_ranges(sheet)
 
 
@@ -498,13 +497,13 @@ async def test_create_defuses_formula_like_project_and_content_cells(
     assert sheet is not None
     assert _row_values(sheet, 3) == [
         "2026-08-05",
-        "owner",
         '\'=HYPERLINK("http://evil.example","x")',
         "'=cmd|' /C calc'!A0",
         "已完成",
+        "owner",
     ]
+    assert sheet.cell(row=3, column=2).data_type != "f"
     assert sheet.cell(row=3, column=3).data_type != "f"
-    assert sheet.cell(row=3, column=4).data_type != "f"
 
 
 async def test_create_merges_independently_per_day(
@@ -545,14 +544,14 @@ async def test_create_merges_independently_per_day(
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    assert _row_values(sheet, 3) == ["2026-08-04", "owner", "项目A", "内容A", "未开始"]
-    assert _row_values(sheet, 4) == ["2026-08-05", "owner", "项目B1", "内容B1", "进行中"]
-    assert _row_values(sheet, 5) == [None, None, "项目B2", "内容B2", "已完成"]
+    assert _row_values(sheet, 3) == ["2026-08-04", "项目A", "内容A", "未开始", "owner"]
+    assert _row_values(sheet, 4) == ["2026-08-05", "项目B1", "内容B1", "进行中", "owner"]
+    assert _row_values(sheet, 5) == [None, "项目B2", "内容B2", "已完成", None]
     assert sheet.max_row == 5
     merges = _merge_ranges(sheet)
     assert "A4:A5" in merges
-    assert "B4:B5" in merges
-    assert not any(cell_range.startswith(("A3", "B3")) for cell_range in merges)
+    assert "E4:E5" in merges  # 责任人
+    assert not any(cell_range.startswith(("A3", "E3")) for cell_range in merges)
 
 
 async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(
@@ -585,12 +584,12 @@ async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    formula_cell, bullet_cell = rows[2][2], rows[3][2]
+    formula_cell, bullet_cell = rows[2][1], rows[3][1]
     assert formula_cell == '\'=HYPERLINK("http://evil.example","x")'
     assert bullet_cell == "-完成需求分析\n-编写代码"
 
     formula_row = next(row for row in sheet.iter_rows() if row[0].value == "2026-08-05")
-    assert formula_row[2].data_type != "f"
+    assert formula_row[1].data_type != "f"
 
 
 async def test_create_rejects_selection_containing_foreign_or_non_archived_ids(
@@ -671,7 +670,7 @@ async def test_create_from_filter_with_no_matches_produces_header_only_workbook(
     sheet = workbook.active
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
-    assert rows == [(REPORT_TITLE, None), _BASE_HEADERS]
+    assert rows == [(REPORT_TITLE, None), (_DATE_HEADER, _OWNER_HEADER)]
 
 
 async def test_create_marks_job_failed_without_raising_when_generation_fails(
