@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import Clock, as_naive_utc, utc_now
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.core.timezone import format_shanghai, to_shanghai
+from app.core.timezone import to_shanghai
 from app.core.ulid import generate_ulid
 from app.models import DailyReportDay, ExportJob
 from app.repositories.daily_report_day import DailyReportDayRepository
@@ -34,7 +34,7 @@ EXPORT_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml
 
 _SHEET_TITLE = "日报导出"
 _MULTISELECT_SEPARATOR = "、"
-_BASE_HEADERS = ["工作日期", "来源条目数", "提交时间", "归档时间"]
+_BASE_HEADERS = ["日期", "责任人"]
 
 
 class ExportSelectionInvalidError(AppError):
@@ -146,7 +146,9 @@ def _multi_source_cell(
     return "\n".join(f"[{position}] {value}" for position, value in present)
 
 
-def build_export_workbook(days: list[DailyReportDay], columns: list[ExportColumn]) -> bytes:
+def build_export_workbook(
+    days: list[DailyReportDay], columns: list[ExportColumn], *, owner_username: str
+) -> bytes:
     """Pure, blocking xlsx builder — callers must run it off the event loop."""
     workbook = Workbook()
     sheet = workbook.active
@@ -162,17 +164,9 @@ def build_export_workbook(days: list[DailyReportDay], columns: list[ExportColumn
             day.archive_snapshot_json or ""
         )
         entries = snapshot.entries
-        submitted_times = _multi_source_cell(
-            [
-                (index + 1, format_shanghai(entry.submitted_at))
-                for index, entry in enumerate(entries)
-            ]
-        )
         row: list[str | int | float | None] = [
             day.work_date.isoformat(),
-            len(entries),
-            submitted_times,
-            format_shanghai(day.archived_at) if day.archived_at else "",
+            owner_username,
         ]
         for column in columns:
             values_by_position = [
@@ -230,6 +224,8 @@ class ExportService:
         daily_report_day_ids: list[str] | None,
         filter_: ExportFilter | None,
     ) -> ExportJob:
+        user = await self._users.get_by_id(owner_id)
+        assert user is not None
         days = await self._resolve_days(
             owner_id, daily_report_day_ids=daily_report_day_ids, filter_=filter_
         )
@@ -259,15 +255,15 @@ class ExportService:
 
         file_path = self._settings.export_temp_dir / f"{job.id}.xlsx"
         try:
-            file_bytes = await asyncio.to_thread(build_export_workbook, days, columns)
+            file_bytes = await asyncio.to_thread(
+                build_export_workbook, days, columns, owner_username=user.username
+            )
             await asyncio.to_thread(file_path.write_bytes, file_bytes)
         except Exception:
             logger.exception("export file generation failed")
             job.status = "failed"
             job.error_message = "导出文件生成失败"
         else:
-            user = await self._users.get_by_id(owner_id)
-            assert user is not None
             target_date = max((day.work_date for day in days), default=to_shanghai(now).date())
             job.status = "succeeded"
             job.file_name = _export_file_name(user.username, target_date)
