@@ -55,6 +55,39 @@ def _save(
     return cast(dict[str, Any], response.json()["data"])
 
 
+def _publish_project_list_field(
+    client: TestClient, headers: dict[str, str], *, required: bool
+) -> str:
+    """Publishes an extra `PROJECT_LIST` field and returns its `field_key`."""
+    current = client.get("/api/v1/report-templates/current", headers=headers)
+    assert current.status_code == 200
+    fields = cast(list[dict[str, Any]], current.json()["data"]["fields"])
+    fields.append(
+        {
+            "label": "今日工作",
+            "description": "",
+            "field_type": "PROJECT_LIST",
+            "required": required,
+            "enabled": True,
+            "sort_order": 100,
+            "options": [],
+        }
+    )
+    response = client.put(
+        "/api/v1/report-templates/current", headers=headers, json={"fields": fields}
+    )
+    assert response.status_code == 200, response.text
+    published_fields = cast(list[dict[str, Any]], response.json()["data"]["fields"])
+    return cast(
+        str,
+        next(
+            field["field_key"]
+            for field in published_fields
+            if field["field_type"] == "PROJECT_LIST"
+        ),
+    )
+
+
 def _create_user_headers(client: TestClient, admin_headers: dict[str, str]) -> dict[str, str]:
     create = client.post(
         "/api/v1/users",
@@ -202,6 +235,106 @@ def test_draft_save_rejects_unknown_and_wrongly_typed_fields(
         )
         assert response.status_code == 422
         assert response.json()["code"] == 42201
+
+
+def test_project_list_field_round_trips_valid_entries(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    """`ai-docs/decisions.md` PROD-022: saved/reloaded `PROJECT_LIST` values
+
+    keep their `{project,content,status}` shape byte-for-byte.
+    """
+    client, headers, _settings = stage5_context
+    field_key = _publish_project_list_field(client, headers, required=False)
+    report = _create(client, headers)
+    entries = [
+        {"project": "个人日报系统", "content": "完成Excel导出功能", "status": "DONE"},
+        {"project": "能源管理平台", "content": "设计设备接口", "status": "DOING"},
+    ]
+
+    saved = _save(client, headers, report, {field_key: entries})
+
+    assert saved["content"][field_key] == entries
+    assert _get(client, headers, report["id"])["content"][field_key] == entries
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        "not-a-list",
+        [{"project": "", "content": "内容", "status": "DONE"}],
+        [{"project": "项目", "content": "   ", "status": "DONE"}],
+        [{"project": "项目", "content": "内容", "status": "UNKNOWN"}],
+        [{"project": "项目", "content": "内容"}],
+        [{"project": "项目", "content": "内容", "status": "DONE", "extra": "不该存在"}],
+    ],
+)
+def test_project_list_field_rejects_malformed_entries(
+    stage5_context: tuple[TestClient, dict[str, str], Settings], entries: object
+) -> None:
+    client, headers, _settings = stage5_context
+    field_key = _publish_project_list_field(client, headers, required=False)
+    report = _create(client, headers)
+
+    response = client.patch(
+        f"/api/v1/daily-reports/{report['id']}",
+        headers=headers,
+        json={"version": report["version"], "content": {field_key: entries}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 42201
+
+
+def test_project_list_required_field_blocks_submit_when_empty(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    field_key = _publish_project_list_field(client, headers, required=True)
+    report = _create(client, headers)
+    content = _default_content(report)
+    content[field_key] = []
+    saved = _save(client, headers, report, content)
+
+    response = client.post(
+        f"/api/v1/daily-reports/{report['id']}/submit",
+        headers=headers,
+        json={"version": saved["version"]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 42201
+
+
+def test_project_list_field_submits_and_archives_with_multiple_entries(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    field_key = _publish_project_list_field(client, headers, required=True)
+    report = _create(client, headers)
+    content = _default_content(report)
+    entries = [
+        {"project": "个人日报系统", "content": "完成Excel导出功能", "status": "DONE"},
+        {"project": "能源管理平台", "content": "设计设备接口", "status": "DOING"},
+    ]
+    content[field_key] = entries
+    saved = _save(client, headers, report, content)
+
+    submitted = client.post(
+        f"/api/v1/daily-reports/{report['id']}/submit",
+        headers=headers,
+        json={"version": saved["version"]},
+    )
+    assert submitted.status_code == 200, submitted.text
+
+    archived = client.post(
+        "/api/v1/daily-report-days/2026-08-05/archive",
+        headers=headers,
+        json={"confirm_archive": True},
+    )
+    assert archived.status_code == 200, archived.text
+    snapshot_entries = archived.json()["data"]["archive_snapshot"]["entries"]
+    assert snapshot_entries[0]["content"][field_key] == entries
 
 
 def test_submit_validates_required_fields_and_preserves_draft_on_failure(

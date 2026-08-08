@@ -1,5 +1,7 @@
 import { ApiError } from '../api/client'
+import type { ProjectListEntry } from '../types/daily-report'
 import { todayInShanghai } from './daily-form'
+import { formatProjectListEntries, isProjectListArray } from './template-fields'
 
 const MULTISELECT_SEPARATOR = '、'
 
@@ -39,12 +41,19 @@ export function existingWeeklyReportId(error: unknown): string | null {
   return typeof data.existing_weekly_report_id === 'string' ? data.existing_weekly_report_id : null
 }
 
-export function formatWeeklyFieldValue(value: string | number | string[] | null): string {
+export function formatWeeklyFieldValue(
+  value: string | number | string[] | ProjectListEntry[] | null
+): string {
   if (value === null) {
     return '—'
   }
   if (Array.isArray(value)) {
-    return value.length > 0 ? value.join(MULTISELECT_SEPARATOR) : '—'
+    if (value.length === 0) {
+      return '—'
+    }
+    return isProjectListArray(value)
+      ? formatProjectListEntries(value)
+      : value.join(MULTISELECT_SEPARATOR)
   }
   return String(value)
 }

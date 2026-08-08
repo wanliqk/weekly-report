@@ -77,4 +77,13 @@ describe('formatWeeklyFieldValue', () => {
   it('passes a plain string through unchanged', () => {
     expect(formatWeeklyFieldValue('完成开发')).toBe('完成开发')
   })
+
+  it('formats a PROJECT_LIST source value as project/content/status pairs', () => {
+    expect(
+      formatWeeklyFieldValue([
+        { project: '个人日报系统', content: '完成Excel导出功能', status: 'DONE' },
+        { project: '能源管理平台', content: '设计设备接口', status: 'DOING' }
+      ])
+    ).toBe('个人日报系统：完成Excel导出功能（已完成）；能源管理平台：设计设备接口（进行中）')
+  })
 })

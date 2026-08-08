@@ -21,6 +21,7 @@ from app.models import DailyReportDay, ExportJob
 from app.repositories.daily_report_day import DailyReportDayRepository
 from app.repositories.export_job import ExportJobRepository
 from app.repositories.user import UserRepository
+from app.schemas.daily_report import ProjectListEntry
 from app.schemas.daily_report_day import DayArchiveSnapshotData
 from app.schemas.export import ExportFilter
 from app.schemas.template import TemplateFieldData
@@ -112,10 +113,30 @@ def _defuse_formula(text: str) -> str:
     return f"'{text}" if text.startswith("=") else text
 
 
+def _format_project_list(entries: list[ProjectListEntry]) -> str:
+    """Renders a `PROJECT_LIST` value as project-grouped bullet text.
+
+    Groups entries by project name (first-appearance order) instead of
+    listing them in raw entry order, so repeated work on the same project
+    within one report reads as one block; completion status is
+    intentionally omitted from the export, matching the requested format.
+    """
+    groups: dict[str, list[str]] = {}
+    for entry in entries:
+        groups.setdefault(entry.project, []).append(entry.content)
+    blocks = [
+        "\n".join([f"项目:{project}", *(f"- {line}" for line in lines)])
+        for project, lines in groups.items()
+    ]
+    return _defuse_formula("\n\n".join(blocks))
+
+
 def _single_source_cell(value: object) -> str | int | float | None:
     if value is None:
         return None
     if isinstance(value, list):
+        if value and isinstance(value[0], ProjectListEntry):
+            return _format_project_list(value)
         return _defuse_formula(_MULTISELECT_SEPARATOR.join(str(item) for item in value))
     if isinstance(value, bool):
         return str(value)

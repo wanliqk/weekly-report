@@ -110,6 +110,12 @@ def test_core_fields_cannot_be_removed_or_all_disabled(
             "sort_order": 30,
             "options": ["开发", " 开发 "],
         },
+        {
+            "label": "项目列表不支持选项",
+            "field_type": "PROJECT_LIST",
+            "sort_order": 30,
+            "options": ["不该存在"],
+        },
     ],
 )
 def test_template_field_options_are_validated(
@@ -134,6 +140,39 @@ def test_template_field_options_are_validated(
     )
     assert response.status_code == 400
     assert response.json()["code"] == 40001
+
+
+def test_project_list_field_publishes_without_options(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    """`ai-docs/decisions.md` PROD-022: `PROJECT_LIST` reuses the existing
+
+    "non-select types must not carry options" rule, so it needs no dedicated
+    validation branch in `services/template.py`.
+    """
+    client, headers, _settings = stage5_context
+    current_fields = cast(list[dict[str, Any]], _current(client, headers)["fields"])
+
+    published = _publish(
+        client,
+        headers,
+        [
+            *current_fields,
+            {
+                "label": "今日工作",
+                "description": "",
+                "field_type": "PROJECT_LIST",
+                "required": True,
+                "enabled": True,
+                "sort_order": 30,
+                "options": [],
+            },
+        ],
+    )
+
+    published_fields = cast(list[dict[str, Any]], published["fields"])
+    assert published_fields[-1]["field_type"] == "PROJECT_LIST"
+    assert published_fields[-1]["options"] == []
 
 
 def test_template_requires_authentication(

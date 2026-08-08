@@ -1,9 +1,9 @@
-import type { DailyStatus } from './daily-report'
+import type { DailyStatus, ProjectListEntry } from './daily-report'
 
 export interface WeeklyDayField {
   field_key: string
   label: string
-  value: string | number | string[] | null
+  value: string | number | string[] | ProjectListEntry[] | null
 }
 
 export interface WeeklyDayEntry {

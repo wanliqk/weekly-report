@@ -1,3 +1,4 @@
+import type { DailyFieldValue, ProjectListEntry, ProjectTaskStatus } from '../types/daily-report'
 import type {
   TemplateCoreType,
   TemplateFieldData,
@@ -6,6 +7,28 @@ import type {
 } from '../types/template'
 
 let draftSequence = 0
+
+const PROJECT_TASK_STATUS_LABELS: Record<ProjectTaskStatus, string> = {
+  TODO: '未开始',
+  DOING: '进行中',
+  DONE: '已完成'
+}
+
+export function projectTaskStatusLabel(status: ProjectTaskStatus): string {
+  return PROJECT_TASK_STATUS_LABELS[status]
+}
+
+export function isProjectListArray(value: unknown[]): value is ProjectListEntry[] {
+  return value.every(
+    (item) => typeof item === 'object' && item !== null && 'project' in item && 'content' in item
+  )
+}
+
+export function formatProjectListEntries(entries: ProjectListEntry[]): string {
+  return entries
+    .map((entry) => `${entry.project}：${entry.content}（${projectTaskStatusLabel(entry.status)}）`)
+    .join('；')
+}
 
 export interface TemplateFieldDraft {
   client_key: string
@@ -100,8 +123,8 @@ export function usesOptions(fieldType: TemplateFieldType): boolean {
   return fieldType === 'select' || fieldType === 'multiselect'
 }
 
-export function emptyFieldValue(fieldType: TemplateFieldType): string | number | string[] | null {
-  if (fieldType === 'multiselect') {
+export function emptyFieldValue(fieldType: TemplateFieldType): DailyFieldValue {
+  if (fieldType === 'multiselect' || fieldType === 'PROJECT_LIST') {
     return []
   }
   if (fieldType === 'number') {

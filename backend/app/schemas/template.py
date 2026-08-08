@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_serializer, field_validator
 
-FieldType = Literal["text", "textarea", "number", "date", "select", "multiselect"]
+FieldType = Literal["text", "textarea", "number", "date", "select", "multiselect", "PROJECT_LIST"]
 CoreType = Literal["today_work", "tomorrow_plan"]
 
 

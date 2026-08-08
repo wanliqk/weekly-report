@@ -6,7 +6,23 @@ from pydantic import BaseModel, Field, field_serializer, field_validator
 from app.schemas.template import TemplateFieldData
 
 DailyStatus = Literal["draft", "submitted", "archived"]
-type DailyFieldValue = str | int | float | list[str] | None
+ProjectTaskStatus = Literal["TODO", "DOING", "DONE"]
+
+
+class ProjectListEntry(BaseModel):
+    """One row of a `PROJECT_LIST` field (`ai-docs/decisions.md` PROD-022).
+
+    Completion status is a fixed three-state enum, unlike `select`/
+    `multiselect` whose choices come from the template field's own
+    `options`; a project entry's status is not template-configurable.
+    """
+
+    project: str
+    content: str
+    status: ProjectTaskStatus
+
+
+type DailyFieldValue = str | int | float | list[str] | list[ProjectListEntry] | None
 type DailyContent = dict[str, DailyFieldValue]
 type DailyInputContent = dict[str, object]
 

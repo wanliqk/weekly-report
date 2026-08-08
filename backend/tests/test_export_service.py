@@ -88,7 +88,7 @@ async def _default_template_version_id(session: AsyncSession, owner_id: str) -> 
 
 
 def _snapshot(
-    *, work_date: date, entries: list[tuple[str, list[dict[str, object]], dict[str, str]]]
+    *, work_date: date, entries: list[tuple[str, list[dict[str, object]], dict[str, object]]]
 ) -> str:
     return json.dumps(
         {
@@ -115,7 +115,7 @@ async def _archived_day(
     owner_id: str,
     work_date: date,
     fields: list[dict[str, object]],
-    content: dict[str, str],
+    content: dict[str, object],
 ) -> DailyReportDay:
     return await _archived_day_multi(
         session, owner_id=owner_id, work_date=work_date, entries=[(fields, content)]
@@ -127,7 +127,7 @@ async def _archived_day_multi(
     *,
     owner_id: str,
     work_date: date,
-    entries: list[tuple[list[dict[str, object]], dict[str, str]]],
+    entries: list[tuple[list[dict[str, object]], dict[str, object]]],
 ) -> DailyReportDay:
     await _default_template_version_id(session, owner_id)  # ensures template exists
     entry_ids = [generate_ulid() for _ in entries]
@@ -250,6 +250,138 @@ async def test_create_merges_multiple_source_entries_for_one_day_into_numbered_l
     rows = list(sheet.iter_rows(values_only=True))
     assert rows[2][1] == "owner"
     assert rows[2][2] == "[1] 上午写文档\n[2] 下午写测试"
+
+
+def _project_list_field(key: str, label: str) -> dict[str, object]:
+    return {
+        "field_key": key,
+        "label": label,
+        "description": "",
+        "field_type": "PROJECT_LIST",
+        "required": False,
+        "enabled": True,
+        "sort_order": 0,
+        "options": [],
+        "core_type": None,
+    }
+
+
+async def test_create_renders_project_list_fields_grouped_by_project(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """`ai-docs/decisions.md` PROD-022: `PROJECT_LIST` cells group entries by
+
+    project (not raw entry order) and omit completion status, per the
+    requested export format.
+    """
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 5),
+            fields=[_project_list_field("k1", "今日工作")],
+            content={
+                "k1": [
+                    {"project": "个人日报系统", "content": "完成Excel导出功能", "status": "DONE"},
+                    {"project": "能源管理平台", "content": "设计设备接口", "status": "DOING"},
+                    {"project": "个人日报系统", "content": "补充单元测试", "status": "DOING"},
+                ]
+            },
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    rows = list(sheet.iter_rows(values_only=True))
+    assert rows[1] == (*_BASE_HEADERS, "今日工作")
+    assert rows[2][2] == (
+        "项目:个人日报系统\n- 完成Excel导出功能\n- 补充单元测试"
+        "\n\n项目:能源管理平台\n- 设计设备接口"
+    )
+
+
+async def test_create_project_list_cells_cannot_become_live_formulas(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """A `PROJECT_LIST` cell always starts with the literal "项目:" prefix, so
+
+    even a project/content value starting with `=` cannot make the cell's
+    first character `=` and be promoted to an executable Excel formula —
+    unlike single-value text cells, which rely on `_defuse_formula`'s
+    explicit apostrophe escape for that same guarantee.
+    """
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 5),
+            fields=[_project_list_field("k1", "今日工作")],
+            content={
+                "k1": [
+                    {
+                        "project": '=HYPERLINK("http://evil.example","x")',
+                        "content": "内容",
+                        "status": "DONE",
+                    }
+                ]
+            },
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    rows = list(sheet.iter_rows(values_only=True))
+    assert rows[2][2] == '项目:=HYPERLINK("http://evil.example","x")\n- 内容'
+    formula_row = next(row for row in sheet.iter_rows() if row[0].value == "2026-08-05")
+    assert formula_row[2].data_type != "f"
+
+
+async def test_create_numbers_project_list_values_across_multiple_sources(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        day = await _archived_day_multi(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 5),
+            entries=[
+                (
+                    [_project_list_field("k1", "今日工作")],
+                    {"k1": [{"project": "项目A", "content": "上午任务", "status": "DOING"}]},
+                ),
+                (
+                    [_project_list_field("k1", "今日工作")],
+                    {"k1": [{"project": "项目B", "content": "下午任务", "status": "DONE"}]},
+                ),
+            ],
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=[day.id], filter_=None
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    rows = list(sheet.iter_rows(values_only=True))
+    assert rows[2][2] == "[1] 项目:项目A\n- 上午任务\n[2] 项目:项目B\n- 下午任务"
 
 
 async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(

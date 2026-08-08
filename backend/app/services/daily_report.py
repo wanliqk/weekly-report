@@ -14,13 +14,15 @@ from app.models import AdminAuditEvent, DailyReport, DailyReportDay
 from app.repositories.admin_audit import AdminAuditRepository
 from app.repositories.daily_report import DailyReportRepository
 from app.repositories.daily_report_day import DailyReportDayRepository
-from app.schemas.daily_report import DailyContent, DailyInputContent
+from app.schemas.daily_report import DailyContent, DailyInputContent, ProjectListEntry
 from app.schemas.template import TemplateFieldData
 from app.services.template import TemplateService, parse_template_fields
 
 _CONTENT_ADAPTER: TypeAdapter[DailyContent] = TypeAdapter(DailyContent)
 _MAX_CREATE_ATTEMPTS = 3
 _REVOCATION_ACTION = "daily_submission_revoked"
+_PROJECT_LIST_STATUSES = {"TODO", "DOING", "DONE"}
+_PROJECT_LIST_KEYS = {"project", "content", "status"}
 
 
 class DailyReportNotFoundError(AppError):
@@ -93,7 +95,36 @@ def _value_error(field: TemplateFieldData, value: object) -> str | None:
         if len(set(value)) != len(value) or any(item not in field.options for item in value):
             return "包含重复或无效选项"
         return None
+    if field.field_type == "PROJECT_LIST":
+        return _project_list_error(value)
     return "字段类型不受支持"
+
+
+def _project_list_error(value: object) -> str | None:
+    """Validates a `PROJECT_LIST` value in either of its two shapes.
+
+    `save()` passes the raw dict straight from the request JSON, but
+    `submit()` re-validates content re-read via `parse_daily_content()`,
+    which has already coerced matching list items into `ProjectListEntry`
+    model instances (see `DailyFieldValue`'s `list[ProjectListEntry]`
+    branch) — so both forms must be accepted here.
+    """
+    if not isinstance(value, list):
+        return "必须是项目列表"
+    for item in value:
+        if isinstance(item, ProjectListEntry):
+            project, content, status = item.project, item.content, item.status
+        elif isinstance(item, dict) and item.keys() == _PROJECT_LIST_KEYS:
+            project, content, status = item["project"], item["content"], item["status"]
+        else:
+            return "项目条目字段不完整或包含未知字段"
+        if not isinstance(project, str) or not project.strip():
+            return "项目名称不能为空"
+        if not isinstance(content, str) or not content.strip():
+            return "工作内容不能为空"
+        if status not in _PROJECT_LIST_STATUSES:
+            return "完成状态无效"
+    return None
 
 
 def _is_empty(value: object) -> bool:

@@ -1,4 +1,11 @@
-export type TemplateFieldType = 'text' | 'textarea' | 'number' | 'date' | 'select' | 'multiselect'
+export type TemplateFieldType =
+  | 'text'
+  | 'textarea'
+  | 'number'
+  | 'date'
+  | 'select'
+  | 'multiselect'
+  | 'PROJECT_LIST'
 
 export type TemplateCoreType = 'today_work' | 'tomorrow_plan'
 

@@ -21,7 +21,8 @@ const fieldTypeOptions: Array<{ value: TemplateFieldType; label: string }> = [
   { value: 'number', label: '数字' },
   { value: 'date', label: '日期' },
   { value: 'select', label: '单选' },
-  { value: 'multiselect', label: '多选' }
+  { value: 'multiselect', label: '多选' },
+  { value: 'PROJECT_LIST', label: '项目列表' }
 ]
 
 const loading = ref(true)

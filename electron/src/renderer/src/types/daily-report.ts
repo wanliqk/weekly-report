@@ -1,7 +1,16 @@
 import type { TemplateFieldData } from './template'
 
 export type DailyStatus = 'draft' | 'submitted' | 'archived'
-export type DailyFieldValue = string | number | string[] | null
+export type ProjectTaskStatus = 'TODO' | 'DOING' | 'DONE'
+
+/** One row of a `PROJECT_LIST` field (`ai-docs/decisions.md` PROD-022). */
+export interface ProjectListEntry {
+  project: string
+  content: string
+  status: ProjectTaskStatus
+}
+
+export type DailyFieldValue = string | number | string[] | ProjectListEntry[] | null
 export type DailyContent = Record<string, DailyFieldValue>
 
 export interface DailyRevocationData {

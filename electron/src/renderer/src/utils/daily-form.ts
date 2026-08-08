@@ -1,7 +1,7 @@
 import { ApiError } from '../api/client'
 import type { DailyContent, DailyFieldValue, DailyStatus } from '../types/daily-report'
 import type { TemplateFieldData } from '../types/template'
-import { emptyFieldValue } from './template-fields'
+import { emptyFieldValue, formatProjectListEntries, isProjectListArray } from './template-fields'
 
 interface FieldErrorData {
   errors: Array<{ field: string; message: string }>
@@ -63,13 +63,19 @@ export function formatDailyFieldValue(value: DailyFieldValue): string {
     return '—'
   }
   if (Array.isArray(value)) {
-    return value.length > 0 ? value.join('、') : '—'
+    if (value.length === 0) {
+      return '—'
+    }
+    return isProjectListArray(value) ? formatProjectListEntries(value) : value.join('、')
   }
   return String(value)
 }
 
 function cloneDailyValue(value: DailyFieldValue | undefined): DailyFieldValue {
-  return Array.isArray(value) ? [...value] : (value ?? null)
+  if (!Array.isArray(value)) {
+    return value ?? null
+  }
+  return isProjectListArray(value) ? value.map((item) => ({ ...item })) : [...value]
 }
 
 function isFieldErrorData(value: unknown): value is FieldErrorData {

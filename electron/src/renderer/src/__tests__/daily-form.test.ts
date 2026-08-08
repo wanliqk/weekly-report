@@ -45,20 +45,46 @@ const fields: TemplateFieldData[] = [
     sort_order: 2,
     options: [],
     core_type: null
+  },
+  {
+    field_key: 'project-key',
+    label: '今日工作',
+    description: '',
+    field_type: 'PROJECT_LIST',
+    required: false,
+    enabled: true,
+    sort_order: 3,
+    options: [],
+    core_type: null
   }
 ]
 
 describe('daily form helpers', () => {
   it('builds editable content only from enabled snapshot fields', () => {
     const originalTags = ['A']
+    const originalProjects = [
+      { project: '个人日报系统', content: '完成导出', status: 'DONE' as const }
+    ]
     const content = initializeDailyContent(fields, {
       'text-key': '完成接口',
       'multi-key': originalTags,
-      'disabled-key': '不可见'
+      'disabled-key': '不可见',
+      'project-key': originalProjects
     })
 
-    expect(content).toEqual({ 'text-key': '完成接口', 'multi-key': ['A'] })
+    expect(content).toEqual({
+      'text-key': '完成接口',
+      'multi-key': ['A'],
+      'project-key': originalProjects
+    })
     expect(content['multi-key']).not.toBe(originalTags)
+    expect(content['project-key']).not.toBe(originalProjects)
+    expect((content['project-key'] as typeof originalProjects)[0]).not.toBe(originalProjects[0])
+  })
+
+  it('defaults a missing PROJECT_LIST field to an empty, independently-mutable list', () => {
+    const content = initializeDailyContent(fields, { 'text-key': '完成接口' })
+    expect(content['project-key']).toEqual([])
   })
 
   it('maps business validation errors back to their fields', () => {
@@ -89,5 +115,10 @@ describe('daily form helpers', () => {
     expect(formatDailyFieldValue(['开发', '评审'])).toBe('开发、评审')
     expect(formatDailyFieldValue(2.5)).toBe('2.5')
     expect(formatDailyFieldValue('完成开发')).toBe('完成开发')
+    expect(
+      formatDailyFieldValue([
+        { project: '个人日报系统', content: '完成Excel导出功能', status: 'DONE' }
+      ])
+    ).toBe('个人日报系统：完成Excel导出功能（已完成）')
   })
 })
