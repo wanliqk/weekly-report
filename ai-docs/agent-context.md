@@ -58,15 +58,16 @@
 - `build/sidecar/` 已是真实产物目录，不再是占位。
 - 2026-08-07 已完成 CR-20260807-01 的需求确认和技术方案编写：提出日期容器 1:n 条目、日期级正式快照/归档事务、admin 最小元数据撤销与脱敏审计、固定 admin/强制改密、安全删除、自然日统计、V1 迁移/受限 downgrade、周报/导出适配和 Electron 路由；`BE-10A`（迁移与认证基线）、`BE-10B`（日报聚合、管理员撤销与用户安全删除）、`BE-10C`（周报、导出与统计适配）均已实现、自测、质量门禁与独立安全审查通过。BE-10B 落地后启动 BE-10C 前发现并修正五处响应契约与 `docs/方案设计.md` 的偏差（ISS-023，已 RESOLVED），教训是字段级契约必须核对方案原文而非仅依赖 `ai-docs/` 摘要。`FE-10`（第二版 Electron/Vue 界面：强制改密路由、我的日报月历+日期级归档、我的周报多来源展示、统计页、管理员日报管理/用户删除、设置收口、日历页导出入口）已实现、自测、质量门禁通过并经真实 Electron 冒烟验证；实现过程中发现并当场修正一处自查缺口——重写"我的日报"为日历视图时最初遗漏了导出入口，已补回“导出本月已归档日报”/“导出当天正式日报”并用真实生成的 xlsx 文件验证。`QA-10`（端到端验收）已完成：迁移覆盖复核（确认既有 fixture 测试已满足要求）、Playwright E2E 套件全面重写为第二版形状（含扩写的主链路 `primary-path.spec.ts` 和新增的 `user-deletion.spec.ts`，连续 3 次全量重跑 100% 通过）、真实生产打包（PyInstaller+electron-builder）与真实安装/升级/卸载验证（含一次意外但真实的"已安装环境下 V1→V2 升级"验证，源自阶段 9 遗留的真实数据，记为 `ISS-025`）。CR-20260807-01 第二版增量至此全部交付完毕，后端与 Electron/Vue 界面均已全部是第二版并经端到端验证。
 
-- 2026-08-08 已完成 CR-20260808-02 的 `WECOM-01` 文档阶段：企业微信反向同步将以本人已归档日期正式快照为唯一来源，采用 Electron Main 安全登录/`safeStorage` 凭证、FastAPI Mapper/Sync Service/内部协议 Client、三张非敏感元数据表、Main-only secret 和保守 `uncertain` 状态。代码尚未实现，用户提供的真实协议样例仍是未跟踪敏感资料。
+- 2026-08-08 已完成 CR-20260808-02 的 `WECOM-01` 文档阶段：企业微信反向同步将以本人已归档日期正式快照为唯一来源，采用 Electron Main 安全登录/`safeStorage` 凭证、FastAPI Mapper/Sync Service/内部协议 Client、三张非敏感元数据表、Main-only secret 和保守 `uncertain` 状态。代码尚未实现。
+- 2026-08-08 已完成 `WECOM-00` 敏感样例治理（ISS-028 已 RESOLVED）：根 `.gitignore` 新增精确规则把用户提供的真实资料目录 `backend/wx-ribao/`（真实抓包 + 含真实 `journaluuid` 的参考脚本）整体排除，`git status --ignored` 确认已生效且原始文件未被改动；新增 `backend/tests/fixtures/wecom/` 四份全合成协议 fixture 供后续 Client 契约测试使用；新增 `backend/tests/test_wecom_fixture_hygiene.py` 作为可复跑敏感扫描，已用正向注入真实姓名验证过其真实生效而非空跑通过。后端 `ruff check`/`mypy`（strict，125 个源文件）/`pytest`（306 项收集，直接重定向运行 exit code 0 全部通过；两次复现已知非阻塞的 `ISS-013`）均已实际执行并通过。企业微信业务代码（数据基础、登录、协议 Client 等）仍未开始，`wecom_sync` 仍为 `false`。
 
 “依赖已列入清单”不等于对应业务已完成；“技术方案已描述”也不等于已经落地。
 
 ## 5. 当前阶段与下一步
 
 - 已完成阶段：工程基线（`3a9fdbc`）、Desktop Bootstrap（`7386cae`）、数据基础与 API Foundation（`8480515`）、认证与用户管理（`1a50e75`）、模板、设置与日报闭环（`1d965fe`）、查询导出与桌面保存（`d6ab86e`）、周报闭环（`346b0ea`）、设置能力与受控备份（`00caa33`）、质量与发布（`0148171`）。
-- 当前阶段：CR-20260808-02 已完成 `WECOM-01` 文档设计；企业微信代码仍未实现，旧占位保持有效。
-- 下一步：`WECOM-00` 敏感样例治理；完成前不得开始数据库、登录或接口 Client 实现。
+- 当前阶段：CR-20260808-02 已完成 `WECOM-01` 文档设计和 `WECOM-00` 敏感样例治理；企业微信业务代码仍未实现，旧占位保持有效。
+- 下一步：`WECOM-02`（企业微信数据基础）与 `WECOM-03`（Electron 登录与凭证桥）依赖已满足，可并行领取；测试一律使用 `backend/tests/fixtures/wecom/` 的合成 fixture，不得读取或依赖已被 `.gitignore` 排除的 `backend/wx-ribao/`。
 - 未获用户明确授权，不得推送远端。
 
 具体任务编号、依赖和状态以 `ai-docs/task.md` 为准；完成事实以 `ai-docs/progress.md` 为准。

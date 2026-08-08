@@ -45,6 +45,11 @@ build/sidecar/
 build/_pyinstaller-dist/
 build/_pyinstaller-work/
 
+# ---- 企业微信同步敏感样例（WECOM-00，ISS-028） ----
+# 用户提供的真实协议样例（Cookie、账号标识、日报正文），仅供本地分析参考，
+# 精确忽略整个目录，永不进入 Git；测试改用 backend/tests/fixtures/wecom/ 下的全合成 fixture。
+backend/wx-ribao/
+
 # ---- OS / 编辑器 ----
 .DS_Store
 Thumbs.db

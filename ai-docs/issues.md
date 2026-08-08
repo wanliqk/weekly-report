@@ -37,7 +37,8 @@
 
 | ISS-026 | P1 | MITIGATED | CR-20260808-02 的企业微信真实同步与既有“只占位、零外部请求”文档/实现冲突 | `docs/需求理解.md` 和 `docs/方案设计.md` 已用第三版增量明确覆盖后续范围，并保留“代码交付前仍占位”的过渡状态；AI 上下文已同步 | `WECOM-08` 全链路完成且 capability 切换后才能 RESOLVED |
 | ISS-027 | P1 | OPEN | 企业微信日报使用非官方内部接口，协议、Cookie、风控或条款可能变化 | 若变化，可能导致认证失效、模板解析失败、重复提交风险或功能不可用；不得以猜测字段绕过 | `WECOM-04` 契约隔离与 fixture 测试，`WECOM-08` 受控测试账号真实冒烟；发布前确认组织制度/相关条款 |
-| ISS-028 | P0 | OPEN | `backend/wx-ribao/http_raw_request.txt` 和 `http_raw_response.txt` 是用户提供的真实协议样例，存在 Cookie、账号标识和日报正文被误提交/打包的风险 | 当前目录未跟踪，本文档阶段不修改原始资料；任何实现前不得暂存该目录或输出其内容 | `WECOM-00` 先建立精确忽略规则、全合成脱敏 fixture 和敏感扫描；必要时由资料提供方更新/失效相关会话 |
+| ISS-028 | P0 | RESOLVED | `backend/wx-ribao/http_raw_request.txt`、`http_raw_response.txt` 和参考脚本 `wx-ribao.py`（其硬编码 URL 内含真实 `journaluuid`）是用户提供的真实协议样例，存在 Cookie、账号标识和日报正文被误提交/打包的风险 | `WECOM-00` 已实现：根 `.gitignore` 新增 `backend/wx-ribao/` 精确忽略规则（`git status --ignored` 确认为 `!!`）；`backend/tests/fixtures/wecom/` 新增四份全合成 fixture 替代原始样例供后续 Client 契约测试使用；`backend/tests/test_wecom_fixture_hygiene.py` 新增可复跑敏感扫描（本机存在原始样例时动态比对 Cookie/姓名/标识/正文取值，已用正向注入验证扫描逻辑真实生效）；原始三份文件本身未被修改、未被暂存、未被读入任何已提交文档 | `WECOM-00` 已交付；`WECOM-02` 起的真实数据/协议/凭证实现仍须继续遵守“测试只用合成 fixture”的约束 |
+| ISS-029 | P3 | OPEN | `uv run ruff format --check .` 报告 `backend/app/services/export_style.py` 需要重新格式化 | `WECOM-00` 会话中执行门禁时发现；`git status` 确认该文件本次会话未被改动，判断是更早提交（可能是 `150d20f`）遗留未跑 format 门禁所致，与本次改动无关；未顺手修改以避免把无关格式改动混入 `WECOM-00` 阶段提交 | 后续任意触碰该文件的阶段顺手执行 `uv run ruff format .` 修复；非阻塞，不影响任何测试或运行时行为 |
 
 ## 2. 非阻塞产品/发布风险
 

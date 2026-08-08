@@ -1,0 +1,159 @@
+{
+  "head": {
+    "ret": 0,
+    "cgi": "xmformcollogicsvr/answer_page",
+    "time": 1700000000,
+    "msg": ""
+  },
+  "param": {
+    "protocol": "http",
+    "hostname": "doc.weixin.qq.com",
+    "sid": "SYNTHETIC_WEDOC_SID_0000000000"
+  },
+  "body": {
+    "form": {
+      "form_id": "SYNTHETIC-FORM-0000000000000000000fork",
+      "title": "日报",
+      "create_vid": 9000000000000001,
+      "create_name": "陈静",
+      "ctime": 1700000000,
+      "mtime": 1700000100,
+      "fill_cnt": 0,
+      "total_cnt": 0,
+      "question": {
+        "items": [
+          {
+            "question_id": 1000000001,
+            "title": "日期",
+            "pos": 1,
+            "status": 1,
+            "reply_type": 11,
+            "must_reply": false,
+            "note": "",
+            "ext": {
+              "qdata_format": "yyyy\"年\"m\"月\"d\"日\"",
+              "qdata_sub_type": "date"
+            }
+          },
+          {
+            "question_id": 1000000002,
+            "title": "今日工作",
+            "pos": 2,
+            "status": 1,
+            "reply_type": 1,
+            "must_reply": true,
+            "note": "",
+            "ext": {
+              "question_descriptor": {"simpleFirstIndex": 0, "simpleSecondIndex": 1},
+              "validate": [{"type": 1}]
+            }
+          },
+          {
+            "question_id": 1000000003,
+            "title": "明日计划",
+            "pos": 3,
+            "status": 1,
+            "reply_type": 1,
+            "must_reply": true,
+            "ext": {
+              "question_descriptor": {"simpleFirstIndex": 0, "simpleSecondIndex": 1},
+              "validate": [{"type": 1}]
+            }
+          },
+          {
+            "question_id": 1000000004,
+            "title": "其他事项",
+            "pos": 4,
+            "status": 1,
+            "reply_type": 1,
+            "must_reply": false,
+            "note": "",
+            "ext": {
+              "question_descriptor": {"simpleFirstIndex": 0, "simpleSecondIndex": 1}
+            }
+          },
+          {
+            "question_id": 1000000005,
+            "title": "附件",
+            "pos": 5,
+            "status": 1,
+            "reply_type": 10,
+            "must_reply": false,
+            "note": "",
+            "ext": {
+              "upload_file_info": {
+                "receive_vid": 9000000000000001,
+                "receive_space_id": "i.9000000000000000.9000000000000001"
+              },
+              "qdata_file_num": {"type": 2, "max": 9},
+              "qdata_camera_only": false
+            }
+          }
+        ]
+      },
+      "share_url": "https://doc.weixin.qq.com/journal/create?docid=c2_SYNTHETIC-FORM-0000000000000000000fork",
+      "status": 1,
+      "can_modify_content": true,
+      "can_fill_out_once": false,
+      "base_form_id": "SYNTHETIC-FORM-0000000000000000000base",
+      "can_anonymous": false
+    },
+    "status": 4,
+    "has_login": true,
+    "login_type": "ww",
+    "share_url": "https://doc.weixin.qq.com/journal/create?docid=c2_SYNTHETIC-FORM-0000000000000000000base",
+    "is_corp_internal": true,
+    "answer_replys": [
+      {
+        "answer_id": 1,
+        "form_reply": {
+          "items": [
+            {
+              "question_id": 1000000003,
+              "text_reply": "示例明日计划内容",
+              "reply_type": 1,
+              "qdata_sub_type": "",
+              "valid_qdata_sub_type": true
+            },
+            {
+              "question_id": 1000000001,
+              "text_reply": "2026年01月01日",
+              "reply_type": 11,
+              "qdata_sub_type": "date",
+              "valid_qdata_sub_type": true
+            },
+            {
+              "question_id": 1000000002,
+              "text_reply": "1. 完成示例模块的需求评审\n2. 编写示例接口的单元测试",
+              "reply_type": 1,
+              "qdata_sub_type": "",
+              "valid_qdata_sub_type": true
+            }
+          ]
+        },
+        "ctime": 1700000000,
+        "mtime": 1700000000,
+        "reply_id": "9000000000000012",
+        "reply_name": "王小明",
+        "avatar": "https://example.invalid/avatar/synthetic.png",
+        "status": 1,
+        "anonymous": false,
+        "target": "",
+        "form_id": "SYNTHETIC-FORM-0000000000000000000fork",
+        "journaluuid": "SYNTHETIC-JOURNAL-UUID-0000000000000000000000000001",
+        "journal_upgraded_docid": "",
+        "journal_upgraded_doc_text": "",
+        "journal_upgraded_doc_url": "",
+        "user_name": "王小明",
+        "corp_name": ""
+      }
+    ],
+    "repeat_before_replys": {
+      "answer_replys": []
+    },
+    "detail_auth": 3,
+    "user_vid": "9000000000000012",
+    "redirect_form_id": "SYNTHETIC-FORM-0000000000000000000fork",
+    "repeat_todo_time": 0
+  }
+}

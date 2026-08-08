@@ -1,0 +1,62 @@
+POST /formcol/answer_page?sid=SYNTHETIC_WEDOC_SID_0000000000&wedoc_xsrf=1 HTTP/2
+host: doc.weixin.qq.com
+sec-ch-ua-platform: "Windows"
+user-agent: Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 wxwork/5.0.0 (MicroMessenger/6.2) WindowsWechat
+accept: application/json, text/plain, */*
+content-type: multipart/form-data; boundary=----SyntheticBoundary0000000000000000
+origin: https://doc.weixin.qq.com
+cookie: traceid=SYNTHETIC_TRACE_0000000000
+cookie: TOK=SYNTHETIC_TOK_00000000000000
+cookie: hashkey=SYNTHETIC_HASHKEY_0000
+cookie: tdoc_uid=9000000000000011
+cookie: wedoc_openid=SYNTHETIC_OPENID_0000
+cookie: wedoc_sid=SYNTHETIC_WEDOC_SID_0000000000
+cookie: wedoc_sids=9000000000000011&SYNTHETIC_WEDOC_SID_0000000000
+cookie: wedoc_skey=9000000000000011&SYNTHETIC_SKEY_00000000000
+cookie: wedoc_ticket=9000000000000011&SYNTHETIC_TICKET_0000000000000000
+cookie: TrustID=w___00000000-0000-0000-0000-000000000000
+cookie: utype=ww
+sec-fetch-site: same-origin
+sec-fetch-mode: cors
+sec-fetch-dest: empty
+referer: https://doc.weixin.qq.com/forms/j/SYNTHETIC-FORM-0000000000000000000fork?journaluuid=SYNTHETIC-JOURNAL-UUID-0000000000000000000000000001&template_id=SYNTHETIC-TEMPLATE-0000000000000001&is_external=0&doc_title=%E6%97%A5%E6%8A%A5
+accept-encoding: gzip, deflate, br, zstd
+accept-language: zh-CN,zh;q=0.9
+
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="form_id"
+
+SYNTHETIC-FORM-0000000000000000000base
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="form_reply"
+
+{"items":[{"question_id":"1000000003","text_reply":"示例明日计划内容"},{"question_id":"1000000001","text_reply":"2026年01月01日"},{"question_id":"1000000002","text_reply":"1. 完成示例模块的需求评审\n2. 编写示例接口的单元测试"}]}
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="type"
+
+8
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="check_setting"
+
+{"can_anonymous":2}
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="use_anonymous"
+
+false
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="submit_again"
+
+true
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="wwjournal_data"
+
+{"entry":{"mngreporter":[{"vid":"9000000000000001"},{"vid":"9000000000000002"}],"reporter":[],"templateid":"SYNTHETIC-TEMPLATE-0000000000000001","doc_info":{"type":2,"form_id":"SYNTHETIC-FORM-0000000000000000000base","template_id":"SYNTHETIC-TEMPLATE-0000000000000001"}}}
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="isSendToRoom"
+
+false
+------SyntheticBoundary0000000000000000
+Content-Disposition: form-data; name="f"
+
+json
+------SyntheticBoundary0000000000000000--

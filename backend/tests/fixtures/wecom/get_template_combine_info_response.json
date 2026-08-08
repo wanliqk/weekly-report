@@ -1,0 +1,108 @@
+{
+  "head": {
+    "ret": 0,
+    "cgi": "xmjournalsvr/get_template_combine_info",
+    "time": 1700000000,
+    "msg": ""
+  },
+  "body": {
+    "template_id": "SYNTHETIC-TEMPLATE-0000000000000001",
+    "form_id": "SYNTHETIC-FORM-0000000000000000000fork",
+    "entrys": [
+      {
+        "journalid": "SYNTHETIC-JOURNAL-0000000000000001",
+        "createtime": 1700000000,
+        "reply_id": "9000000000000011",
+        "reply_name": "王小明",
+        "form_id": "SYNTHETIC-FORM-0000000000000000000fork"
+      }
+    ],
+    "form": {
+      "form_id": "SYNTHETIC-FORM-0000000000000000000fork",
+      "title": "日报",
+      "create_vid": 9000000000000001,
+      "create_name": "陈静",
+      "ctime": 1700000000,
+      "mtime": 1700000100,
+      "fill_cnt": 0,
+      "total_cnt": 0,
+      "question": {
+        "items": [
+          {
+            "question_id": 1000000001,
+            "title": "日期",
+            "pos": 1,
+            "status": 1,
+            "reply_type": 11,
+            "must_reply": false,
+            "note": "",
+            "ext": {
+              "qdata_format": "yyyy\"年\"m\"月\"d\"日\"",
+              "qdata_sub_type": "date"
+            }
+          },
+          {
+            "question_id": 1000000002,
+            "title": "今日工作",
+            "pos": 2,
+            "status": 1,
+            "reply_type": 1,
+            "must_reply": true,
+            "note": "",
+            "ext": {
+              "question_descriptor": {"simpleFirstIndex": 0, "simpleSecondIndex": 1},
+              "validate": [{"type": 1}]
+            }
+          },
+          {
+            "question_id": 1000000003,
+            "title": "明日计划",
+            "pos": 3,
+            "status": 1,
+            "reply_type": 1,
+            "must_reply": true,
+            "ext": {
+              "question_descriptor": {"simpleFirstIndex": 0, "simpleSecondIndex": 1},
+              "validate": [{"type": 1}]
+            }
+          },
+          {
+            "question_id": 1000000004,
+            "title": "其他事项",
+            "pos": 4,
+            "status": 1,
+            "reply_type": 1,
+            "must_reply": false,
+            "note": "",
+            "ext": {
+              "question_descriptor": {"simpleFirstIndex": 0, "simpleSecondIndex": 1}
+            }
+          },
+          {
+            "question_id": 1000000005,
+            "title": "附件",
+            "pos": 5,
+            "status": 1,
+            "reply_type": 10,
+            "must_reply": false,
+            "note": "",
+            "ext": {
+              "upload_file_info": {
+                "receive_vid": 9000000000000001,
+                "receive_space_id": "i.9000000000000000.9000000000000001"
+              },
+              "qdata_file_num": {"type": 2, "max": 9},
+              "qdata_camera_only": false
+            }
+          }
+        ]
+      },
+      "share_url": "https://doc.weixin.qq.com/journal/create?docid=c2_SYNTHETIC-FORM-0000000000000000000fork",
+      "status": 1,
+      "can_modify_content": true,
+      "can_fill_out_once": false,
+      "base_form_id": "SYNTHETIC-FORM-0000000000000000000base",
+      "can_anonymous": false
+    }
+  }
+}

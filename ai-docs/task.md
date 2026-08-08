@@ -187,7 +187,7 @@ uv sync --directory backend --frozen
 
 | ID | 主责 | 任务 | 依赖 | 状态 | 交付物与验收 |
 |---|---|---|---|---|---|
-| WECOM-00 | 主 Agent | 敏感样例治理 | 用户提供资料 | TODO | 精确忽略原始 HTTP/Cookie 文件，生成全合成脱敏 fixture，敏感扫描证明不会入 Git/构建产物 |
+| WECOM-00 | 主 Agent | 敏感样例治理 | 用户提供资料 | DONE | 精确忽略原始 HTTP/Cookie 文件，生成全合成脱敏 fixture，敏感扫描证明不会入 Git/构建产物 |
 | WECOM-01 | 主 Agent | 需求与技术方案文档 | 用户需求、当前代码与样例分析 | DONE | 正式需求/方案、架构/API/数据库/模块摘要、决策/风险和任务拆分已更新；未修改代码或原始资料 |
 | WECOM-02 | 主 Agent | 企业微信数据基础 | WECOM-00、WECOM-01 | TODO | 三张 ORM 表、Repository、Pydantic 配置、Alembic 迁移和约束/迁移测试 |
 | WECOM-03 | 主 Agent | Electron 登录与凭证桥 | WECOM-00、WECOM-01 | TODO | Main-only secret、安全登录窗口、`safeStorage` Cookie jar、窄 IPC/内部鉴权和构建产物扫描 |
@@ -196,6 +196,14 @@ uv sync --directory backend --frozen
 | WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | TODO | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
 | WECOM-07 | 主 Agent | Electron/Vue 交互 | WECOM-03、WECOM-06 | TODO | 设置连接/映射、日报预览/同步、历史/重试 UI 及前端测试 |
 | WECOM-08 | 主 Agent | 全链路验收与发布 | WECOM-02..07 | TODO | 全量门禁、E2E、受控企业微信测试账号冒烟、生产打包升级、凭证扫描和独立安全审查 |
+
+### WECOM-00 验证记录
+
+- 根 `.gitignore` 新增 `backend/wx-ribao/` 精确忽略规则；`git status --short`/`git status --ignored --short` 确认该目录已从未跟踪变为已忽略，原始三份用户资料未被修改。
+- `backend/tests/fixtures/wecom/` 新增四份全合成协议 fixture + `README.md`（标注每份与真实抓包的置信度），`backend/tests/test_wecom_fixture_hygiene.py` 新增可复跑敏感扫描（本机存在原始样例时动态比对，否则跳过），并用正向注入真实姓名的方式验证过扫描逻辑真实生效而非空跑通过。
+- 实际门禁：`uv run ruff check .`、`uv run mypy`（strict，**125 个源文件**）均通过；`uv run pytest`（**306 项收集**）直接重定向运行 exit code 0、全部通过；`git diff --check` 通过（仅 LF→CRLF 提示）。全量跑批中两次复现已知的 `ISS-013`（JWT 篡改测试偶发假阳性），单独重跑 `test_auth_api.py` 立即全部通过，本阶段未改动认证代码，与该已知问题无关。
+- `uv run ruff format --check .` 发现一项与本阶段无关的预置格式漂移（`app/services/export_style.py`，工作树本身干净，判断为更早提交遗留），未顺手修改，已记入 `issues.md`（`ISS-029`，P3，非阻塞）。
+- 独立审查：本阶段范围小且是治理性质（仅 `.gitignore`、测试 fixture、一个纯函数式扫描测试，未触碰任何业务代码/API/数据库/Electron 能力边界），由主 Agent 自行复核 `git status`/fixture 内容/扫描结果替代独立沙盒审查；`WECOM-02` 起涉及真实数据/协议/凭证实现后恢复独立审查（含专项安全审查）惯例。
 
 ## 4. 当前可领取任务
 
@@ -215,7 +223,7 @@ uv sync --directory backend --frozen
 
 第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均为 `DONE`。CR-20260807-01 第二版增量的全部任务已交付完毕，当前无可领取的第二版任务。
 
-企业微信增量 `WECOM-01` 文档阶段已完成。下一可领取任务只能是 `WECOM-00` 敏感样例治理；`WECOM-02` 及后续实现不得绕过该前置。当前产品仍为占位，不得把方案描述为已实现。
+企业微信增量 `WECOM-01`（文档）、`WECOM-00`（敏感样例治理）均已完成实现、自测与质量门禁。下一可领取任务是 `WECOM-02`（企业微信数据基础）和 `WECOM-03`（Electron 登录与凭证桥），二者依赖已满足、互不重叠，可按两个 Agent 并行；`WECOM-04` 及后续仍需等待其前置任务。当前产品仍为占位（`wecom_sync=false`），不得把方案或 fixture 的存在描述为业务功能已实现。
 
 ### 第二版阶段 10A 验证记录
 

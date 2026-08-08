@@ -481,3 +481,12 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 正式文档已新增第三版需求和技术方案：只手动同步本人已归档正式日报；Electron Main 安全登录 + `safeStorage` Cookie jar；FastAPI Mapper/Sync Service/内部协议 Client；三张非敏感元数据表；Main-only secret；动态字段映射；`uncertain` 保守重试语义。
 - `ai-docs` 已同步需求、架构、模块、数据库、API、决策、风险和 `WECOM-00..08` 任务。`WECOM-01` 仅交付文档，没有修改后端/前端/数据库、依赖、能力开关或原始资料，也没有发起企业微信网络请求。
 - 当前实现事实仍是 `wecom_sync=false` 和设置页占位。下一步必须先做 `WECOM-00` 敏感样例治理，再进入数据或登录实现。
+
+## 8. 企业微信敏感样例治理（WECOM-00，ISS-028）
+
+- 2026-08-08：根 `.gitignore` 新增精确规则 `backend/wx-ribao/`，把用户提供的真实参考脚本 `wx-ribao.py`（含硬编码的真实表单地址/`journaluuid`）和真实抓包 `http_raw_request.txt`/`http_raw_response.txt` 整目录排除；`git status --short`/`git status --ignored --short` 已验证该目录从 `??`（未跟踪）变为 `!!`（已忽略），原始文件本身未被修改或暂存。
+- 新增 `backend/tests/fixtures/wecom/`：`get_template_combine_info_response.json`、`get_journal_list_response.json`、`answer_page_request.http`、`answer_page_response.json` 四份全合成 fixture，覆盖 `docs/方案设计.md` §2.4 记录的三个内部接口；Cookie 值、`sid`/`vid`/`uid`、`form_id`/`template_id`/`journaluuid`、人名、公司名、头像域名和日报正文全部替换为 `SYNTHETIC-*`/虚构占位符，仅保留题目标签（"日期"/"今日工作"等通用模板文案）和字段名等非识别性协议形状；随附 `README.md` 按文件逐一标注与真实抓包的置信度关系（`get_journal_list` 无真实抓包可比对，标注为低置信度，留给 `WECOM-04` 在受控测试账号上复核）。
+- 新增 `backend/tests/test_wecom_fixture_hygiene.py` 作为可复跑的敏感扫描：仅当本机存在 `backend/wx-ribao/` 时才动态提取其中的 Cookie 值、`create_name`/`reply_name`/`user_name`/`avatar`/`text_reply`/`form_id`/`template_id`/`journaluuid` 等敏感字段取值和脚本硬编码 URL 分量，断言 fixture 目录不包含任何一个；目录不存在时安全跳过（不影响其他机器/CI）。用正向对照验证过扫描逻辑真实生效：临时向 fixture 文本注入真实样例中出现的一个真实姓名后重跑会被正确检出为 1 项泄漏，证明该测试不是空跑通过（验证后未落盘，本文档不记录具体姓名）。
+- 实际门禁：`uv run ruff check .`（含新文件，0 error）、`uv run mypy`（strict，**125 个源文件**，较 `QA-10` 收尾的 123 个新增 2 个）均通过；`uv run pytest`（**306 项收集**，含新增 1 项 `test_wecom_fixture_hygiene.py`）在无 pipe 截断的直接重定向运行下**全部通过、exit code 0**。过程中两次全量跑批复现已知的 `ISS-013`（`test_expired_and_tampered_tokens_map_to_40102` 偶发假阳性，因随机 JWT 签名翻转末位字符不总改变解码字节），单独重跑 `test_auth_api.py` 立即 8 项全部通过；本阶段未改动任何 JWT/认证代码，与该已知非阻塞问题无关。`git diff --check` 通过（仅 LF→CRLF 提示）；`git status --short` 只显示 `.gitignore` 改动与两个新增路径，`backend/wx-ribao/` 不再出现。
+- 顺带发现一项与本阶段无关的预置格式漂移：`uv run ruff format --check .` 报告 `app/services/export_style.py` 需要重新格式化（该文件本次会话未改动，`git status` 确认工作树干净，漂移应来自更早提交未跑 format 门禁）；判断为超出 `WECOM-00` 范围的独立小问题，未顺手修改以避免把无关改动混入本阶段提交，已记入 `issues.md`（`ISS-029`，P3，非阻塞）。
+- `backend/tests/fixtures/wecom/` 目前只是数据文件，尚未接入任何 Client/Mapper 代码（`WECOM-02..04` 仍是 `TODO`）；不得把 fixture 存在等同于协议 Client 或数据基础已实现。
