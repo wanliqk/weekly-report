@@ -10,7 +10,12 @@ from app.core.paths import ensure_runtime_directories
 from app.db.migrate import _build_alembic_config, run_startup_migrations
 
 V1_REVISION = "3f6f955b87bb"
-HEAD_REVISION = "8b1d4e6f2a90"
+V2_REVISION = "8b1d4e6f2a90"
+# True head after WECOM-02 added the (always-empty, unrelated) WeCom sync
+# tables revision on top of the V2 baseline; `run_startup_migrations` always
+# upgrades to head, so this constant must track it even though this file is
+# about V1->V2 data migration, not WeCom.
+HEAD_REVISION = "f19f6d677a36"
 USER_ID = "user-1"
 INACTIVE_USER_ID = "user-2"
 TEMPLATE_ID = "template-1"
@@ -364,8 +369,12 @@ def test_v2_downgrade_rejects_multiple_entries_for_one_day(settings: Settings) -
         command.downgrade(_build_alembic_config(settings), V1_REVISION)
 
     with sqlite3.connect(settings.database_path) as connection:
+        # Each revision step commits independently (SQLite non-transactional
+        # DDL): the trivial, always-empty WeCom tables step downgrades
+        # cleanly first, then the V2->V1 step raises and blocks — leaving the
+        # database stamped at V2 (not at the true head) rather than at V1.
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            HEAD_REVISION,
+            V2_REVISION,
         )
         assert "daily_report_days" in _table_names(connection)
 
@@ -415,7 +424,10 @@ def test_v2_downgrade_rejects_existing_admin_audit_events(
         command.downgrade(_build_alembic_config(settings), V1_REVISION)
 
     with sqlite3.connect(settings.database_path) as connection:
+        # Same reasoning as test_v2_downgrade_rejects_multiple_entries_for_one_day:
+        # the WeCom tables step downgrades first and commits independently,
+        # so the blocked V2->V1 step leaves the database at V2, not at head.
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            HEAD_REVISION,
+            V2_REVISION,
         )
         assert connection.execute("SELECT COUNT(*) FROM admin_audit_events").fetchone() == (1,)

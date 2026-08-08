@@ -221,7 +221,7 @@ app/
 
 | 模块 | 目标职责 | 依赖 | 禁止事项 | 状态 |
 |---|---|---|---|---|
-| M23 WeCom Auth Bridge | 受控登录窗口、Cookie 提取、`safeStorage`、Main-only 调用 | M02、M03、M05 | Cookie 进入 renderer/SQLite、任意 URL IPC | DESIGN |
+| M23 WeCom Auth Bridge | 受控登录窗口、Cookie 提取、`safeStorage`、Main-only 调用 | M02、M03、M05 | Cookie 进入 renderer/SQLite、任意 URL IPC | IN_PROGRESS（`WECOM-03` 已交付登录窗口/凭证存储/IPC 骨架，Main-only 端点尚未存在，见下方说明） |
 | M24 WeCom Connection | 账号校验、模板发现、绑定/配置版本 | M05、M23、M27 | 保存 Cookie、admin 读取他人配置 | DESIGN |
 | M25 WeCom Mapper | 正式快照到日期/今日/明日的确定性转换与预览 | M18、M07 | 读取开放日期、按标签运行时猜测 | DESIGN |
 | M26 WeCom Sync | 幂等记录、状态机、重复检查、结果对账 | M18、M24、M25、M27 | 自动重试 `uncertain`、修改本地日报 | DESIGN |
@@ -230,8 +230,10 @@ app/
 
 主要代码落点：
 
-- Electron Main：`electron/src/main/wecom/**`、`electron/src/main/security/wecom-credential-store.ts`、受限 IPC/preload。
-- Backend：`app/models/wecom.py`、`repositories/wecom_*.py`、`services/wecom_*.py`、`integrations/wecom/**`、公开与 Main-only Router。
-- Renderer：`api/wecom.ts`、`components/wecom/**`，并接入现有 `/settings` 与 `/daily`。
+- Electron Main：`electron/src/main/wecom/**`（`auth-window-controller.ts`/`bridge-client.ts`）、`electron/src/main/security/wecom-credential-store.ts`、`electron/src/main/ipc/register-wecom-bridge.ts`，均已随 `WECOM-03` 落地。
+- Backend：`app/models/wecom.py`、`app/repositories/wecom.py`、`app/schemas/wecom.py` 已随 `WECOM-02` 落地（仅数据层：ORM/Repository/JSON 配置的 Pydantic 校验契约）；`services/wecom_*.py`、`integrations/wecom/**`、公开与 Main-only Router 仍未实现，是 `WECOM-04/05/06` 的范围。
+- Renderer：`api/wecom.ts`、`components/wecom/**` 尚未实现，是 `WECOM-07` 的范围。
+
+`WECOM-02`/`WECOM-03` 的边界：`WeComBridgeClient` 已按 `docs/方案设计.md` §9.2 的请求形状（loopback base URL、`X-Main-Bridge-Secret` + JWT header、结构化 JSON body）实现，但调用的 `/api/v1/internal/wecom/**` 端点本身要到 `WECOM-06` 才存在，目前对真实 sidecar 发起调用会得到 404；`connect()` IPC 流程中的 `form_id` 参数暂传空字符串，因为具体表单发现属于 `WECOM-06`/`WECOM-07`。这些是已知、记录在案的范围边界，不是缺陷。
 
 实现顺序和验收门禁以 `task.md` 的 `WECOM-00..08` 为准。

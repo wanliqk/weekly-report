@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { RUNTIME_SECRET_ENV_VAR } from '../../../shared/contracts'
+import { MAIN_BRIDGE_SECRET_ENV_VAR, RUNTIME_SECRET_ENV_VAR } from '../../../shared/contracts'
 import { SidecarManager, type SidecarManagerDeps, type SpawnSidecarProcess } from '../manager'
 import type { SidecarLaunchPlanResult } from '../paths'
 
@@ -42,6 +42,7 @@ function createDeps(overrides: Partial<SidecarManagerDeps> = {}): SidecarManager
     spawnProcess,
     waitForHealthy: vi.fn().mockResolvedValue(undefined),
     generateSecret: vi.fn(() => 'secret-value'),
+    generateMainBridgeSecret: vi.fn(() => 'bridge-secret-value'),
     terminate: vi.fn().mockResolvedValue(undefined),
     ...overrides
   }
@@ -77,6 +78,7 @@ describe('SidecarManager', () => {
       baseUrl: 'http://127.0.0.1:5001',
       runtimeSecret: 'secret-value'
     })
+    expect(manager.getMainBridgeSecret()).toBe('bridge-secret-value')
   })
 
   it('passes the runtime secret to the child via the documented env var', async () => {
@@ -97,6 +99,47 @@ describe('SidecarManager', () => {
       { env: Record<string, string> }
     ]
     expect(spawnCall[2].env[RUNTIME_SECRET_ENV_VAR]).toBe('the-secret')
+  })
+
+  it('passes an independent main bridge secret to the child via its own documented env var', async () => {
+    const child = new FakeChildProcess()
+    const deps = createDeps({
+      spawnProcess: vi.fn(() => asChildProcess(child)),
+      generateSecret: vi.fn(() => 'the-runtime-secret'),
+      generateMainBridgeSecret: vi.fn(() => 'the-main-bridge-secret')
+    })
+    const manager = new SidecarManager(deps)
+
+    const startPromise = manager.start()
+    child.stdout.emit('data', readyLine(5012))
+    await startPromise
+
+    const spawnCall = (deps.spawnProcess as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      string[],
+      { env: Record<string, string> }
+    ]
+    expect(spawnCall[2].env[MAIN_BRIDGE_SECRET_ENV_VAR]).toBe('the-main-bridge-secret')
+    expect(spawnCall[2].env[MAIN_BRIDGE_SECRET_ENV_VAR]).not.toBe(
+      spawnCall[2].env[RUNTIME_SECRET_ENV_VAR]
+    )
+    expect(manager.getMainBridgeSecret()).toBe('the-main-bridge-secret')
+  })
+
+  it('does not expose the main bridge secret before the sidecar is ready or after it stops', async () => {
+    const child = new FakeChildProcess()
+    const deps = createDeps({ spawnProcess: vi.fn(() => asChildProcess(child)) })
+    const manager = new SidecarManager(deps)
+
+    expect(manager.getMainBridgeSecret()).toBeNull()
+
+    const startPromise = manager.start()
+    child.stdout.emit('data', readyLine(5013))
+    await startPromise
+    expect(manager.getMainBridgeSecret()).toBe('bridge-secret-value')
+
+    await manager.stop('test-stop')
+    expect(manager.getMainBridgeSecret()).toBeNull()
   })
 
   it('merges the launch plan env (e.g. production userData directories) into the child env', async () => {
@@ -246,6 +289,24 @@ describe('SidecarManager', () => {
 
     const lines = manager.getSnapshot().recentLogLines
     expect(lines.some((line) => line.includes('super-secret-value'))).toBe(false)
+    expect(lines.some((line) => line.includes('***REDACTED***'))).toBe(true)
+  })
+
+  it('redacts the main bridge secret from captured log lines', async () => {
+    const child = new FakeChildProcess()
+    const deps = createDeps({
+      spawnProcess: vi.fn(() => asChildProcess(child)),
+      generateMainBridgeSecret: vi.fn(() => 'super-secret-bridge-value')
+    })
+    const manager = new SidecarManager(deps)
+
+    const startPromise = manager.start()
+    child.stderr.emit('data', Buffer.from('leaked super-secret-bridge-value in traceback\n'))
+    child.stdout.emit('data', readyLine(7003))
+    await startPromise
+
+    const lines = manager.getSnapshot().recentLogLines
+    expect(lines.some((line) => line.includes('super-secret-bridge-value'))).toBe(false)
     expect(lines.some((line) => line.includes('***REDACTED***'))).toBe(true)
   })
 })

@@ -189,8 +189,8 @@ uv sync --directory backend --frozen
 |---|---|---|---|---|---|
 | WECOM-00 | 主 Agent | 敏感样例治理 | 用户提供资料 | DONE | 精确忽略原始 HTTP/Cookie 文件，生成全合成脱敏 fixture，敏感扫描证明不会入 Git/构建产物 |
 | WECOM-01 | 主 Agent | 需求与技术方案文档 | 用户需求、当前代码与样例分析 | DONE | 正式需求/方案、架构/API/数据库/模块摘要、决策/风险和任务拆分已更新；未修改代码或原始资料 |
-| WECOM-02 | 主 Agent | 企业微信数据基础 | WECOM-00、WECOM-01 | TODO | 三张 ORM 表、Repository、Pydantic 配置、Alembic 迁移和约束/迁移测试 |
-| WECOM-03 | 主 Agent | Electron 登录与凭证桥 | WECOM-00、WECOM-01 | TODO | Main-only secret、安全登录窗口、`safeStorage` Cookie jar、窄 IPC/内部鉴权和构建产物扫描 |
+| WECOM-02 | 主 Agent | 企业微信数据基础 | WECOM-00、WECOM-01 | DONE | 三张 ORM 表、Repository、Pydantic 配置、Alembic 迁移和约束/迁移测试 |
+| WECOM-03 | 主 Agent | Electron 登录与凭证桥 | WECOM-00、WECOM-01 | DONE | Main-only secret、安全登录窗口、`safeStorage` Cookie jar、窄 IPC/内部鉴权和构建产物扫描 |
 | WECOM-04 | 主 Agent | 企业微信内部协议 Client | WECOM-00、WECOM-02、WECOM-03 | TODO | 模板/列表/提交 Client、Cookie URL 筛选、协议 DTO、脱敏 fixture 合同测试 |
 | WECOM-05 | 主 Agent | 字段映射与预览 | WECOM-02 | TODO | 正式快照 Mapper、动态 `field_key` 配置、`PROJECT_LIST`、结构/载荷指纹与边界测试 |
 | WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | TODO | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
@@ -204,6 +204,30 @@ uv sync --directory backend --frozen
 - 实际门禁：`uv run ruff check .`、`uv run mypy`（strict，**125 个源文件**）均通过；`uv run pytest`（**306 项收集**）直接重定向运行 exit code 0、全部通过；`git diff --check` 通过（仅 LF→CRLF 提示）。全量跑批中两次复现已知的 `ISS-013`（JWT 篡改测试偶发假阳性），单独重跑 `test_auth_api.py` 立即全部通过，本阶段未改动认证代码，与该已知问题无关。
 - `uv run ruff format --check .` 发现一项与本阶段无关的预置格式漂移（`app/services/export_style.py`，工作树本身干净，判断为更早提交遗留），未顺手修改，已记入 `issues.md`（`ISS-029`，P3，非阻塞）。
 - 独立审查：本阶段范围小且是治理性质（仅 `.gitignore`、测试 fixture、一个纯函数式扫描测试，未触碰任何业务代码/API/数据库/Electron 能力边界），由主 Agent 自行复核 `git status`/fixture 内容/扫描结果替代独立沙盒审查；`WECOM-02` 起涉及真实数据/协议/凭证实现后恢复独立审查（含专项安全审查）惯例。
+
+### WECOM-02/WECOM-03 验证记录
+
+`WECOM-02`（数据基础，backend）与 `WECOM-03`（Electron 登录与凭证桥）依赖只有 `WECOM-00`/`WECOM-01`、互不依赖，文件范围完全不重叠（`backend/**` vs `electron/**`），按两个 Agent 并行实现；主 Agent 逐文件复核两份 diff 后统一运行合并后的全量门禁、同步文档并提交。
+
+**WECOM-02（backend）**：
+
+- 新增 `app/models/wecom.py`（`WeComUserBinding`/`WeComSyncProfile`/`WeComDailySyncRecord`，复用现有 `TimestampMixin` 而非手写 `created_at`/`updated_at`，与 `daily_report.py`/`template.py`/`user.py`/`weekly_report.py` 同一更新后的约定）、`app/repositories/wecom.py`（三个极简 owner 过滤 Repository，无 Service 逻辑）、`app/schemas/wecom.py`（`WeComQuestionMappingConfig`/`WeComRecipientConfig`/`WeComFieldMappingConfig` 三个 Pydantic 契约，`schema_version` 均为无默认值 `Literal[1]`，各自带自定义校验器如"日期/今日/明日题目 `submit_order` 不重复""`field_key` 不重复"）、迁移 `f19f6d677a36_add_wecom_sync_tables`（纯建表，`down_revision=8b1d4e6f2a90`）。
+- 字段设计与 `docs/方案设计.md` §6 逐项核对一致；在设计未明确长度的指纹字段上额外加 `length(...) = 64` CHECK（SHA-256 十六进制固定长度），`last_error_kind` 刻意不加 CHECK 白名单（该枚举归属尚未实现的 `WECOM-04/06`，提前约束有锁死后续设计的风险）。
+- 新增 `tests/test_wecom_models.py`（约束测试）、`test_wecom_migration.py`（迁移 upgrade/downgrade/幂等/FK 检查）、`test_wecom_schemas.py`（Pydantic 契约校验），并同步修正了两处因新增迁移而必然联动的既有测试：`test_migrations.py` 的 `_EXPECTED_TABLES` 加入三张新表；`test_v2_migration.py` 的 `HEAD_REVISION` 更新为新头版本，且两个 downgrade 拒绝测试的断言从"降级失败后停在 HEAD"改为"停在 V2"（真实原因：SQLite 上 Alembic 每个 revision 步骤独立提交，多步 downgrade 会先干净地退掉本次新增的空表 revision，再执行到 V2→V1 才被正确拒绝，因此最终落点是 V2 而非原 HEAD；已用真实迁移验证过，不是猜测）。
+- 实际门禁：`uv run ruff check .`、`uv run mypy`（strict）均通过；`uv run ruff format --check .` 仅剩与本任务无关的既有 `ISS-029` 漂移。
+
+**WECOM-03（Electron）**：
+
+- 新增 `electron/src/main/security/wecom-credential-store.ts`（`safeStorage` 加密、按随机 32 位十六进制 `credential_slot` 定位、无明文回退、`{mode:0o600}` 写入、损坏密文/加密不可用均转为类型化错误而非未捕获异常）、`electron/src/main/wecom/{constants,auth-window-controller,bridge-client}.ts`、`electron/src/main/ipc/register-wecom-bridge.ts`（`connect`/`disconnect`/`executeSync` 三个窄 IPC，`assertTrustedSender` 校验、`executeSync` 的 ULID 正则校验、`connect` 失败时清理已创建的凭证槽）。
+- `main_bridge_secret`：复用现有 `generateRuntimeSecret()` 独立调用生成第二个随机密钥，随 sidecar 子进程环境变量 `WEEKLY_REPORT_MAIN_BRIDGE_SECRET` 下发（`manager.ts`），同时接入既有 `LogBuffer.append(...secretsToRedact)` 的可变参数脱敏机制，不写日志、不经 preload/renderer；`SidecarManager.getMainBridgeSecret()` 刻意不接入任何 IPC handler，只有 `index.ts` 直接构造的 `WeComBridgeClient` 能读到。
+- 登录窗口：隔离 `wecom-auth-<随机>`（非 `persist:`）session partition，`webPreferences` 为 `{contextIsolation:true,sandbox:true,nodeIntegration:false}` 且不设置 `preload`；导航限制为精确主机名白名单（`doc.weixin.qq.com`/`open.weixin.qq.com`/`work.weixin.qq.com`，HTTPS-only，拒绝 `doc.weixin.qq.com.evil.com` 这类相似域名）；登录完成判定为轮询 `wedoc_sid` Cookie 非空（可注入 fake session 做纯函数单测），不是固定等待。
+- `WeComBridgeClient` 已按 §9.2 的请求形状实现（loopback base URL 校验、`X-Main-Bridge-Secret`+JWT header、结构化 JSON body、Cookie jar 转 snake_case），但调用的 `/api/v1/internal/wecom/**` 端点本身要到 `WECOM-06` 才存在——这是已知、记录在案的范围边界。
+- 实际门禁：`npm run lint`（0 error/0 warning）、`npm run typecheck`、`npm test`（**26 文件 192 项通过**）、`npm run build` 均通过；构建产物扫描（`electron/out/{main,preload,renderer}`）确认无密钥/Cookie 相关字符串泄露，`preload/index.js` 精确只暴露 `wecom.{connect,disconnect,executeSync}` 三个方法。
+
+**合并后复核（主 Agent）**：
+
+- 主 Agent 逐文件读取了两份 diff 的全部新增/修改代码（不仅是 Agent 自述摘要），确认字段设计、安全边界（`safeStorage` 无明文回退、导航白名单、IPC 受信任 frame 校验、Main-only secret 不进 IPC）均与设计文档一致，未发现 P0/P1。
+- 合并后重新执行的全量门禁（而非分别信任两个 Agent 各自门禁结果）：后端 `uv run ruff check .`、`uv run mypy`（strict，**132 个源文件**）均通过，`uv run pytest -q`（**342 项收集，0 failure/0 error**，`--junit-xml` 确认，终端最终汇总行在本环境下持续性缺失与用例结果无关）；前端 `npm run lint`、`npm run typecheck`、`npm test`（**26 文件 192 项**）、`npm run build` 均通过；主 Agent 独立执行 `grep` 复核构建产物未发现 `X-Main-Bridge-Secret`/`wecom` 相关字符串泄露到 `preload`/`renderer` 产物。`git diff --check` 通过（仅 LF→CRLF 提示），`git status --short` 只包含两个任务范围内的文件，无非预期改动。
 
 ## 4. 当前可领取任务
 
@@ -223,7 +247,7 @@ uv sync --directory backend --frozen
 
 第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均为 `DONE`。CR-20260807-01 第二版增量的全部任务已交付完毕，当前无可领取的第二版任务。
 
-企业微信增量 `WECOM-01`（文档）、`WECOM-00`（敏感样例治理）均已完成实现、自测与质量门禁。下一可领取任务是 `WECOM-02`（企业微信数据基础）和 `WECOM-03`（Electron 登录与凭证桥），二者依赖已满足、互不重叠，可按两个 Agent 并行；`WECOM-04` 及后续仍需等待其前置任务。当前产品仍为占位（`wecom_sync=false`），不得把方案或 fixture 的存在描述为业务功能已实现。
+企业微信增量 `WECOM-00`（敏感样例治理）、`WECOM-01`（文档）、`WECOM-02`（数据基础）、`WECOM-03`（Electron 登录与凭证桥）均已完成实现、自测与质量门禁，其中 `WECOM-02`/`WECOM-03` 由两个 Agent 并行实现、无文件重叠，主 Agent 统一复核并提交。下一可领取任务是 `WECOM-05`（字段映射与预览，依赖 `WECOM-02` 已满足）；`WECOM-04`（内部协议 Client）依赖 `WECOM-00`/`WECOM-02`/`WECOM-03` 均已满足，也可领取，与 `WECOM-05` 互不重叠可并行。`WECOM-06` 及后续仍需等待 `WECOM-04`+`WECOM-05`。当前产品仍为占位（`wecom_sync=false`），不得把已实现的数据层/Electron 凭证桥描述为完整业务功能——公开/Main-only API、企业微信协议 Client、字段映射 Service 均尚未实现。
 
 ### 第二版阶段 10A 验证记录
 

@@ -54,4 +54,4 @@
 
 ## 5. 当前阶段
 
-截至 2026-08-08，V1 规划的全部 9 个阶段和 CR-20260807-01 第二版增量均已交付。CR-20260808-02 企业微信日报反向同步已完成 `WECOM-01` 需求/技术方案文档和 `WECOM-00` 敏感样例治理（原始真实样例已精确 `.gitignore`，测试改用全合成 fixture），业务代码尚未实现，当前产品仍保持 `wecom_sync=false` 和占位 UI。下一可领取任务是 `WECOM-02`（企业微信数据基础）和 `WECOM-03`（Electron 登录与凭证桥），可并行推进。具体事实以 `progress.md`、任务依赖以 `task.md` 为准。
+截至 2026-08-08，V1 规划的全部 9 个阶段和 CR-20260807-01 第二版增量均已交付。CR-20260808-02 企业微信日报反向同步已完成 `WECOM-00`（敏感样例治理）、`WECOM-01`（需求/技术方案文档）、`WECOM-02`（三张 ORM 表/Repository/Pydantic 配置契约/迁移）、`WECOM-03`（Electron Main 登录窗口/`safeStorage` Cookie jar/窄 IPC/Main-only secret）。企业微信协议 Client、字段映射、同步编排 Service、公开/Main-only API 和 renderer UI 仍未实现，当前产品仍保持 `wecom_sync=false` 和占位 UI，不得把已交付的数据层/凭证桥骨架当作完整业务功能。下一可领取任务是 `WECOM-04`（内部协议 Client）和 `WECOM-05`（字段映射与预览），依赖已满足，可并行推进。具体事实以 `progress.md`、任务依赖以 `task.md` 为准。

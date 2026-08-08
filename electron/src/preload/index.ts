@@ -7,7 +7,10 @@ import {
   type ExportSaveResult,
   type RuntimeApiConfig,
   type SecureTokenSnapshot,
-  type SidecarStatusSnapshot
+  type SidecarStatusSnapshot,
+  type WeComConnectResult,
+  type WeComDisconnectResult,
+  type WeComExecuteSyncResult
 } from '../shared/contracts'
 
 const desktopApi = Object.freeze({
@@ -43,6 +46,16 @@ const runtimeBridge = Object.freeze({
   backupFile: Object.freeze({
     save: (suggestedName: string, data: Uint8Array): Promise<BackupSaveResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.BACKUP_SAVE_FILE, { suggestedName, data })
+  }),
+  // Deliberately narrow (docs/方案设计.md §9.3): connect/disconnect/executeSync
+  // only. Never expose reading Cookies, sending arbitrary HTTP, opening
+  // arbitrary URLs, or reading the credential file path.
+  wecom: Object.freeze({
+    connect: (): Promise<WeComConnectResult> => ipcRenderer.invoke(IPC_CHANNELS.WECOM_CONNECT),
+    disconnect: (): Promise<WeComDisconnectResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WECOM_DISCONNECT),
+    executeSync: (recordId: string): Promise<WeComExecuteSyncResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WECOM_EXECUTE_SYNC, recordId)
   })
 })
 

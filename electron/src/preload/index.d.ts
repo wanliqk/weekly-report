@@ -3,7 +3,10 @@ import type {
   ExportSaveResult,
   RuntimeApiConfig,
   SecureTokenSnapshot,
-  SidecarStatusSnapshot
+  SidecarStatusSnapshot,
+  WeComConnectResult,
+  WeComDisconnectResult,
+  WeComExecuteSyncResult
 } from '../shared/contracts'
 
 declare global {
@@ -30,6 +33,11 @@ declare global {
       }
       readonly backupFile: {
         readonly save: (suggestedName: string, data: Uint8Array) => Promise<BackupSaveResult>
+      }
+      readonly wecom: {
+        readonly connect: () => Promise<WeComConnectResult>
+        readonly disconnect: () => Promise<WeComDisconnectResult>
+        readonly executeSync: (recordId: string) => Promise<WeComExecuteSyncResult>
       }
     }
   }

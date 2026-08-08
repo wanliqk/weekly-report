@@ -317,7 +317,7 @@ downgrade 只有在每日期最多一条且周报快照可无损还原时允许�
 
 ## 9. 企业微信同步数据库目标（CR-20260808-02）
 
-> 以下三张表尚未实现，进入 `WECOM-02` 后才创建迁移。
+> `WECOM-02` 已实现以下三张表的 ORM/Repository/Alembic 迁移（`f19f6d677a36_add_wecom_sync_tables`，`down_revision=8b1d4e6f2a90`）；Service/API 层尚未接入，见 `WECOM-04/05/06`。
 
 ### 9.1 `wecom_user_bindings`
 
@@ -329,8 +329,8 @@ downgrade 只有在每日期最多一条且周报快照可无损还原时允许�
 ### 9.2 `wecom_sync_profiles`
 
 - 每用户唯一一行；`form_id`、`template_id`、可空 `journal_uuid`。
-- `destination_fingerprint`、`schema_fingerprint` 均为规范化 SHA-256。
-- `question_mapping_json`、`recipient_config_json`、`field_mapping_json` 必须有 `schema_version` 并经 Pydantic 校验。
+- `destination_fingerprint`、`schema_fingerprint` 均为规范化 SHA-256（**已实现**：额外加 `length(...) = 64` CHECK 约束）。
+- `question_mapping_json`、`recipient_config_json`、`field_mapping_json` 必须有 `schema_version` 并经 Pydantic 校验（**已实现**：`app/schemas/wecom.py` 的 `WeComQuestionMappingConfig`/`WeComRecipientConfig`/`WeComFieldMappingConfig`，`schema_version` 为无默认值的 `Literal[1]`，目前仅是校验契约，尚未接入任何写入路径）。
 - 正整数 `version`、`is_active`、时间戳。该表即模板/映射配置，不再重复建模板配置表。
 
 ### 9.3 `wecom_daily_sync_records`
@@ -340,6 +340,7 @@ downgrade 只有在每日期最多一条且周报快照可无损还原时允许�
 - `attempt_count`、`attempt_token`、必要远端 ID、脱敏错误类型/短消息和尝试/成功时间。
 - UNIQUE `(daily_report_day_id,destination_fingerprint)`；索引 `(user_id,status,updated_at)`。
 - 不保存 payload/response 原文；同步正文可从不可变正式快照重建。
+- **已实现**：`last_error_kind` 未加 CHECK 白名单（该枚举归属尚未实现的 `WECOM-04/06`，现在约束会有提前锁定风险）；`last_error_message` 非空时长度 1～500。
 
 ### 9.4 凭证与删除
 

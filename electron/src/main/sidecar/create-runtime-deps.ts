@@ -24,6 +24,10 @@ export function createRuntimeDeps(
     spawnProcess: spawnSidecarProcess,
     waitForHealthy,
     generateSecret: generateRuntimeSecret,
+    // Same generator, called independently for a second, unrelated random
+    // value (SEC-014's `main_bridge_secret` is deliberately not derived from
+    // the runtime secret) — see `SidecarManagerDeps.generateMainBridgeSecret`.
+    generateMainBridgeSecret: generateRuntimeSecret,
     terminate: terminateProcessTree
   }
 }

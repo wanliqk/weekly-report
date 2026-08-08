@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 
 import {
+  MAIN_BRIDGE_SECRET_ENV_VAR,
   RUNTIME_SECRET_ENV_VAR,
   type ServiceState,
   type SidecarStatusSnapshot
@@ -85,6 +86,13 @@ export interface SidecarManagerDeps {
   spawnProcess: SpawnSidecarProcess
   waitForHealthy: typeof waitForHealthy
   generateSecret: typeof generateRuntimeSecret
+  /**
+   * Generates the independent Main-only bridge secret (`docs/方案设计.md` §3.1,
+   * decision SEC-014). Kept as its own deps field — even though it can reuse
+   * `generateRuntimeSecret`'s implementation — so tests can assert its value
+   * lands in `MAIN_BRIDGE_SECRET_ENV_VAR` independently of the runtime secret.
+   */
+  generateMainBridgeSecret: typeof generateRuntimeSecret
   terminate: typeof terminateProcessTree
 }
 
@@ -103,6 +111,7 @@ export class SidecarManager extends EventEmitter {
   private child: ChildProcess | null = null
   private baseUrl: string | null = null
   private runtimeSecret: string | null = null
+  private mainBridgeSecret: string | null = null
   private startPromise: Promise<void> | null = null
 
   constructor(deps: SidecarManagerDeps) {
@@ -129,6 +138,15 @@ export class SidecarManager extends EventEmitter {
 
   getChildPid(): number | null {
     return this.child?.pid ?? null
+  }
+
+  /**
+   * Main-only bridge secret for the WeCom internal endpoints (SEC-014). Unlike
+   * `getRuntimeConfig()`, this is never wired to an IPC handler — only
+   * `WeComBridgeClient` (constructed directly in `index.ts`) may read it.
+   */
+  getMainBridgeSecret(): string | null {
+    return this.state === 'ready' ? this.mainBridgeSecret : null
   }
 
   start(): Promise<void> {
@@ -158,6 +176,7 @@ export class SidecarManager extends EventEmitter {
     this.child = null
     this.baseUrl = null
     this.runtimeSecret = null
+    this.mainBridgeSecret = null
     this.startPromise = null
     this.setState('stopped', cause)
   }
@@ -175,6 +194,8 @@ export class SidecarManager extends EventEmitter {
 
     const runtimeSecret = this.deps.generateSecret()
     this.runtimeSecret = runtimeSecret
+    const mainBridgeSecret = this.deps.generateMainBridgeSecret()
+    this.mainBridgeSecret = mainBridgeSecret
 
     const child = this.deps.spawnProcess(launchPlan.plan.executablePath, launchPlan.plan.args, {
       cwd: launchPlan.plan.cwd,
@@ -182,7 +203,8 @@ export class SidecarManager extends EventEmitter {
         ...process.env,
         ...launchPlan.plan.env,
         WEEKLY_REPORT_PORT: '0',
-        [RUNTIME_SECRET_ENV_VAR]: runtimeSecret
+        [RUNTIME_SECRET_ENV_VAR]: runtimeSecret,
+        [MAIN_BRIDGE_SECRET_ENV_VAR]: mainBridgeSecret
       },
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -198,7 +220,7 @@ export class SidecarManager extends EventEmitter {
       while (newlineIndex !== -1) {
         const line = stdoutBuffer.slice(0, newlineIndex)
         stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1)
-        this.logBuffer.append(line, runtimeSecret)
+        this.logBuffer.append(line, runtimeSecret, mainBridgeSecret)
         const port = parseAnnouncedPort(line)
         if (port !== null) {
           portAnnounced.resolve(port)
@@ -208,7 +230,7 @@ export class SidecarManager extends EventEmitter {
     })
 
     child.stderr?.on('data', (chunk: Buffer) => {
-      this.logBuffer.append(chunk.toString('utf8'), runtimeSecret)
+      this.logBuffer.append(chunk.toString('utf8'), runtimeSecret, mainBridgeSecret)
     })
 
     child.once('error', (error: Error) => {

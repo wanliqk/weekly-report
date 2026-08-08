@@ -10,6 +10,7 @@ from app.models.daily_report import DailyReport, DailyReportDay
 from app.models.export_job import ExportJob
 from app.models.template import ReportTemplate, TemplateVersion
 from app.models.user import User, UserSettings
+from app.models.wecom import WeComDailySyncRecord, WeComSyncProfile, WeComUserBinding
 from app.models.weekly_report import WeeklyReport, WeeklyReportSource
 
 __all__ = [
@@ -22,6 +23,9 @@ __all__ = [
     "TemplateVersion",
     "User",
     "UserSettings",
+    "WeComDailySyncRecord",
+    "WeComSyncProfile",
+    "WeComUserBinding",
     "WeeklyReport",
     "WeeklyReportSource",
 ]

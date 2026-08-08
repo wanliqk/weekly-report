@@ -1,20 +1,30 @@
 import { spawnSync } from 'node:child_process'
 import { join } from 'path'
 
-import { app, BrowserWindow, dialog, safeStorage, globalShortcut } from 'electron'
+import { app, BrowserWindow, dialog, safeStorage, session, globalShortcut } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
 import { BackupFileSaver } from './backup/file-saver'
 import { ExportFileSaver } from './export/file-saver'
 import { registerRuntimeBridge } from './ipc/register-runtime-bridge'
-import { SecureTokenStore } from './security/secure-token-store'
+import { registerWeComBridge } from './ipc/register-wecom-bridge'
+import { SecureTokenStore, type SafeStorageAdapter } from './security/secure-token-store'
+import { WeComCredentialStore } from './security/wecom-credential-store'
 import { createRuntimeDeps } from './sidecar/create-runtime-deps'
 import { getSidecarManager } from './sidecar/manager'
 import type { ResolveLaunchPlanOptions } from './sidecar/paths'
+import {
+  WeComAuthWindowController,
+  isAllowedWeComNavigationUrl,
+  toWeComCookie
+} from './wecom/auth-window-controller'
+import { WeComBridgeClient } from './wecom/bridge-client'
+import { WECOM_AUTH_WEB_PREFERENCES } from './wecom/constants'
 
 let mainWindow: BrowserWindow | null = null
 let unregisterRuntimeBridge: (() => void) | null = null
+let unregisterWeComBridge: (() => void) | null = null
 
 function getLaunchOptions(): ResolveLaunchPlanOptions {
   return {
@@ -48,8 +58,6 @@ function createWindow(): void {
     mainWindow?.show()
   })
 
-  
-
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
     if (targetUrl !== mainWindow?.webContents.getURL()) {
@@ -57,10 +65,76 @@ function createWindow(): void {
     }
   })
 
-  const tokenStore = new SecureTokenStore(join(app.getPath('userData'), 'access-token.bin'), {
+  const safeStorageAdapter: SafeStorageAdapter = {
     isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
     encryptString: (plainText) => safeStorage.encryptString(plainText),
     decryptString: (encrypted) => safeStorage.decryptString(encrypted)
+  }
+  const tokenStore = new SecureTokenStore(
+    join(app.getPath('userData'), 'access-token.bin'),
+    safeStorageAdapter
+  )
+  const wecomCredentialStore = new WeComCredentialStore(
+    join(app.getPath('userData'), 'wecom-credentials'),
+    safeStorageAdapter
+  )
+  const wecomAuthWindowController = new WeComAuthWindowController({
+    createSession: (partition) => {
+      const authSession = session.fromPartition(partition)
+      authSession.setPermissionRequestHandler((_contents, _permission, callback) => {
+        callback(false)
+      })
+      authSession.on('will-download', (event) => {
+        event.preventDefault()
+      })
+      return {
+        cookies: {
+          get: async (filter) => {
+            const cookies = await authSession.cookies.get(filter)
+            return cookies.map(toWeComCookie)
+          }
+        },
+        clearStorageData: () => authSession.clearStorageData()
+      }
+    },
+    createWindow: (partition) => {
+      const authWindow = new BrowserWindow({
+        width: 480,
+        height: 720,
+        show: true,
+        autoHideMenuBar: true,
+        parent: mainWindow ?? undefined,
+        modal: true,
+        webPreferences: {
+          ...WECOM_AUTH_WEB_PREFERENCES,
+          partition
+        }
+      })
+      authWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      authWindow.webContents.on('will-navigate', (event, targetUrl) => {
+        if (!isAllowedWeComNavigationUrl(targetUrl)) {
+          event.preventDefault()
+        }
+      })
+      authWindow.webContents.on('will-redirect', (event, targetUrl) => {
+        if (!isAllowedWeComNavigationUrl(targetUrl)) {
+          event.preventDefault()
+        }
+      })
+      return {
+        loadURL: (url) => authWindow.loadURL(url),
+        isDestroyed: () => authWindow.isDestroyed(),
+        close: () => authWindow.close(),
+        on: (event, listener) => {
+          authWindow.on(event, listener)
+        }
+      }
+    }
+  })
+  const wecomBridgeClient = new WeComBridgeClient({
+    getBaseUrl: () => getSidecarManager(sidecarDeps).getRuntimeConfig()?.baseUrl ?? null,
+    getMainBridgeSecret: () => getSidecarManager(sidecarDeps).getMainBridgeSecret(),
+    getAccessToken: async () => (await tokenStore.getToken()).token
   })
   const exportFileSaver = new ExportFileSaver({
     showSaveDialog: async (suggestedName) => {
@@ -93,6 +167,12 @@ function createWindow(): void {
     exportFileSaver,
     backupFileSaver
   )
+  unregisterWeComBridge = registerWeComBridge(
+    mainWindow,
+    wecomAuthWindowController,
+    wecomCredentialStore,
+    wecomBridgeClient
+  )
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -103,6 +183,8 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     unregisterRuntimeBridge?.()
     unregisterRuntimeBridge = null
+    unregisterWeComBridge?.()
+    unregisterWeComBridge = null
     mainWindow = null
   })
 }

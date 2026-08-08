@@ -18,6 +18,9 @@ _EXPECTED_TABLES = {
     "weekly_report_sources",
     "export_jobs",
     "admin_audit_events",
+    "wecom_user_bindings",
+    "wecom_sync_profiles",
+    "wecom_daily_sync_records",
 }
 
 
