@@ -176,16 +176,14 @@ def _workbook_path(job: ExportJob) -> Path:
 
 
 def _row_values(sheet: Worksheet, row: int) -> list[object]:
-    """Reads one row's cells, trimming the trailing `None` padding
+    """Reads every one of a row's cells across the sheet's full column count.
 
-    `sheet.iter_rows()` adds once `sheet.max_column` grows past that row's
-    own real width (e.g. a 2-column main table row padded out once a
-    3-column `PROJECT_LIST` block is appended later in the same sheet).
+    Deliberately does *not* trim trailing `None`s: in the merged-cell layout
+    a trailing `None` can be real data (a day-level column left blank on a
+    project row it was merged away from, or a `PROJECT_LIST` column with no
+    entries for that day) — callers must spell out the exact expected width.
     """
-    values = [cell.value for cell in sheet[row]]
-    while values and values[-1] is None:
-        values.pop()
-    return values
+    return [cell.value for cell in sheet[row]]
 
 
 async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeeded(
@@ -280,103 +278,156 @@ def _project_list_field(key: str, label: str) -> dict[str, object]:
     }
 
 
-async def test_create_excludes_project_list_from_the_main_table_and_appends_a_block_table(
-    export_engine: AsyncEngine, export_settings: Settings
-) -> None:
-    """`ai-docs/decisions.md` PROD-022 (revised): `PROJECT_LIST` is never a
+def _project_list_and_plan_fields(
+    project_key: str = "k1", plan_key: str = "k2"
+) -> list[dict[str, object]]:
+    """A `PROJECT_LIST` field followed by a plain field, matching the
 
-    main-table cell — the field is dropped from the main header/columns and
-    instead becomes a titled 2D sub-table appended below the main table,
-    with one row per raw entry (not merged by project, since each entry
-    keeps its own independent `完成状态`).
+    `日期/责任人/项目/工作内容/进度/明日工作计划` column order from
+    `ai-docs/decisions.md` PROD-024's worked example.
     """
-    session_factory = create_session_factory(export_engine)
-    async with session_factory() as session:
-        user = await _bootstrap_user(session)
-        await _archived_day(
-            session,
-            owner_id=user.id,
-            work_date=date(2026, 8, 5),
-            fields=[_project_list_field("k1", "今日工作")],
-            content={
-                "k1": [
-                    {"project": "个人日报系统", "content": "完成Excel导出优化", "status": "DONE"},
-                    {"project": "能源管理平台", "content": "设计设备接口方案", "status": "DOING"},
-                ]
-            },
-        )
-
-    async with session_factory() as session:
-        job = await ExportService(session, export_settings).create(
-            user.id, daily_report_day_ids=None, filter_=ExportFilter()
-        )
-
-    workbook = openpyxl.load_workbook(_workbook_path(job))
-    sheet = workbook.active
-    assert sheet is not None
-    assert _row_values(sheet, 2) == ["日期", "责任人"]  # no "今日工作" column
-    assert _row_values(sheet, 3) == ["2026-08-05", "owner"]  # one main-table data row
-    assert _row_values(sheet, 4) == []  # blank row separates the block from the main table
-    assert _row_values(sheet, 5) == ["2026-08-05 owner · 今日工作"]
-    assert _row_values(sheet, 6) == ["项目", "工作内容", "完成状态"]
-    assert _row_values(sheet, 7) == ["个人日报系统", "完成Excel导出优化", "已完成"]
-    assert _row_values(sheet, 8) == ["能源管理平台", "设计设备接口方案", "进行中"]
-    assert sheet.max_row == 8
-
-    assert sheet.cell(row=6, column=1).font.bold is True
-
-
-async def test_create_defuses_formula_like_project_and_content_cells_in_a_block(
-    export_engine: AsyncEngine, export_settings: Settings
-) -> None:
-    """Unlike the old single-cell-with-a-fixed-prefix rendering, `项目`/`工作内容`
-
-    are now standalone cells, so each is independently at risk of Excel
-    formula promotion and must go through `_defuse_formula` on its own.
-    """
-    session_factory = create_session_factory(export_engine)
-    async with session_factory() as session:
-        user = await _bootstrap_user(session)
-        await _archived_day(
-            session,
-            owner_id=user.id,
-            work_date=date(2026, 8, 5),
-            fields=[_project_list_field("k1", "今日工作")],
-            content={
-                "k1": [
-                    {
-                        "project": '=HYPERLINK("http://evil.example","x")',
-                        "content": "=cmd|' /C calc'!A0",
-                        "status": "DONE",
-                    }
-                ]
-            },
-        )
-
-    async with session_factory() as session:
-        job = await ExportService(session, export_settings).create(
-            user.id, daily_report_day_ids=None, filter_=ExportFilter()
-        )
-
-    workbook = openpyxl.load_workbook(_workbook_path(job))
-    sheet = workbook.active
-    assert sheet is not None
-    assert _row_values(sheet, 7) == [
-        '\'=HYPERLINK("http://evil.example","x")',
-        "'=cmd|' /C calc'!A0",
-        "已完成",
+    return [
+        _project_list_field(project_key, "今日工作"),
+        {
+            "field_key": plan_key,
+            "label": "明日工作计划",
+            "description": "",
+            "field_type": "textarea",
+            "required": False,
+            "enabled": True,
+            "sort_order": 10,
+            "options": [],
+            "core_type": None,
+        },
     ]
-    assert sheet.cell(row=7, column=1).data_type != "f"
-    assert sheet.cell(row=7, column=2).data_type != "f"
 
 
-async def test_create_flattens_project_list_entries_from_every_source_into_one_block(
+def _merge_ranges(sheet: Worksheet) -> set[str]:
+    return {str(cell_range) for cell_range in sheet.merged_cells.ranges}
+
+
+async def test_create_merges_day_level_columns_across_several_project_rows(
     export_engine: AsyncEngine, export_settings: Settings
 ) -> None:
-    """A day archived from several source entries still produces exactly one
+    """`ai-docs/decisions.md` PROD-024: a `PROJECT_LIST` field stays inline in
 
-    block per field: all sources' entries appear as rows, in submission
-    order, with no `[N]`-style source numbering (unlike other field types).
+    the main table (not a separate block) as `项目`/`工作内容`/`进度` columns
+    at its own sort position; every other field (`日期`/`责任人`/plain
+    fields such as `明日工作计划`) is written once and vertically merged
+    across the day's project rows so it is never repeated.
+    """
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 3),
+            fields=_project_list_and_plan_fields(),
+            content={
+                "k1": [
+                    {"project": "测试项目1", "content": "测试测试", "status": "DONE"},
+                    {"project": "测试项目2", "content": "测试测试", "status": "DONE"},
+                ],
+                "k2": "明天计划",
+            },
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    assert _row_values(sheet, 2) == ["日期", "责任人", "项目", "工作内容", "进度", "明日工作计划"]
+    assert _row_values(sheet, 3) == [
+        "2026-08-03",
+        "owner",
+        "测试项目1",
+        "测试测试",
+        "已完成",
+        "明天计划",
+    ]
+    assert _row_values(sheet, 4) == [None, None, "测试项目2", "测试测试", "已完成", None]
+    assert sheet.max_row == 4
+
+    merges = _merge_ranges(sheet)
+    assert "A3:A4" in merges  # 日期
+    assert "B3:B4" in merges  # 责任人
+    assert "F3:F4" in merges  # 明日工作计划
+    # 项目/工作内容/进度 vary per row and must never be merged.
+    assert not any(cell_range.startswith(("C3", "D3", "E3")) for cell_range in merges)
+
+
+async def test_create_handles_a_single_project_without_merging(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """Requirement 6: exactly one project needs no merge — just one plain row."""
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 3),
+            fields=[_project_list_field("k1", "今日工作")],
+            content={"k1": [{"project": "测试项目1", "content": "测试测试", "status": "DONE"}]},
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    assert _row_values(sheet, 3) == ["2026-08-03", "owner", "测试项目1", "测试测试", "已完成"]
+    assert sheet.max_row == 3
+    # Only the title-row merge exists; no day-level merge was needed for one row.
+    assert _merge_ranges(sheet) == {"A1:E1"}
+
+
+async def test_create_handles_an_empty_project_list(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """Requirement 7: zero projects still produces the day's row, with blank
+
+    `项目`/`工作内容`/`进度` cells and (with only one row) no merge.
+    """
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 3),
+            fields=[_project_list_field("k1", "今日工作")],
+            content={"k1": []},
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    assert _row_values(sheet, 3) == ["2026-08-03", "owner", None, None, None]
+    assert sheet.max_row == 3
+    assert _merge_ranges(sheet) == {"A1:E1"}
+
+
+async def test_create_flattens_project_list_entries_from_every_source_without_reordering(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """A day archived from several source entries still produces one row per
+
+    project, in submission order — sources are not distinguished with `[N]`
+    numbering the way single-value fields are.
     """
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
@@ -405,47 +456,103 @@ async def test_create_flattens_project_list_entries_from_every_source_into_one_b
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    assert _row_values(sheet, 7) == ["项目A", "上午任务", "进行中"]
-    assert _row_values(sheet, 8) == ["项目B", "下午任务", "已完成"]
-    assert sheet.max_row == 8
+    assert _row_values(sheet, 3) == ["2026-08-05", "owner", "项目A", "上午任务", "进行中"]
+    assert _row_values(sheet, 4) == [None, None, "项目B", "下午任务", "已完成"]
+    assert "A3:A4" in _merge_ranges(sheet)
 
 
-async def test_create_appends_one_block_per_day_in_main_table_order_and_skips_empty_days(
+async def test_create_defuses_formula_like_project_and_content_cells(
     export_engine: AsyncEngine, export_settings: Settings
 ) -> None:
+    """`项目`/`工作内容` are standalone cells, so each is independently at risk
+
+    of Excel formula promotion and must go through `_defuse_formula` on its
+    own (unlike `进度`, which only ever holds a fixed-enum label).
+    """
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
         user = await _bootstrap_user(session)
-        older = await _archived_day(
-            session,
-            owner_id=user.id,
-            work_date=date(2026, 8, 4),
-            fields=[_project_list_field("k1", "今日工作")],
-            content={"k1": []},
-        )
-        newer = await _archived_day(
+        await _archived_day(
             session,
             owner_id=user.id,
             work_date=date(2026, 8, 5),
             fields=[_project_list_field("k1", "今日工作")],
-            content={"k1": [{"project": "项目A", "content": "内容A", "status": "TODO"}]},
+            content={
+                "k1": [
+                    {
+                        "project": '=HYPERLINK("http://evil.example","x")',
+                        "content": "=cmd|' /C calc'!A0",
+                        "status": "DONE",
+                    }
+                ]
+            },
         )
 
     async with session_factory() as session:
         job = await ExportService(session, export_settings).create(
-            user.id, daily_report_day_ids=[older.id, newer.id], filter_=None
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
         )
 
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    assert _row_values(sheet, 3)[0] == "2026-08-04"
-    assert _row_values(sheet, 4)[0] == "2026-08-05"
-    # Only one block (for 2026-08-05); the empty-list 2026-08-04 day contributes none.
-    assert _row_values(sheet, 6) == ["2026-08-05 owner · 今日工作"]
-    assert _row_values(sheet, 7) == ["项目", "工作内容", "完成状态"]
-    assert _row_values(sheet, 8) == ["项目A", "内容A", "未开始"]
-    assert sheet.max_row == 8
+    assert _row_values(sheet, 3) == [
+        "2026-08-05",
+        "owner",
+        '\'=HYPERLINK("http://evil.example","x")',
+        "'=cmd|' /C calc'!A0",
+        "已完成",
+    ]
+    assert sheet.cell(row=3, column=3).data_type != "f"
+    assert sheet.cell(row=3, column=4).data_type != "f"
+
+
+async def test_create_merges_independently_per_day(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """Two days with different project counts each get their own correct
+
+    row span and merge range; one day's expansion must not affect another's.
+    """
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 4),
+            fields=[_project_list_field("k1", "今日工作")],
+            content={"k1": [{"project": "项目A", "content": "内容A", "status": "TODO"}]},
+        )
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 5),
+            fields=[_project_list_field("k1", "今日工作")],
+            content={
+                "k1": [
+                    {"project": "项目B1", "content": "内容B1", "status": "DOING"},
+                    {"project": "项目B2", "content": "内容B2", "status": "DONE"},
+                ]
+            },
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    assert _row_values(sheet, 3) == ["2026-08-04", "owner", "项目A", "内容A", "未开始"]
+    assert _row_values(sheet, 4) == ["2026-08-05", "owner", "项目B1", "内容B1", "进行中"]
+    assert _row_values(sheet, 5) == [None, None, "项目B2", "内容B2", "已完成"]
+    assert sheet.max_row == 5
+    merges = _merge_ranges(sheet)
+    assert "A4:A5" in merges
+    assert "B4:B5" in merges
+    assert not any(cell_range.startswith(("A3", "B3")) for cell_range in merges)
 
 
 async def test_create_defuses_formula_like_content_but_preserves_bullet_dashes(

@@ -7,7 +7,6 @@ so `export.py` only ever deals with *what* data goes in which cell, never
 """
 
 import unicodedata
-from dataclasses import dataclass
 
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -32,10 +31,6 @@ _BODY_ALIGNMENT = Alignment(horizontal="left", vertical="center", wrap_text=True
 _BODY_ROW_MIN_HEIGHT = 20.0
 _BODY_ROW_LINE_HEIGHT = 15.0
 
-_BLOCK_TITLE_FONT = Font(name=_FONT_NAME, size=11, bold=True, color="FF1F3864")
-_BLOCK_TITLE_ALIGNMENT = Alignment(horizontal="left", vertical="center")
-_BLOCK_TITLE_ROW_HEIGHT = 22.0
-
 _BORDER_COLOR = "FFBFBFBF"
 _CELL_BORDER = Border(
     left=Side(style="thin", color=_BORDER_COLOR),
@@ -49,22 +44,6 @@ _MAX_COLUMN_WIDTH = 42.0
 _COLUMN_WIDTH_PADDING = 4.0
 
 
-@dataclass(frozen=True)
-class ProjectListBlockLayout:
-    """Row span of one `PROJECT_LIST` sub-table appended below the main table.
-
-    One block is one (day, field) pair with at least one entry: a bold
-    title row identifying the day/owner/field, a 3-column header row
-    (`项目`/`工作内容`/`完成状态`), and its data rows.
-    """
-
-    title_row: int
-    header_row: int
-    first_data_row: int
-    last_data_row: int
-    column_count: int = 3
-
-
 def style_report_sheet(
     sheet: Worksheet,
     *,
@@ -72,7 +51,6 @@ def style_report_sheet(
     first_data_row: int,
     last_data_row: int,
     column_count: int,
-    project_list_blocks: tuple[ProjectListBlockLayout, ...] = (),
 ) -> None:
     """Applies the enterprise daily-report look to an already-populated sheet.
 
@@ -80,43 +58,25 @@ def style_report_sheet(
     already written on `header_row`, and data rows `first_data_row..
     last_data_row` already filled across columns `1..column_count`. Only
     ever sets formatting (and the title cell's text) — never touches the
-    data cell values.
-
-    `project_list_blocks` styles each appended `PROJECT_LIST` sub-table the
-    same way (bold header, borders, wrap text) and folds their cells into
-    the same column-width pass as the main table, since a block's 3 columns
-    reuse the sheet's leftmost column letters and must not be narrower than
-    whatever the main table already needs there.
+    data cell values. Cells the caller has already merged (e.g. a
+    `PROJECT_LIST` day's `日期`/`责任人`/other single-value columns spanning
+    several project rows) are styled the same as any other cell — setting
+    `.font`/`.alignment`/`.border` on a merged-away `MergedCell` is safe in
+    openpyxl, only `.value` is read-only there.
     """
     _style_title(sheet, row=header_row - 1, column_count=column_count)
     _style_header(sheet, row=header_row, column_count=column_count)
-    _style_body(sheet, first_row=first_data_row, last_row=last_data_row, column_count=column_count)
-    for block in project_list_blocks:
-        _style_block_title(sheet, row=block.title_row)
-        _style_header(sheet, row=block.header_row, column_count=block.column_count)
-        _style_body(
-            sheet,
-            first_row=block.first_data_row,
-            last_row=block.last_data_row,
-            column_count=block.column_count,
-        )
-    block_last_rows = [block.last_data_row for block in project_list_blocks]
-    block_column_counts = [block.column_count for block in project_list_blocks]
+    _style_body(
+        sheet, first_row=first_data_row, last_row=last_data_row, column_count=column_count
+    )
     _autosize_columns(
         sheet,
         header_row=header_row,
         first_data_row=first_data_row,
-        last_data_row=max([last_data_row, *block_last_rows]),
-        column_count=max([column_count, *block_column_counts]),
+        last_data_row=last_data_row,
+        column_count=column_count,
     )
     sheet.freeze_panes = sheet.cell(row=first_data_row, column=1).coordinate
-
-
-def _style_block_title(sheet: Worksheet, *, row: int) -> None:
-    cell = sheet.cell(row=row, column=1)
-    cell.font = _BLOCK_TITLE_FONT
-    cell.alignment = _BLOCK_TITLE_ALIGNMENT
-    sheet.row_dimensions[row].height = _BLOCK_TITLE_ROW_HEIGHT
 
 
 def _style_title(sheet: Worksheet, *, row: int, column_count: int) -> None:

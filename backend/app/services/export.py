@@ -3,7 +3,7 @@ import json
 import logging
 import re
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from io import BytesIO
@@ -24,9 +24,9 @@ from app.repositories.user import UserRepository
 from app.schemas.daily_report import ProjectListEntry
 from app.schemas.daily_report_day import DayArchiveSnapshotData
 from app.schemas.export import ExportFilter
-from app.schemas.template import TemplateFieldData
+from app.schemas.template import FieldType, TemplateFieldData
 from app.services.daily_report_day import parse_day_archive_snapshot
-from app.services.export_style import ProjectListBlockLayout, style_report_sheet
+from app.services.export_style import style_report_sheet
 
 logger = logging.getLogger(__name__)
 
@@ -62,41 +62,40 @@ class ExportFileNotAvailableError(AppError):
 class ExportColumn:
     field_key: str
     header: str
+    field_type: FieldType
 
 
-def plan_export_columns(
-    snapshots: list[list[TemplateFieldData]],
-    *,
-    include: Callable[[TemplateFieldData], bool] = lambda _field: True,
-) -> list[ExportColumn]:
-    """Merges every included entry's field snapshot into one ordered column list.
+def plan_export_columns(snapshots: list[list[TemplateFieldData]]) -> list[ExportColumn]:
+    """Merges every entry's field snapshot into one ordered column list.
 
     `field_key` is immutable (database.md 3.4) so it is always the merge key;
     a field's *label* can change release to release, so the most recent
     snapshot that still carries the key wins for the displayed header
-    (requirements.md 4.4.2: label changes must not affect merging). Column
-    order follows first appearance across the chronologically ordered
-    snapshots (day by day, entry by entry within a day), so fields still in
-    use lead and fields only old entries used trail after them. Two distinct
+    (requirements.md 4.4.2: label changes must not affect merging), and the
+    same "most recent wins" rule applies to `field_type`. Column order
+    follows first appearance across the chronologically ordered snapshots
+    (day by day, entry by entry within a day), so fields still in use lead
+    and fields only old entries used trail after them. Two distinct
     `field_key`s that happen to end up with the same header text get a short
     `field_key` suffix appended so the generated columns stay unambiguous.
 
-    `include` lets a caller plan two disjoint column sets from the same
-    snapshots — e.g. the main table's columns (everything except
-    `PROJECT_LIST`) and the `PROJECT_LIST` block titles/headers — while
-    reusing the exact same ordering/label/dedup rules for both.
+    `PROJECT_LIST` columns stay in this same single ordered list — callers
+    that need to render them differently from a plain single-value column
+    (`build_export_workbook`) branch on `.field_type`, rather than this
+    function producing two separate lists, so a `PROJECT_LIST` field keeps
+    its natural position among the day's other fields.
     """
     order: dict[str, int] = {}
     label_by_key: dict[str, str] = {}
+    type_by_key: dict[str, FieldType] = {}
     next_index = 0
     for snapshot in snapshots:
         for field in sorted(snapshot, key=lambda item: item.sort_order):
-            if not include(field):
-                continue
             if field.field_key not in order:
                 order[field.field_key] = next_index
                 next_index += 1
             label_by_key[field.field_key] = field.label
+            type_by_key[field.field_key] = field.field_type
     ordered_keys = sorted(order, key=lambda key: order[key])
     header_counts = Counter(label_by_key.values())
     columns: list[ExportColumn] = []
@@ -104,7 +103,7 @@ def plan_export_columns(
         label = label_by_key[key]
         if header_counts[label] > 1:
             label = f"{label}({key[-4:]})"
-        columns.append(ExportColumn(field_key=key, header=label))
+        columns.append(ExportColumn(field_key=key, header=label, field_type=type_by_key[key]))
     return columns
 
 
@@ -124,7 +123,7 @@ def _defuse_formula(text: str) -> str:
     return f"'{text}" if text.startswith("=") else text
 
 
-_PROJECT_LIST_BLOCK_HEADERS = ["项目", "工作内容", "完成状态"]
+_PROJECT_LIST_SUB_HEADERS = ["项目", "工作内容", "进度"]
 _PROJECT_TASK_STATUS_LABELS = {"TODO": "未开始", "DOING": "进行中", "DONE": "已完成"}
 
 
@@ -168,89 +167,121 @@ def _project_list_entries(value: object) -> list[ProjectListEntry]:
     return [item for item in value if isinstance(item, ProjectListEntry)]
 
 
+@dataclass(frozen=True)
+class _ColumnLayout:
+    headers: list[str]
+    day_level_columns: list[int]
+    """1-based column indices that hold one value per day (vertically merged
+    across a day's rows when it has more than one `PROJECT_LIST` entry)."""
+    regular_column_index: dict[str, int]
+    """`field_key` -> 1-based column index, for every non-`PROJECT_LIST` field."""
+    project_list_column_ranges: dict[str, tuple[int, int, int]]
+    """`field_key` -> 1-based (project, content, progress) column indices,
+
+    for every `PROJECT_LIST` field."""
+
+
+def _plan_column_layout(columns: list[ExportColumn]) -> _ColumnLayout:
+    headers = list(_BASE_HEADERS)
+    day_level_columns = [1, 2]
+    regular_column_index: dict[str, int] = {}
+    project_list_column_ranges: dict[str, tuple[int, int, int]] = {}
+    for column in columns:
+        if column.field_type == "PROJECT_LIST":
+            start = len(headers) + 1
+            headers.extend(_PROJECT_LIST_SUB_HEADERS)
+            project_list_column_ranges[column.field_key] = (start, start + 1, start + 2)
+        else:
+            index = len(headers) + 1
+            headers.append(column.header)
+            day_level_columns.append(index)
+            regular_column_index[column.field_key] = index
+    return _ColumnLayout(
+        headers=headers,
+        day_level_columns=day_level_columns,
+        regular_column_index=regular_column_index,
+        project_list_column_ranges=project_list_column_ranges,
+    )
+
+
 def build_export_workbook(
-    days: list[DailyReportDay],
-    columns: list[ExportColumn],
-    project_list_columns: list[ExportColumn],
-    *,
-    owner_username: str,
+    days: list[DailyReportDay], columns: list[ExportColumn], *, owner_username: str
 ) -> bytes:
     """Pure, blocking xlsx builder — callers must run it off the event loop.
 
-    `PROJECT_LIST` fields are excluded from `columns`/the main table (a
-    day with several projects cannot fit one cell) and instead rendered as
-    a real 2D sub-table appended below the main table: one titled block per
-    (day, field) that has at least one entry, with its own bold header row
-    (`项目`/`工作内容`/`完成状态`) and one data row per project entry.
+    Each day is one or more rows: exactly one `PROJECT_LIST` entry per row,
+    at least one row even with zero entries. Day-level values (日期/责任人
+    and every non-`PROJECT_LIST` field) are written once on the day's first
+    row and vertically merged across the rest so they are never repeated.
     """
     workbook = Workbook()
     sheet = workbook.active
     if sheet is None:  # pragma: no cover - a fresh Workbook() always has an active sheet
         raise RuntimeError("workbook has no active worksheet")
     sheet.title = _SHEET_TITLE
-    headers = [*_BASE_HEADERS, *(column.header for column in columns)]
+    layout = _plan_column_layout(columns)
     header_row = 2
-    sheet.append([None] * len(headers))  # row 1: title, filled in by style_report_sheet
-    sheet.append(headers)  # row 2: header
-    day_snapshots: list[DayArchiveSnapshotData] = []
+    sheet.append([None] * len(layout.headers))  # row 1: title, filled in by style_report_sheet
+    sheet.append(layout.headers)  # row 2: header
+
     for day in days:
         snapshot: DayArchiveSnapshotData = parse_day_archive_snapshot(
             day.archive_snapshot_json or ""
         )
-        day_snapshots.append(snapshot)
         entries = snapshot.entries
-        row: list[str | int | float | None] = [
-            day.work_date.isoformat(),
-            owner_username,
-        ]
-        for column in columns:
-            values_by_position = [
-                (index + 1, entry.content.get(column.field_key))
-                for index, entry in enumerate(entries)
-            ]
-            row.append(_multi_source_cell(values_by_position))
-        sheet.append(row)
-    last_data_row = header_row + len(days)
 
-    blocks: list[ProjectListBlockLayout] = []
-    for day, snapshot in zip(days, day_snapshots, strict=True):
-        for column in project_list_columns:
-            project_entries = [
-                item
-                for entry in snapshot.entries
-                for item in _project_list_entries(entry.content.get(column.field_key))
-            ]
-            if not project_entries:
-                continue
-            sheet.append([])  # blank row separates this block from whatever precedes it
-            sheet.append([f"{day.work_date.isoformat()} {owner_username} · {column.header}"])
-            title_row = sheet.max_row
-            sheet.append(_PROJECT_LIST_BLOCK_HEADERS)
-            block_header_row = sheet.max_row
-            for item in project_entries:
-                sheet.append(
-                    [
-                        _defuse_formula(item.project),
-                        _defuse_formula(item.content),
-                        _PROJECT_TASK_STATUS_LABELS[item.status],
-                    ]
+        regular_values: dict[str, str | int | float | None] = {}
+        project_rows: dict[str, list[ProjectListEntry]] = {}
+        for column in columns:
+            if column.field_type == "PROJECT_LIST":
+                project_rows[column.field_key] = [
+                    item
+                    for entry in entries
+                    for item in _project_list_entries(entry.content.get(column.field_key))
+                ]
+            else:
+                values_by_position = [
+                    (index + 1, entry.content.get(column.field_key))
+                    for index, entry in enumerate(entries)
+                ]
+                regular_values[column.field_key] = _multi_source_cell(values_by_position)
+        row_count = max([1, *(len(items) for items in project_rows.values())])
+
+        first_row = sheet.max_row + 1
+        for offset in range(row_count):
+            row: list[str | int | float | None] = [None] * len(layout.headers)
+            if offset == 0:
+                row[0] = day.work_date.isoformat()
+                row[1] = owner_username
+                for field_key, index in layout.regular_column_index.items():
+                    row[index - 1] = regular_values[field_key]
+            for field_key, items in project_rows.items():
+                if offset >= len(items):
+                    continue
+                item = items[offset]
+                project_col, content_col, progress_col = layout.project_list_column_ranges[
+                    field_key
+                ]
+                row[project_col - 1] = _defuse_formula(item.project)
+                row[content_col - 1] = _defuse_formula(item.content)
+                row[progress_col - 1] = _PROJECT_TASK_STATUS_LABELS[item.status]
+            sheet.append(row)
+        last_row = sheet.max_row
+        if row_count > 1:
+            for column_index in layout.day_level_columns:
+                sheet.merge_cells(
+                    start_row=first_row,
+                    start_column=column_index,
+                    end_row=last_row,
+                    end_column=column_index,
                 )
-            blocks.append(
-                ProjectListBlockLayout(
-                    title_row=title_row,
-                    header_row=block_header_row,
-                    first_data_row=block_header_row + 1,
-                    last_data_row=sheet.max_row,
-                )
-            )
 
     style_report_sheet(
         sheet,
         header_row=header_row,
         first_data_row=header_row + 1,
-        last_data_row=last_data_row,
-        column_count=len(headers),
-        project_list_blocks=tuple(blocks),
+        last_data_row=sheet.max_row,
+        column_count=len(layout.headers),
     )
     buffer = BytesIO()
     workbook.save(buffer)
@@ -304,12 +335,7 @@ class ExportService:
             for day in days
             for entry in parse_day_archive_snapshot(day.archive_snapshot_json or "").entries
         ]
-        columns = plan_export_columns(
-            snapshots, include=lambda field: field.field_type != "PROJECT_LIST"
-        )
-        project_list_columns = plan_export_columns(
-            snapshots, include=lambda field: field.field_type == "PROJECT_LIST"
-        )
+        columns = plan_export_columns(snapshots)
 
         now = self._clock()
         job = ExportJob(
@@ -331,11 +357,7 @@ class ExportService:
         file_path = self._settings.export_temp_dir / f"{job.id}.xlsx"
         try:
             file_bytes = await asyncio.to_thread(
-                build_export_workbook,
-                days,
-                columns,
-                project_list_columns,
-                owner_username=user.username,
+                build_export_workbook, days, columns, owner_username=user.username
             )
             await asyncio.to_thread(file_path.write_bytes, file_bytes)
         except Exception:
