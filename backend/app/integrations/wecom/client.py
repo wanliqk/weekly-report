@@ -1,0 +1,601 @@
+"""`WeComInternalClient`: async HTTP client for WeCom's unofficial internal
+journal endpoints (`docs/方案设计.md` §2.4/§8).
+
+Scope boundary (`WECOM-04`): this module is a pure protocol client. It does
+not know about local users, templates, `daily_report_days`, or the sync
+state machine — it only knows how to turn a Cookie jar + a small set of
+already-resolved values into one of the three verified requests, and how to
+turn the raw HTTP response back into a typed DTO or a classified exception.
+Field mapping (which local field becomes which `question_id`) is `WECOM-05`;
+orchestration/idempotency/retry policy is `WECOM-06`.
+
+Security posture (`docs/方案设计.md` §12, `SEC-013`/`SEC-014`):
+- The base URL is hardcoded to `https://doc.weixin.qq.com` and is not a
+  constructor parameter; every request is re-validated against it
+  immediately before being sent, so no caller-supplied value can ever change
+  the target host (SSRF defense in depth).
+- Redirects are never followed (`follow_redirects=False`); a 3xx response is
+  treated as an auth-expired signal, not something to chase.
+- Nothing about the request (Cookie header value, JSON/multipart body) is
+  ever logged. The only optional debug log line carries method, host, a
+  path template, an outcome category, and a duration.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any, Final
+from urllib.parse import urlsplit
+
+import httpx
+from pydantic import ValidationError
+
+from app.core.clock import Clock, utc_now
+from app.integrations.wecom.schemas import (
+    WeComCookieIn,
+    WeComJournalEntry,
+    WeComJournalPage,
+    WeComQuestionItem,
+    WeComSubmissionResult,
+    WeComSubmitDailyPayload,
+    WeComTemplateEntry,
+    WeComTemplateInfo,
+)
+
+logger = logging.getLogger(__name__)
+
+_ALLOWED_HOST: Final = "doc.weixin.qq.com"
+_BASE_URL: Final = f"https://{_ALLOWED_HOST}"
+
+_GET_TEMPLATE_INFO_PATH: Final = "/journal/get_template_combine_info"
+_LIST_JOURNALS_PATH: Final = "/wework/journal/get_journal_list"
+_SUBMIT_DAILY_PATH: Final = "/formcol/answer_page"
+
+_SID_COOKIE_NAME: Final = "wedoc_sid"
+
+# Defense against an unbounded/pathological response body — these are small
+# JSON APIs; anything past these thresholds is treated as a protocol anomaly
+# rather than parsed (docs/方案设计.md §8 point 3: "JSON 深度/大小合理性").
+_MAX_RESPONSE_BYTES: Final = 5_000_000
+_MAX_JSON_DEPTH: Final = 32
+
+# "远端列表接口的分页必须有最大页数和总项数限制,避免异常响应导致无限扫描"
+# (docs/方案设计.md §10.2). This Client only makes one call per invocation (no
+# looping), but a single response claiming an implausible number of entries
+# is itself treated as a protocol anomaly rather than trusted.
+_MAX_JOURNAL_ENTRIES: Final = 200
+_DEFAULT_JOURNAL_LIMIT: Final = 50
+
+_DEFAULT_TIMEOUT: Final = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
+
+
+class WeComClientError(Exception):
+    """Base class for every classified failure this Client raises.
+
+    `detail`, like `message`, must only ever carry safe-to-log
+    classification context (an HTTP status, a business code, a field name) —
+    never a Cookie, a request/response body, or a query string.
+    """
+
+    def __init__(self, message: str, *, detail: str | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.detail = detail
+
+
+class WeComAuthExpired(WeComClientError):
+    """Cookie invalid/expired, `wedoc_sid` missing, a 3xx redirect, or an
+    HTML (login-page-shaped) response where JSON was expected."""
+
+
+class WeComSchemaChanged(WeComClientError):
+    """The remote form's question structure looks structurally broken (e.g.
+    a `question` item is missing an identifying field).
+
+    This only reports "something about the question structure looks off" at
+    the raw-shape level; comparing the result against an *expected*
+    structure/schema fingerprint is the caller's job (`WECOM-05`/`WECOM-06`)
+    — this Client does not hold or maintain that expected-structure state.
+    """
+
+
+class WeComBusinessRejected(WeComClientError):
+    """A definite non-zero business code (`head.ret` / `errcode`) — the
+    remote explicitly processed the request and declined it."""
+
+    def __init__(self, message: str, *, biz_code: int, detail: str | None = None) -> None:
+        super().__init__(message, detail=detail)
+        self.biz_code = biz_code
+
+
+class WeComProtocolChanged(WeComClientError):
+    """HTTP 200 with a body, but the shape doesn't match the documented
+    contract (missing top-level node, oversized/too-deep JSON, an
+    implausibly large list, non-JSON content type on what should be a safe
+    read). Only raised for read-only calls, where nothing was submitted."""
+
+
+class WeComTransportFailed(WeComClientError):
+    """DNS/TLS/connect failure, or the target host failed Client-side
+    allowlist validation — the request body was never sent."""
+
+
+class WeComOutcomeUncertain(WeComClientError):
+    """A write/read timed out, or `submit_daily`'s response came back
+    malformed after HTTP 200 — the remote may or may not have accepted the
+    write. Callers must reconcile remotely before ever retrying
+    (`SEC-015`/`docs/方案设计.md` §10.3)."""
+
+
+def _coerce_biz_code(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _assert_allowed_target(url: str) -> None:
+    """Reject anything that isn't `https://doc.weixin.qq.com/...`.
+
+    Called immediately before every request is sent, even though the base
+    URL is a hardcoded module constant — this is deliberate defense in depth
+    (`docs/方案设计.md` §12: "HTTP Client 只允许固定 HTTPS 主机...防止 SSRF") and is
+    also what the "host lock" test exercises directly.
+    """
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() != _ALLOWED_HOST:
+        raise WeComTransportFailed("目标主机不受信任,已拒绝发起请求")
+
+
+def _cookie_domain_matches(cookie_domain: str, host: str) -> bool:
+    domain = cookie_domain.strip().lower().lstrip(".")
+    host = host.lower()
+    return host == domain or host.endswith(f".{domain}")
+
+
+def _cookie_path_matches(cookie_path: str, request_path: str) -> bool:
+    """RFC 6265 §5.1.4 path-match: exact match, or `cookie_path` is a proper
+    ancestor segment of `request_path`."""
+    path = cookie_path or "/"
+    if not path.startswith("/"):
+        path = f"/{path}"
+    if request_path == path:
+        return True
+    if request_path.startswith(path):
+        return path.endswith("/") or request_path[len(path)] == "/"
+    return False
+
+
+def select_cookie_header(
+    cookie_jar: Sequence[WeComCookieIn], url: str, *, now: datetime
+) -> tuple[str, str | None]:
+    """Filter `cookie_jar` down to what applies to `url` and build a
+    `Cookie:` header value plus the extracted `wedoc_sid` (or `None`).
+
+    A cookie is kept only if its domain matches (or is a parent domain of)
+    the target host, its path is a match/ancestor of the target path, it
+    isn't `secure`-only on a non-https URL, and it isn't already expired.
+    Does not raise — callers decide what a missing `wedoc_sid` means.
+    """
+    parsed = urlsplit(url)
+    host = parsed.hostname or ""
+    path = parsed.path or "/"
+    is_https = parsed.scheme == "https"
+
+    pairs: list[tuple[str, str]] = []
+    wedoc_sid: str | None = None
+    for cookie in cookie_jar:
+        if not _cookie_domain_matches(cookie.domain, host):
+            continue
+        if not _cookie_path_matches(cookie.path, path):
+            continue
+        if cookie.secure and not is_https:
+            continue
+        if cookie.expiration_date is not None:
+            expires_at = datetime.fromtimestamp(cookie.expiration_date, tz=UTC)
+            if expires_at <= now:
+                continue
+        pairs.append((cookie.name, cookie.value))
+        if cookie.name == _SID_COOKIE_NAME:
+            wedoc_sid = cookie.value
+
+    cookie_header = "; ".join(f"{name}={value}" for name, value in pairs)
+    return cookie_header, wedoc_sid
+
+
+def _json_depth(value: Any, *, current: int = 0) -> int:
+    if current > _MAX_JSON_DEPTH:
+        return current
+    if isinstance(value, dict):
+        if not value:
+            return current + 1
+        return max(_json_depth(v, current=current + 1) for v in value.values())
+    if isinstance(value, list):
+        if not value:
+            return current + 1
+        return max(_json_depth(v, current=current + 1) for v in value)
+    return current
+
+
+def _parse_json_response(response: httpx.Response, *, on_send: bool) -> dict[str, Any]:
+    """Validate status/content-type/size/depth and return the parsed JSON
+    object. `on_send=True` (the submit endpoint, where the body has
+    definitely left the process) turns shape failures into
+    `WeComOutcomeUncertain` instead of `WeComProtocolChanged`, matching
+    `docs/方案设计.md` §11's "HTTP 200 但 JSON/节点变化...若已发送提交则 uncertain,只读
+    接口则 schema_changed/协议错误" rule.
+    """
+    if 300 <= response.status_code < 400:
+        raise WeComAuthExpired("登录状态已失效(收到重定向响应)")
+    if response.status_code in (401, 403):
+        raise WeComAuthExpired("登录状态已失效")
+    if response.status_code != 200:
+        message = f"远端返回非预期状态码 {response.status_code}"
+        raise WeComOutcomeUncertain(message) if on_send else WeComProtocolChanged(message)
+
+    content_type = response.headers.get("content-type", "")
+    if "json" not in content_type.lower():
+        raise WeComAuthExpired("登录状态已失效(收到非 JSON 响应,疑似登录页拦截)")
+
+    if len(response.content) > _MAX_RESPONSE_BYTES:
+        message = "响应体超出合理大小,判定为协议异常"
+        raise WeComOutcomeUncertain(message) if on_send else WeComProtocolChanged(message)
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        message = "响应不是合法 JSON"
+        if on_send:
+            raise WeComOutcomeUncertain(message) from exc
+        raise WeComProtocolChanged(message) from exc
+
+    if not isinstance(payload, dict):
+        message = "响应 JSON 顶层结构不是对象"
+        if on_send:
+            raise WeComOutcomeUncertain(message)
+        raise WeComProtocolChanged(message)
+
+    if _json_depth(payload) > _MAX_JSON_DEPTH:
+        message = "响应 JSON 嵌套深度超出合理范围,判定为协议异常"
+        if on_send:
+            raise WeComOutcomeUncertain(message)
+        raise WeComProtocolChanged(message)
+
+    return payload
+
+
+class WeComInternalClient:
+    """Async HTTP client for the three verified WeCom internal endpoints.
+
+    Exposes exactly three methods: `get_template_info`, `list_journals`,
+    `submit_daily` (`docs/方案设计.md` §8). Not thread-safe across event
+    loops, same as any `httpx.AsyncClient`; construct one per request scope.
+    """
+
+    def __init__(
+        self,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        clock: Clock = utc_now,
+    ) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=_BASE_URL,
+            timeout=_DEFAULT_TIMEOUT,
+            follow_redirects=False,
+            transport=transport,
+        )
+        self._clock = clock
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def __aenter__(self) -> WeComInternalClient:
+        return self
+
+    async def __aexit__(self, *_exc_info: object) -> None:
+        await self.aclose()
+
+    # -- public protocol methods -------------------------------------------------
+
+    async def get_template_info(
+        self, cookie_jar: Sequence[WeComCookieIn], form_id: str
+    ) -> WeComTemplateInfo:
+        cookie_header, _sid = self._select_or_raise(cookie_jar, _GET_TEMPLATE_INFO_PATH)
+        payload = await self._send_json(
+            _GET_TEMPLATE_INFO_PATH,
+            params={"_prefetch": "1"},
+            json_body={
+                "form_id": form_id,
+                "fetch_journal_list": True,
+                "is_pre_create": False,
+                "is_answer_from_share": False,
+                "is_answer_from_workplace": False,
+                "fetch_submission_type": 1,
+                "is_only_view": True,
+            },
+            cookie_header=cookie_header,
+            on_send=False,
+        )
+        return self._parse_template_info(payload)
+
+    async def list_journals(
+        self,
+        cookie_jar: Sequence[WeComCookieIn],
+        template_id: str,
+        cursor: str | None,
+        *,
+        limit: int = _DEFAULT_JOURNAL_LIMIT,
+    ) -> WeComJournalPage:
+        cookie_header, sid = self._select_or_raise(cookie_jar, _LIST_JOURNALS_PATH)
+        payload = await self._send_json(
+            _LIST_JOURNALS_PATH,
+            params={"sid": sid, "wedoc_xsrf": "1"},
+            json_body={
+                "lastjournal_id": cursor or "",
+                "direction": 1,
+                "limit": limit,
+                "isconditionquery": True,
+                "querydetail": {
+                    "submission_type": 1,
+                    "template_id": template_id,
+                    "partyids": [],
+                    "vids": [],
+                },
+            },
+            cookie_header=cookie_header,
+            on_send=False,
+        )
+        return self._parse_journal_page(payload)
+
+    async def submit_daily(
+        self,
+        cookie_jar: Sequence[WeComCookieIn],
+        payload: WeComSubmitDailyPayload,
+    ) -> WeComSubmissionResult:
+        cookie_header, sid = self._select_or_raise(cookie_jar, _SUBMIT_DAILY_PATH)
+
+        form_reply = json.dumps(
+            {"items": [item.model_dump() for item in payload.items]}, ensure_ascii=False
+        )
+        check_setting = json.dumps({"can_anonymous": 2}, ensure_ascii=False)
+        wwjournal_data = json.dumps(
+            {
+                "entry": {
+                    "mngreporter": [{"vid": vid} for vid in payload.mngreporter_vids],
+                    "reporter": [{"vid": vid} for vid in payload.reporter_vids],
+                    "templateid": payload.template_id,
+                    "doc_info": {
+                        "type": 2,
+                        "form_id": payload.form_id,
+                        "template_id": payload.template_id,
+                    },
+                }
+            },
+            ensure_ascii=False,
+        )
+        # Field order mirrors `tests/fixtures/wecom/answer_page_request.http`.
+        fields: list[tuple[str, str]] = [
+            ("form_id", payload.form_id),
+            ("form_reply", form_reply),
+            ("type", "8"),
+            ("check_setting", check_setting),
+            ("use_anonymous", "false"),
+            ("submit_again", "true" if payload.submit_again else "false"),
+            ("wwjournal_data", wwjournal_data),
+            ("isSendToRoom", "false"),
+            ("f", "json"),
+        ]
+
+        response_payload = await self._send_multipart(
+            _SUBMIT_DAILY_PATH,
+            params={"sid": sid, "wedoc_xsrf": "1"},
+            fields=fields,
+            cookie_header=cookie_header,
+        )
+        return self._parse_submission_result(response_payload)
+
+    # -- request plumbing ---------------------------------------------------------
+
+    def _select_or_raise(self, cookie_jar: Sequence[WeComCookieIn], path: str) -> tuple[str, str]:
+        url = f"{_BASE_URL}{path}"
+        _assert_allowed_target(url)
+        cookie_header, wedoc_sid = select_cookie_header(cookie_jar, url, now=self._clock())
+        if not wedoc_sid:
+            raise WeComAuthExpired("企业微信登录状态缺失(未找到 wedoc_sid),已拒绝发起请求")
+        return cookie_header, wedoc_sid
+
+    async def _send_json(
+        self,
+        path: str,
+        *,
+        params: dict[str, str],
+        json_body: dict[str, Any],
+        cookie_header: str,
+        on_send: bool,
+    ) -> dict[str, Any]:
+        started = time.monotonic()
+        try:
+            response = await self._client.post(
+                path, params=params, json=json_body, headers={"Cookie": cookie_header}
+            )
+        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as exc:
+            self._log(path, "transport_failed", started)
+            raise WeComTransportFailed("无法连接企业微信服务") from exc
+        except (httpx.WriteTimeout, httpx.ReadTimeout) as exc:
+            self._log(path, "outcome_uncertain", started)
+            raise WeComOutcomeUncertain("请求超时,结果不确定") from exc
+        except httpx.HTTPError as exc:
+            self._log(path, "transport_failed", started)
+            raise WeComTransportFailed("网络请求失败") from exc
+
+        try:
+            result = _parse_json_response(response, on_send=on_send)
+        except WeComClientError:
+            self._log(path, "protocol_error", started)
+            raise
+        self._log(path, "ok", started)
+        return result
+
+    async def _send_multipart(
+        self,
+        path: str,
+        *,
+        params: dict[str, str],
+        fields: list[tuple[str, str]],
+        cookie_header: str,
+    ) -> dict[str, Any]:
+        # `files=[(name, (None, value)), ...]` forces httpx's own
+        # `MultipartStream` encoding (random per-request boundary, never a
+        # fixed/hardcoded string) while rendering byte-identical to a plain
+        # data field, since a `None` filename suppresses the
+        # `filename=`/`Content-Type:` parts a real file upload would add.
+        files: list[tuple[str, tuple[None, str]]] = [
+            (name, (None, value)) for name, value in fields
+        ]
+        started = time.monotonic()
+        try:
+            response = await self._client.post(
+                path, params=params, files=files, headers={"Cookie": cookie_header}
+            )
+        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as exc:
+            self._log(path, "transport_failed", started)
+            raise WeComTransportFailed("无法连接企业微信服务") from exc
+        except (httpx.WriteTimeout, httpx.ReadTimeout) as exc:
+            self._log(path, "outcome_uncertain", started)
+            raise WeComOutcomeUncertain("请求超时,结果不确定") from exc
+        except httpx.HTTPError as exc:
+            self._log(path, "transport_failed", started)
+            raise WeComTransportFailed("网络请求失败") from exc
+
+        try:
+            result = _parse_json_response(response, on_send=True)
+        except WeComClientError:
+            self._log(path, "protocol_error", started)
+            raise
+        self._log(path, "ok", started)
+        return result
+
+    def _log(self, path: str, outcome: str, started: float) -> None:
+        # Method/host/path template/outcome/duration only — never headers,
+        # Cookie values, query strings, or bodies (docs/方案设计.md §8 point 2).
+        logger.debug(
+            "wecom_client request host=%s path=%s outcome=%s duration_ms=%d",
+            _ALLOWED_HOST,
+            path,
+            outcome,
+            int((time.monotonic() - started) * 1000),
+        )
+
+    # -- response parsing -----------------------------------------------------
+
+    def _parse_template_info(self, payload: dict[str, Any]) -> WeComTemplateInfo:
+        head = payload.get("head")
+        if not isinstance(head, dict) or "ret" not in head:
+            raise WeComProtocolChanged("响应缺少 head.ret 节点")
+        ret = head["ret"]
+        if ret != 0:
+            raise WeComBusinessRejected("获取模板信息被拒绝", biz_code=_coerce_biz_code(ret))
+
+        body = payload.get("body")
+        if not isinstance(body, dict):
+            raise WeComProtocolChanged("响应缺少 body 节点")
+
+        template_id = body.get("template_id")
+        form_id = body.get("form_id")
+        entrys = body.get("entrys")
+        form = body.get("form")
+        if (
+            not isinstance(template_id, str | int)
+            or not isinstance(form_id, str | int)
+            or not isinstance(entrys, list)
+            or not isinstance(form, dict)
+        ):
+            raise WeComProtocolChanged("响应 body 缺少 template_id/form_id/entrys/form 节点")
+
+        try:
+            entries = [WeComTemplateEntry.model_validate(entry) for entry in entrys]
+        except ValidationError as exc:
+            raise WeComProtocolChanged("body.entrys 元素结构与预期不符") from exc
+
+        question = form.get("question")
+        items = question.get("items") if isinstance(question, dict) else None
+        if not isinstance(items, list):
+            raise WeComSchemaChanged("表单题目结构(body.form.question.items)缺失")
+        try:
+            questions = [WeComQuestionItem.model_validate(item) for item in items]
+        except ValidationError as exc:
+            raise WeComSchemaChanged("表单题目结构与预期不符") from exc
+
+        return WeComTemplateInfo(
+            template_id=str(template_id),
+            form_id=str(form_id),
+            entries=entries,
+            questions=questions,
+        )
+
+    def _parse_journal_page(self, payload: dict[str, Any]) -> WeComJournalPage:
+        if "errcode" not in payload:
+            raise WeComProtocolChanged("响应缺少 errcode 节点")
+        errcode = payload["errcode"]
+        if errcode != 0:
+            raise WeComBusinessRejected("获取日报列表被拒绝", biz_code=_coerce_biz_code(errcode))
+
+        entrys = payload.get("entrys")
+        if not isinstance(entrys, list):
+            raise WeComProtocolChanged("响应缺少 entrys 节点")
+        if len(entrys) > _MAX_JOURNAL_ENTRIES:
+            raise WeComProtocolChanged("entrys 数量超出合理范围,判定为协议异常")
+
+        try:
+            entries = [WeComJournalEntry.model_validate(entry) for entry in entrys]
+        except ValidationError as exc:
+            raise WeComProtocolChanged("entrys 元素结构与预期不符") from exc
+
+        return WeComJournalPage(entries=entries)
+
+    def _parse_submission_result(self, payload: dict[str, Any]) -> WeComSubmissionResult:
+        head = payload.get("head")
+        if not isinstance(head, dict) or "ret" not in head:
+            raise WeComOutcomeUncertain("响应缺少 head.ret 节点,无法确认是否受理")
+        ret = head["ret"]
+        if ret != 0:
+            raise WeComBusinessRejected("提交日报被拒绝", biz_code=_coerce_biz_code(ret))
+
+        body = payload.get("body")
+        if not isinstance(body, dict):
+            raise WeComOutcomeUncertain("响应缺少 body 节点,无法确认是否受理")
+
+        answer_replys = body.get("answer_replys")
+        if not isinstance(answer_replys, list) or not answer_replys:
+            raise WeComOutcomeUncertain("响应缺少 answer_replys,无法确认是否受理")
+        first = answer_replys[0]
+        if not isinstance(first, dict):
+            raise WeComOutcomeUncertain("answer_replys[0] 结构与预期不符")
+
+        answer_id = first.get("answer_id")
+        reply_id = first.get("reply_id")
+        journal_uuid = first.get("journaluuid")
+        user_vid = body.get("user_vid")
+        if answer_id is None or reply_id is None or journal_uuid is None or user_vid is None:
+            raise WeComOutcomeUncertain("提交回执缺少必需标识字段")
+
+        repeat_before_replys = body.get("repeat_before_replys")
+        has_repeat = bool(
+            isinstance(repeat_before_replys, dict) and repeat_before_replys.get("answer_replys")
+        )
+
+        return WeComSubmissionResult(
+            answer_id=str(answer_id),
+            reply_id=str(reply_id),
+            journal_uuid=str(journal_uuid),
+            user_vid=str(user_vid),
+            has_repeat_before_replys=has_repeat,
+        )

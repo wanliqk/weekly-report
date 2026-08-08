@@ -191,8 +191,8 @@ uv sync --directory backend --frozen
 | WECOM-01 | 主 Agent | 需求与技术方案文档 | 用户需求、当前代码与样例分析 | DONE | 正式需求/方案、架构/API/数据库/模块摘要、决策/风险和任务拆分已更新；未修改代码或原始资料 |
 | WECOM-02 | 主 Agent | 企业微信数据基础 | WECOM-00、WECOM-01 | DONE | 三张 ORM 表、Repository、Pydantic 配置、Alembic 迁移和约束/迁移测试 |
 | WECOM-03 | 主 Agent | Electron 登录与凭证桥 | WECOM-00、WECOM-01 | DONE | Main-only secret、安全登录窗口、`safeStorage` Cookie jar、窄 IPC/内部鉴权和构建产物扫描 |
-| WECOM-04 | 主 Agent | 企业微信内部协议 Client | WECOM-00、WECOM-02、WECOM-03 | TODO | 模板/列表/提交 Client、Cookie URL 筛选、协议 DTO、脱敏 fixture 合同测试 |
-| WECOM-05 | 主 Agent | 字段映射与预览 | WECOM-02 | TODO | 正式快照 Mapper、动态 `field_key` 配置、`PROJECT_LIST`、结构/载荷指纹与边界测试 |
+| WECOM-04 | 主 Agent | 企业微信内部协议 Client | WECOM-00、WECOM-02、WECOM-03 | DONE | 模板/列表/提交 Client、Cookie URL 筛选、协议 DTO、脱敏 fixture 合同测试 |
+| WECOM-05 | 主 Agent | 字段映射与预览 | WECOM-02 | DONE | 正式快照 Mapper、动态 `field_key` 配置、`PROJECT_LIST`、结构/载荷指纹与边界测试 |
 | WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | TODO | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
 | WECOM-07 | 主 Agent | Electron/Vue 交互 | WECOM-03、WECOM-06 | TODO | 设置连接/映射、日报预览/同步、历史/重试 UI 及前端测试 |
 | WECOM-08 | 主 Agent | 全链路验收与发布 | WECOM-02..07 | TODO | 全量门禁、E2E、受控企业微信测试账号冒烟、生产打包升级、凭证扫描和独立安全审查 |
@@ -229,6 +229,36 @@ uv sync --directory backend --frozen
 - 主 Agent 逐文件读取了两份 diff 的全部新增/修改代码（不仅是 Agent 自述摘要），确认字段设计、安全边界（`safeStorage` 无明文回退、导航白名单、IPC 受信任 frame 校验、Main-only secret 不进 IPC）均与设计文档一致，未发现 P0/P1。
 - 合并后重新执行的全量门禁（而非分别信任两个 Agent 各自门禁结果）：后端 `uv run ruff check .`、`uv run mypy`（strict，**132 个源文件**）均通过，`uv run pytest -q`（**342 项收集，0 failure/0 error**，`--junit-xml` 确认，终端最终汇总行在本环境下持续性缺失与用例结果无关）；前端 `npm run lint`、`npm run typecheck`、`npm test`（**26 文件 192 项**）、`npm run build` 均通过；主 Agent 独立执行 `grep` 复核构建产物未发现 `X-Main-Bridge-Secret`/`wecom` 相关字符串泄露到 `preload`/`renderer` 产物。`git diff --check` 通过（仅 LF→CRLF 提示），`git status --short` 只包含两个任务范围内的文件，无非预期改动。
 
+### WECOM-04/WECOM-05 验证记录
+
+`WECOM-04`（内部协议 Client，backend）与 `WECOM-05`（字段映射与预览，backend）依赖分别是 `WECOM-00`/`WECOM-02`/`WECOM-03` 和 `WECOM-02`，二者互不依赖，文件范围完全不重叠（`app/integrations/wecom/**` + `tests/test_wecom_client.py` vs `app/services/wecom_mapper.py` + `tests/test_wecom_mapper.py`），唯一潜在共享风险点是 `backend/pyproject.toml`/`uv.lock`（只有 `WECOM-04` 需要改，用于把 `httpx` 从 dev 依赖迁移为生产依赖），已要求 `WECOM-04` 尽早一次性完成该步骤以降低两个 Agent 共享同一 `backend/.venv` 时的环境竞态窗口；两个 Agent 按此拆分并行实现，主 Agent 逐文件复核两份 diff 后统一运行合并后的全量门禁、同步文档并提交。
+
+**WECOM-04（`app/integrations/wecom/`）**：
+
+- 依赖迁移：`httpx==0.28.1` 从 `[dependency-groups].dev` 移到 `[project.dependencies]`（版本不变），`uv lock`+`uv sync --frozen` 已验证生产环境可 `import httpx`。
+- `WeComInternalClient`（`client.py`）：base URL 硬编码 `https://doc.weixin.qq.com`（非构造参数），每次请求前用 `_assert_allowed_target()` 二次校验（纵深防御，防 SSRF）；`follow_redirects=False`，3xx 归类为 `WeComAuthExpired`；`get_template_info`/`list_journals`/`submit_daily` 三方法齐全，`list_journals` 额外带 `limit` 关键字参数（默认 50，未破坏原定位置签名）；`_MAX_JOURNAL_ENTRIES=200` 防止异常响应触发无界扫描。
+- 六个异常类型（`WeComAuthExpired`/`WeComSchemaChanged`/`WeComBusinessRejected`/`WeComProtocolChanged`/`WeComTransportFailed`/`WeComOutcomeUncertain`）均继承自 `WeComClientError`；关键设计：只读接口（模板信息/日报列表）的结构校验失败归 `WeComProtocolChanged`，写接口（提交日报）HTTP 200 之后的结构校验失败归 `WeComOutcomeUncertain`——同一类校验失败在读/写接口上被分类到不同异常，精确对应 `docs/方案设计.md` §11"若已发送提交则 uncertain，只读接口则 schema_changed/协议错误"。
+- `select_cookie_header()`：纯函数，按 RFC 6265 domain/path 匹配规则 + `secure`/过期时间筛选 Cookie，独立提取 `wedoc_sid`；缺失时 `_select_or_raise()` 直接拒绝、不发请求。
+- multipart 提交：用 `files=[(name, (None, value)), ...]` 的 httpx 惯用法强制走 multipart 编码且边界随机（不能硬编码固定边界），字段顺序与 `tests/fixtures/wecom/answer_page_request.http` 一致；`get_journal_list`/`answer_page` 用 `errcode`，`get_template_combine_info`/`answer_page` 响应体用 `head.ret`，两套业务码字段名已按各自真实抓包正确区分。
+- Debug 日志只含 method/host/路径模板/耗时/分类结果，用 `caplog` 测试直接断言 Cookie 值和 `"Cookie"`/`"form_id"` 关键字不出现在任何日志行。过程中发现并修复一个真实的测试环境陷阱：若在包含 `TestClient`/`create_app` 的其他测试文件之后运行，Alembic `env.py` 的 `logging.config.fileConfig(disable_existing_loggers=True)` 会把已存在的 `app.integrations.wecom.client` logger 标记为 disabled，导致 `caplog` 收不到记录；已在测试内保存/强制启用/还原该 logger 的 `.disabled` 标志规避，未改动共享的 Alembic/日志配置本身。
+- 测试（`test_wecom_client.py`，31 项）：三方法成功路径、multipart 字段顺序/边界随机性、6 项 Cookie 筛选纯函数测试、三方法业务码拒绝、HTML 登录页响应、缺字段/超量 `entrys`/缺 `answer_replys`、connect/read/write 三种超时分类、重定向不跟随、host allowlist 拒绝真实域名之外的一切（含形似域名 `doc.weixin.qq.com.evil.com`）、日志脱敏。
+- 实际门禁：`uv run ruff check .`、`uv run ruff format --check .`（仅剩与本任务无关的既有 `ISS-029`）、`uv run mypy`（strict，139 个源文件）、`uv run pytest tests/test_wecom_client.py`（31 passed）均已独立验证通过。
+
+**WECOM-05（`app/services/wecom_mapper.py`）**：
+
+- 路由规则严格按 §7.1 四条优先级实现：`field_type=PROJECT_LIST` 优先于 `core_type` 判断；`core_type=today_work`/`tomorrow_plan` 的核心字段值直接作为答案正文（非"标签:值"形式的附加内容）；自定义字段按 `field_mapping_json.rules` 查表，无规则且非空时按 `unmapped_policy` 记入 `unmapped_field_keys`（`block`）或静默跳过（`ignore`），本模块只如实报告、不决定是否真的阻止提交（留给 `WECOM-06`）。
+- **"责任人"歧义已解决并已反向修正 `docs/方案设计.md` §7.2**：`ProjectListEntry`（`app/schemas/daily_report.py`）只有 `project`/`content`/`status` 三个字段，没有责任人子字段；§7.1 表格本身也把"责任人类自定义字段"列为独立的、按通用"标签:值"规则映射的自定义字段。已按这个更贴合真实数据模型的方向实现（责任人是普通自定义字段，格式化后追加在同一来源全部 `PROJECT_LIST` 分段之后），并同步修正了 `docs/方案设计.md` §7.2 的示例文本（移除示例代码块里容易被误读为"每个项目条目自带责任人"的那一行，改为单独一句话说明）。
+- **半角冒号（连带修正了 `docs/方案设计.md`）**：§7.2 原文示例用全角"："，但仓库全部 Python 源码的 Ruff `RUF001`/`RUF002`/`RUF003`（禁止歧义全角标点）零例外启用，`app/**` 现有中文提示文本一律用半角标点；`wecom_mapper.py` 因此改用半角 `:`（`ruff check` 验证过全角版本会直接报错），`docs/方案设计.md` §7.2 的示例文本已同步改为半角，避免文档和实现出现无意义的字面差异。
+- 两个指纹函数均为 `hashlib.sha256(json.dumps(..., sort_keys=True, separators=(",", ":")).encode()).hexdigest()`（64 位小写十六进制，和 `WECOM-02` 的 `length(...)=64` 约束一致）：`compute_schema_fingerprint()` 是三个 `WeComQuestionSpec` 的纯函数（不依赖数据库，供 `WECOM-06` 对本地配置和实时抓取的远端结构都能调用同一函数比对），`sub_type=None` 序列化为 JSON `null`、`sub_type=""` 序列化为 `""`，两者不会被规范化成相同指纹；载荷指纹基于 Mapper 自己产出的三个答案文本。
+- 测试（`test_wecom_mapper.py`，34 项）：核心字段、`PROJECT_LIST`（单/多项目、三态标签、和核心文本字段共存、优先于同名核心类型）、动态字段两种未映射策略、多来源"日报 N"分段（含 3 来源且中间一个为空的定位保持测试）、空值不留痕迹、日期跨年/闰日格式化、**历史多模板 fixture**（同一天两个 entry 各自持有字段集合/顺序完全不同的 `template_snapshot`，验证 Mapper 只依赖每个 entry 自带快照、不依赖全局当前模板）、两个指纹函数的确定性/敏感性（含 `None` vs `""` 的 `sub_type` 专项测试）。
+- 实际门禁：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`（strict，139 个源文件）、`uv run pytest tests/test_wecom_mapper.py`（34 passed）均已独立验证通过。
+
+**合并后复核（主 Agent）**：
+
+- 主 Agent 逐文件读取了两份 diff 的全部新增代码（`client.py`/`schemas.py`/`wecom_mapper.py` 及两份测试文件），确认端点字段/业务码判定、Cookie 筛选算法、异常分类边界、路由/格式化规则、指纹算法均与 `docs/方案设计.md` 原文逐项核对一致，未发现 P0/P1。
+- 合并后重新执行的全量门禁（而非只信任两个 Agent 各自的门禁结果）：`uv run ruff check .`、`uv run ruff format --check .`（仅剩既有 `ISS-029`）、`uv run mypy`（strict，**139 个源文件**）均通过；`uv run pytest -q`（**407 项收集，0 failure/0 error**，`--junit-xml` 确认，恰好等于阶段前 342 项 + `WECOM-04` 新增 31 项 + `WECOM-05` 新增 34 项）。`git diff --check` 通过（仅 LF→CRLF 提示），`git status --short` 只包含两个任务范围内的文件（`backend/pyproject.toml`、`backend/uv.lock`、`backend/app/integrations/**`、`backend/app/services/wecom_mapper.py`、两个测试文件），无非预期改动；用 `WECOM-00` 的敏感样例扫描逻辑对本次完整 diff 做了一次额外的正向核验（真实样例 token 均未出现在 diff 中）。
+- 独立审查：本阶段涉及真实协议 Client 和字段映射算法实现，范围不小；由主 Agent 逐文件复核全部新增代码（含安全边界：host 硬编码/SSRF 防护、Cookie 从不写日志、多来源/未映射字段处理不静默出错）替代独立沙盒审查，判断依据是改动完全局限于纯逻辑层（无数据库写入、无 API 端点、无 Electron 能力边界变化），风险面小于 `WECOM-02`/`WECOM-03`；`WECOM-06` 起涉及真实状态机、并发和权限时恢复独立沙盒安全审查惯例。
+
 ## 4. 当前可领取任务
 
 阶段 3（`DB-01`/`DB-02`/`DB-03`/`API-01`/`QA-03`）已实现、通过质量门禁并创建独立提交 `8480515`；独立 Reviewer 审查仍待补齐（非阻塞）。
@@ -247,7 +277,7 @@ uv sync --directory backend --frozen
 
 第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均为 `DONE`。CR-20260807-01 第二版增量的全部任务已交付完毕，当前无可领取的第二版任务。
 
-企业微信增量 `WECOM-00`（敏感样例治理）、`WECOM-01`（文档）、`WECOM-02`（数据基础）、`WECOM-03`（Electron 登录与凭证桥）均已完成实现、自测与质量门禁，其中 `WECOM-02`/`WECOM-03` 由两个 Agent 并行实现、无文件重叠，主 Agent 统一复核并提交。下一可领取任务是 `WECOM-05`（字段映射与预览，依赖 `WECOM-02` 已满足）；`WECOM-04`（内部协议 Client）依赖 `WECOM-00`/`WECOM-02`/`WECOM-03` 均已满足，也可领取，与 `WECOM-05` 互不重叠可并行。`WECOM-06` 及后续仍需等待 `WECOM-04`+`WECOM-05`。当前产品仍为占位（`wecom_sync=false`），不得把已实现的数据层/Electron 凭证桥描述为完整业务功能——公开/Main-only API、企业微信协议 Client、字段映射 Service 均尚未实现。
+企业微信增量 `WECOM-00`（敏感样例治理）、`WECOM-01`（文档）、`WECOM-02`（数据基础）、`WECOM-03`（Electron 登录与凭证桥）、`WECOM-04`（内部协议 Client）、`WECOM-05`（字段映射与预览）均已完成实现、自测与质量门禁，其中 `WECOM-02`/`WECOM-03` 和 `WECOM-04`/`WECOM-05` 各是一对两个 Agent 并行实现、无文件重叠，主 Agent 统一复核并提交。下一可领取任务是 `WECOM-06`（同步编排与 API，依赖 `WECOM-04`+`WECOM-05` 均已满足）。当前产品仍为占位（`wecom_sync=false`），不得把已实现的数据层/Electron 凭证桥/协议 Client/字段 Mapper 描述为完整业务功能——公开/Main-only API、连接与同步 Service、renderer UI 均尚未实现。
 
 ### 第二版阶段 10A 验证记录
 

@@ -499,3 +499,12 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 详细设计决策、字段级核对结果和验证记录见 `ai-docs/task.md` 的"WECOM-02/WECOM-03 验证记录"小节，不在此重复。
 - 合并后实际门禁（主 Agent 重新执行，未只信任两个 Agent 各自的门禁结果）：后端 `uv run ruff check .`、`uv run mypy`（strict，**132 个源文件**）通过，`uv run pytest -q`（**342 项收集，0 failure/0 error**，`--junit-xml` 确认）；前端 `npm run lint`、`npm run typecheck`、`npm test`（**26 文件 192 项**）、`npm run build` 均通过；主 Agent 独立复核构建产物未发现 Main-only 密钥/Cookie 相关字符串泄露到 `preload`/`renderer`。`git diff --check` 通过（仅 LF→CRLF 提示）。
 - 当前实现事实：企业微信数据层和 Electron 凭证桥骨架已存在，但公开/Main-only API、企业微信协议 Client、字段映射 Mapper、同步编排 Service 均未实现，产品仍是 `wecom_sync=false` 占位。下一步是 `WECOM-04`（内部协议 Client）和 `WECOM-05`（字段映射与预览），依赖已满足，可并行。
+
+## 10. 企业微信协议 Client 与字段映射（WECOM-04/WECOM-05）
+
+- 2026-08-08：`WECOM-04`（内部协议 Client）与 `WECOM-05`（字段映射与预览）依赖分别是 `WECOM-00`/`WECOM-02`/`WECOM-03` 和 `WECOM-02`、互不依赖，文件范围完全不重叠，唯一共享风险点是 `backend/pyproject.toml`/`uv.lock`（只有 `WECOM-04` 需要改，把 `httpx` 迁移为生产依赖），已要求尽早一次性完成以降低两个 Agent 共享同一 `backend/.venv` 的环境竞态窗口；按此拆分并行实现，主 Agent 复核两份 diff 并统一运行合并后的全量门禁、同步文档、创建独立提交。
+- `WECOM-04`：新增 `app/integrations/wecom/`（`client.py`/`schemas.py`）。`WeComInternalClient` 的 base URL 硬编码 `doc.weixin.qq.com`（非构造参数，每次请求前二次校验，防 SSRF）、`follow_redirects=False`、六个分类异常（`WeComAuthExpired`/`WeComSchemaChanged`/`WeComBusinessRejected`/`WeComProtocolChanged`/`WeComTransportFailed`/`WeComOutcomeUncertain`）、`select_cookie_header()` 按 RFC 6265 规则筛选、multipart 提交用 httpx 惯用法强制随机边界。过程中发现并修复一个真实的测试环境陷阱：Alembic `env.py` 的 `logging.config.fileConfig(disable_existing_loggers=True)` 会在测试跨文件运行时把 Client 自己的 logger 标记为 disabled，导致 `caplog` 收不到日志脱敏断言需要的记录，已在测试内保存/强制启用/还原该标志规避。
+- `WECOM-05`：新增 `app/services/wecom_mapper.py`。严格按 §7.1 四条优先级路由（`PROJECT_LIST` 优先于 `core_type`），解决了"责任人"的表述歧义（`ProjectListEntry` 没有责任人子字段，按普通自定义字段处理）并**反向修正了 `docs/方案设计.md` §7.2` 的示例文本**（移除易被误读的"每项目一个责任人"示例行，冒号统一改为半角以匹配仓库全部 Python 源码零例外遵守的 Ruff `RUF001`/`RUF002`/`RUF003` 规则）；`compute_schema_fingerprint()`/载荷指纹均为 `sha256(json.dumps(sort_keys=True))` 的确定性纯函数。
+- 详细设计决策、字段级核对结果和验证记录见 `ai-docs/task.md` 的"WECOM-04/WECOM-05 验证记录"小节，不在此重复。
+- 合并后实际门禁（主 Agent 重新执行，未只信任两个 Agent 各自的门禁结果）：`uv run ruff check .`、`uv run ruff format --check .`（仅剩既有 `ISS-029`）、`uv run mypy`（strict，**139 个源文件**）均通过；`uv run pytest -q`（**407 项收集，0 failure/0 error**，恰好等于 342 + 31 + 34）。`git diff --check` 通过（仅 LF→CRLF 提示）；用 `WECOM-00` 的敏感样例扫描逻辑对完整 diff 做了额外正向核验，真实样例 token 均未出现。
+- 当前实现事实：企业微信数据层、Electron 凭证桥、协议 Client、字段 Mapper 均已就位，但公开/Main-only API、连接与同步编排 Service（幂等/状态机/重复检查）、renderer UI 均未实现，产品仍是 `wecom_sync=false` 占位。下一步是 `WECOM-06`（同步编排与 API），依赖已满足。
