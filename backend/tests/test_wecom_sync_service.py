@@ -20,7 +20,7 @@ from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
 from app.integrations.wecom.client import WeComAuthExpired, WeComOutcomeUncertain
 from app.integrations.wecom.schemas import WeComQuestionItem
-from app.models import DailyReport, DailyReportDay, User, WeComDailySyncRecord
+from app.models import DailyReport, DailyReportDay, User
 from app.repositories.daily_report_day import DailyReportDayRepository
 from app.repositories.wecom import WeComDailySyncRecordRepository
 from app.services.bootstrap import BootstrapService
@@ -329,9 +329,16 @@ async def test_execute_maps_missing_target_question_to_schema_changed(
         assert refreshed.status == "schema_changed"
 
 
-async def test_execute_detects_a_duplicate_fork_and_never_submits(
+async def test_execute_submits_even_when_a_fork_exists_on_the_matching_date(
     wecom_engine: AsyncEngine,
 ) -> None:
+    """`ISS-040` second revision: a `fork_items` entry on `work_date` used to
+    block the sync as `duplicate_detected`. That check was removed after real
+    usage showed it false-positives on every attempt — `fork_items` lists
+    form *instances that exist* (and `get_form_detail()` itself appears to
+    cause today's fork to exist), not ones that were actually submitted to.
+    This is the regression guard: a same-date fork must never block
+    submission again."""
     session_factory = create_session_factory(wecom_engine)
     user = await _bootstrap_user(session_factory)
     work_date = date(2026, 8, 5)
@@ -342,69 +349,6 @@ async def test_execute_detects_a_duplicate_fork_and_never_submits(
 
     candidate = build_fork_item(form_id=DEFAULT_FORM_ID, ctime=_shanghai_noon_epoch(work_date))
     stub = StubWeComClient(form_detail=build_form_detail(fork_items=[candidate]))
-    async with session_factory() as session:
-        with pytest.raises(Exception) as excinfo:
-            await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
-    assert getattr(excinfo.value, "code", None) == 40915
-    assert stub.submit_daily_calls == 0
-
-    async with session_factory() as session:
-        refreshed = await WeComDailySyncRecordRepository(session).get_for_owner(record.id, user.id)
-        assert refreshed is not None
-        assert refreshed.status == "duplicate_detected"
-
-
-async def test_execute_never_auto_reconciles_a_duplicate_fork_even_with_a_known_journal_uuid(
-    wecom_engine: AsyncEngine,
-) -> None:
-    """`fork_items` (`ISS-040`, replacing the removed `list_journals` check)
-    carries no `journalid`/submitter identity to cross-verify against a
-    record's own `remote_journal_uuid` the way the old check could — so even
-    a record that already knows its own past remote id must still be
-    reported as `duplicate_detected` on any same-date fork, never silently
-    reconciled to `succeeded` (`docs/方案设计.md` §10.2/§10.3's revised,
-    intentionally conservative behavior)."""
-    session_factory = create_session_factory(wecom_engine)
-    user = await _bootstrap_user(session_factory)
-    work_date = date(2026, 8, 5)
-    await _prepare_archived_day(session_factory, owner_id=user.id, work_date=work_date)
-    await _connect(session_factory, owner_id=user.id)
-    async with session_factory() as session:
-        record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
-        db_record = await session.get(WeComDailySyncRecord, record.id)
-        assert db_record is not None
-        db_record.remote_journal_uuid = "SYNTHETIC-JOURNAL-EXISTING"
-        await session.commit()
-
-    candidate = build_fork_item(form_id=DEFAULT_FORM_ID, ctime=_shanghai_noon_epoch(work_date))
-    stub = StubWeComClient(form_detail=build_form_detail(fork_items=[candidate]))
-    async with session_factory() as session:
-        with pytest.raises(Exception) as excinfo:
-            await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
-    assert getattr(excinfo.value, "code", None) == 40915
-    assert stub.submit_daily_calls == 0
-
-    async with session_factory() as session:
-        refreshed = await WeComDailySyncRecordRepository(session).get_for_owner(record.id, user.id)
-        assert refreshed is not None
-        assert refreshed.status == "duplicate_detected"
-
-
-async def test_execute_ignores_a_non_live_fork_on_a_matching_date(
-    wecom_engine: AsyncEngine,
-) -> None:
-    session_factory = create_session_factory(wecom_engine)
-    user = await _bootstrap_user(session_factory)
-    work_date = date(2026, 8, 5)
-    await _prepare_archived_day(session_factory, owner_id=user.id, work_date=work_date)
-    await _connect(session_factory, owner_id=user.id)
-    async with session_factory() as session:
-        record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
-
-    deleted_fork = build_fork_item(
-        form_id=DEFAULT_FORM_ID, ctime=_shanghai_noon_epoch(work_date), status=0
-    )
-    stub = StubWeComClient(form_detail=build_form_detail(fork_items=[deleted_fork]))
     async with session_factory() as session:
         finished = await WeComSyncService(session, client=stub).execute(
             user.id, record.id, cookie_jar=[]

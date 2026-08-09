@@ -402,9 +402,14 @@ def test_execute_end_to_end_succeeds_and_updates_the_record(
     assert detail.json()["data"]["status"] == "succeeded"
 
 
-def test_execute_end_to_end_surfaces_a_duplicate_as_a_business_error(
+def test_execute_end_to_end_succeeds_even_when_a_fork_exists_on_the_matching_date(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`ISS-040` second revision: a `fork_items` entry on the target date
+    used to block execution as `duplicate_detected`. Real usage showed that
+    check false-positives on every attempt (see `test_wecom_sync_service.py`'s
+    matching regression test for the full explanation) and it has been
+    removed — this is the end-to-end guard that it stays removed."""
     headers = _bootstrap_and_login(client)
     _connect(client, headers, monkeypatch)
     _archived_day(client, headers, "2026-08-05")
@@ -423,8 +428,8 @@ def test_execute_end_to_end_surfaces_a_duplicate_as_a_business_error(
         headers={**headers, **MAIN_BRIDGE_HEADER},
         json={"cookie_jar": _COOKIE_JAR},
     )
-    assert response.status_code == 409
-    assert response.json()["code"] == 40915
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["status"] == "succeeded"
 
     detail = client.get(f"/api/v1/wecom/sync-records/{record_id}", headers=headers)
-    assert detail.json()["data"]["status"] == "duplicate_detected"
+    assert detail.json()["data"]["status"] == "succeeded"

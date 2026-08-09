@@ -575,3 +575,12 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 查重来源换成 `fork_items` 后不再有可交叉验证的远端 ID（如 `journalid`），因此明确放弃了原设计里"`uncertain` 记录可自动对账为 `succeeded`"的分支；已确认这条分支在当前代码库里从未被任何调用点实际触发过（`retry()` 显式拒绝对 `uncertain` 记录生效），所以是记录一个此前只存在于纸面的能力缺口，不是真实行为倒退。
 - 已删除不再被任何调用方使用的 `list_journals()`/`WeComJournalPage`/`WeComJournalEntry`/`_parse_journal_page`/`_MAX_JOURNAL_ENTRIES`/`_DEFAULT_JOURNAL_LIMIT`；`wecom_logging.py::_ALLOWED_PATH_TEMPLATES` 同步更新（移除 `get_journal_list`，新增 `formcol/detail`）。
 - `docs/方案设计.md` §2.4/§5.3/§6.3/§10.2/§10.3 已修订，逐条记录新协议形状、`rich_text_reply` 格式要求、查重取舍及其理由，保留可追溯的修订说明而非静默改写。
+
+## 19. fork_items 查重误判，彻底移除查重（`ISS-041`）
+
+- 用户重新连接后重试同步，真实报告"检测到企业微信可能已存在同日日报"，但企业微信当天实际没有任何日报——`ISS-040` 刚上线的 `fork_items` 查重逻辑本身有 bug，不是历史遗留问题。
+- 根因：`fork_items` 列出的是"这个周期性表单存在哪些日期的实例（fork）"，不是"哪些日期已经真正提交过内容"；抓包证据显示某个 fork 的 `ctime` 早于同一会话里对它的实际提交，说明"fork 存在"和"已提交"是两件事，而 `fork_items` 仅有的字段（`form_id`/`ctime`/`mtime`/`status`）没有一个能区分"空壳实例"与"已填写提交"。更严重的是，`get_form_detail()` 这次调用本身看起来就会让"今天"的 fork 成立——查重检查因此在每一次同步尝试上都 100% 误判，而不是"保守但偶尔误判"。
+- 已彻底移除 `_has_duplicate_fork`/`_fork_item_matches_work_date`/`_FORK_ITEM_LIVE_STATUS` 三个函数/常量，`_perform_remote_sync()` 不再基于 `fork_items` 做任何阻断：结构指纹校验通过后直接提交，信任 `submit_again=true`，与用户提供的真实成功抓包（本身也不含查重调用）完全一致。`fork_items` 仍会被 `get_form_detail()` 抓取并建模（`WeComFormDetailForkItem`）供未来参考，只是不再影响状态机；`duplicate_detected` 状态、错误码 `40915` 和状态机允许的转换均保留在系统中，属于诚实记录、当前无路径可达的能力缺口。
+- `docs/方案设计.md` §2.4/§5.3/§10.2/§10.3/§11 追加"第二次修订"说明，未删除 `ISS-040` 第一次修订的记录，保留完整决策轨迹。
+- 移除 3 个已过时的查重专项测试，新增 2 个"存在 fork 也必须成功提交"的回归测试（`test_wecom_sync_service.py`/`test_wecom_internal_api.py` 各一个），防止这个 100% 误判行为再次出现。`ruff check`/`mypy` strict/定向 `pytest`/全量 `pytest` 均通过。
+- 教训：`fork_items` 这类"实例列表"字段，在没有真实多日、多状态样本佐证前不能想当然地当作"提交历史"使用——这正是 `ISS-040` 实现时踩的坑，`ISS-041` 是紧接着的一次真实纠正，两者相隔不到一次重连+重试的时间。

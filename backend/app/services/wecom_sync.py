@@ -15,7 +15,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Protocol
 
 from pydantic import ValidationError
@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import Clock, utc_now
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.core.timezone import to_shanghai
 from app.core.ulid import generate_ulid
 from app.integrations.wecom.client import (
     WeComAuthExpired,
@@ -39,7 +38,6 @@ from app.integrations.wecom.schemas import (
     WeComAnswerItem,
     WeComCookieIn,
     WeComFormDetail,
-    WeComFormDetailForkItem,
     WeComQuestionItem,
     WeComSubmissionResult,
     WeComSubmitDailyPayload,
@@ -73,9 +71,10 @@ class WeComClientLike(Protocol):
     """Duck-typed subset of `WeComInternalClient` — see
     `app/services/wecom_connection.py`'s identically-named Protocol for why
     tests inject a stub instead of a real HTTP client. `execute()` uses both
-    protocol methods below: `get_form_detail()` (structure re-check +
-    fork-based duplicate check) replaces the old `get_template_info()` +
-    `list_journals()` pair."""
+    protocol methods below: `get_form_detail()` (structure re-check; its
+    `fork_items` are fetched but no longer used for duplicate detection —
+    `docs/方案设计.md` §10.2's second revision) replaces the old
+    `get_template_info()` + `list_journals()` pair."""
 
     async def get_form_detail(
         self, cookie_jar: Sequence[WeComCookieIn], form_id: str
@@ -238,47 +237,6 @@ def _rebuild_current_specs(
             return None
         specs.append(spec)
     return specs[0], specs[1], specs[2]
-
-
-# `_FORK_ITEM_LIVE_STATUS`: the one `status` value observed on a real
-# `fork_items` entry across every capture seen so far. Anything else is
-# treated as not-live (e.g. a deleted/archived fork) and excluded from the
-# duplicate check rather than assumed to still count.
-_FORK_ITEM_LIVE_STATUS = 1
-
-
-def _fork_item_matches_work_date(fork_item: WeComFormDetailForkItem, work_date: date) -> bool:
-    """`ctime` is a Unix-epoch *creation* timestamp for that fork (one past
-    submission of this recurring personal journal form) — no field on
-    `fork_items` names an explicit "which work date" the entry represents.
-    Converting to the fixed Asia/Shanghai offset (`app/core/timezone.py`)
-    and comparing calendar dates is the same best-effort heuristic the
-    now-removed `get_journal_list`-based check used (same-day submission is
-    this integration's normal case), not a claim that it's exact for a
-    backfilled/late entry."""
-    created_at = datetime.fromtimestamp(fork_item.ctime, tz=UTC)
-    return to_shanghai(created_at).date() == work_date
-
-
-def _has_duplicate_fork(fork_items: Sequence[WeComFormDetailForkItem], *, work_date: date) -> bool:
-    """`docs/方案设计.md` §10.2's revised duplicate check, sourced from
-    `formcol/detail`'s `fork_items` instead of the removed `list_journals`
-    call. Every fork here is already this user's own submission history
-    (`WeComFormDetailForkItem`'s docstring) — no per-user identity field to
-    filter on the way the old `get_journal_list`-based check did.
-
-    Unlike the removed check, there is no `journalid` to compare against a
-    record's own `remote_journal_uuid`, so this can no longer reconcile an
-    `uncertain` record to `succeeded` by finding its own past write — any
-    same-date fork is reported as `duplicate_detected` and left for the user
-    to confirm manually, the conservative side of `docs/方案设计.md` §10.3's
-    "对不确定结果保守处理" principle.
-    """
-    return any(
-        fork_item.status == _FORK_ITEM_LIVE_STATUS
-        and _fork_item_matches_work_date(fork_item, work_date)
-        for fork_item in fork_items
-    )
 
 
 @dataclass
@@ -683,16 +641,20 @@ class WeComSyncService:
                     app_error=_app_error_for("schema_changed"),
                 )
 
-            if _has_duplicate_fork(form_detail.fork_items, work_date=day.work_date):
-                return _SyncAttemptOutcome(
-                    status="duplicate_detected",
-                    profile_id=profile.id,
-                    profile_version=profile.version,
-                    payload_fingerprint=fallback_payload_fingerprint,
-                    last_error_kind="duplicate_detected",
-                    last_error_message="检测到企业微信可能已存在同日日报,请先在企业微信内确认",
-                    app_error=_app_error_for("duplicate_detected"),
-                )
+            # `docs/方案设计.md` §10.2 (2026-08-09 second revision): the
+            # `fork_items`-based duplicate check has been removed entirely.
+            # It produced false positives on every attempt — `fork_items`
+            # lists form *instances that exist*, not ones that were actually
+            # submitted to, and this same `get_form_detail()` call appears to
+            # cause today's fork to exist as a side effect of merely being
+            # asked about it, so "does today's fork exist" was never a valid
+            # proxy for "did I already submit today". No field on
+            # `fork_items` (`form_id`/`ctime`/`mtime`/`status`) reliably
+            # distinguishes an empty placeholder from a real submission, so
+            # there is currently no reliable duplicate signal available from
+            # any verified endpoint; `submit_again=true` is trusted to be
+            # WeCom's own accepted behavior for this integration, matching
+            # the real working capture this flow is based on.
 
             raw_reply_type_by_question_id = {
                 question.question_id: question.reply_type for question in form_detail.questions
