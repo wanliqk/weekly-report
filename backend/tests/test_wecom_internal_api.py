@@ -5,7 +5,13 @@ from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
-from wecom_service_support import build_journal_entry, build_submission_result, build_template_info
+from wecom_service_support import (
+    DEFAULT_FORM_ID,
+    build_fork_item,
+    build_form_detail,
+    build_submission_result,
+    build_template_info,
+)
 
 from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
@@ -14,7 +20,7 @@ from app.db.migrate import run_startup_migrations
 from app.integrations.wecom.client import WeComInternalClient
 from app.integrations.wecom.schemas import (
     WeComCookieIn,
-    WeComJournalPage,
+    WeComFormDetail,
     WeComSubmissionResult,
     WeComSubmitDailyPayload,
     WeComTemplateInfo,
@@ -133,22 +139,15 @@ def _patch_get_template_info(
     monkeypatch.setattr(WeComInternalClient, "get_template_info", _fake)
 
 
-def _patch_list_journals(
-    monkeypatch: pytest.MonkeyPatch, journal_page: WeComJournalPage | None = None
+def _patch_get_form_detail(
+    monkeypatch: pytest.MonkeyPatch, form_detail: WeComFormDetail | None = None
 ) -> None:
-    resolved = journal_page if journal_page is not None else WeComJournalPage(entries=[])
+    resolved = form_detail if form_detail is not None else build_form_detail()
 
-    async def _fake(
-        self: WeComInternalClient,
-        cookie_jar: object,
-        template_id: str,
-        cursor: str | None,
-        *,
-        limit: int = 50,
-    ) -> WeComJournalPage:
+    async def _fake(self: WeComInternalClient, cookie_jar: object, form_id: str) -> WeComFormDetail:
         return resolved
 
-    monkeypatch.setattr(WeComInternalClient, "list_journals", _fake)
+    monkeypatch.setattr(WeComInternalClient, "get_form_detail", _fake)
 
 
 def _patch_submit_daily(
@@ -389,7 +388,7 @@ def test_execute_end_to_end_succeeds_and_updates_the_record(
     assert created.status_code == 200, created.text
     record_id = created.json()["data"]["id"]
 
-    _patch_list_journals(monkeypatch)
+    _patch_get_form_detail(monkeypatch)
     _patch_submit_daily(monkeypatch)
     response = client.post(
         f"/api/v1/internal/wecom/sync-records/{record_id}/execute",
@@ -413,11 +412,11 @@ def test_execute_end_to_end_surfaces_a_duplicate_as_a_business_error(
     assert created.status_code == 200, created.text
     record_id = created.json()["data"]["id"]
 
-    candidate = build_journal_entry(
-        journalid="SYNTHETIC-JOURNAL-EXISTING",
-        createtime=_shanghai_noon_epoch(date(2026, 8, 5)),
+    candidate = build_fork_item(
+        form_id=DEFAULT_FORM_ID,
+        ctime=_shanghai_noon_epoch(date(2026, 8, 5)),
     )
-    _patch_list_journals(monkeypatch, WeComJournalPage(entries=[candidate]))
+    _patch_get_form_detail(monkeypatch, build_form_detail(fork_items=[candidate]))
     _patch_submit_daily(monkeypatch)
     response = client.post(
         f"/api/v1/internal/wecom/sync-records/{record_id}/execute",

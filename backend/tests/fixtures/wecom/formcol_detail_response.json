@@ -1,0 +1,52 @@
+{
+  "head": {
+    "ret": 0,
+    "cgi": "xmformcollogicsvr/detail",
+    "time": 1700000000,
+    "msg": ""
+  },
+  "param": {
+    "protocol": "http",
+    "hostname": "doc.weixin.qq.com",
+    "sid": "SYNTHETIC_WEDOC_SID_0000000000"
+  },
+  "body": {
+    "stat_info": {
+      "form_id": "SYNTHETIC-FORM-0000000000000000000base",
+      "creater_vid": 9000000000000011,
+      "creater_name": "王小明",
+      "title": "日报",
+      "question_infos": [
+        {
+          "title": "日期",
+          "type": 11,
+          "must_reply": false,
+          "question_id": 1000000001
+        },
+        {
+          "title": "今日工作",
+          "type": 24,
+          "must_reply": true,
+          "question_id": 1000000002
+        },
+        {
+          "title": "明日计划",
+          "type": 24,
+          "must_reply": true,
+          "question_id": 1000000003
+        }
+      ],
+      "fork_items": [
+        {
+          "form_id": "SYNTHETIC-FORM-0000000000000000000fork",
+          "title": "日报",
+          "ctime": 1700000000,
+          "mtime": 1700000000,
+          "status": 1
+        }
+      ]
+    },
+    "task_status": 1,
+    "cache_time": 1700000000
+  }
+}

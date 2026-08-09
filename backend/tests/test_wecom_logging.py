@@ -174,7 +174,7 @@ def test_raw_debug_logging_disabled_by_default_writes_no_file(tmp_path: Path) ->
     log_wecom_raw_body(
         logging.getLogger(WECOM_RAW_LOGGER_NAME),
         direction="request",
-        path_template="/wework/journal/get_journal_list",
+        path_template="/formcol/detail",
         body='{"template_id": "REAL-VALUE"}',
     )
     shutdown_wecom_logging()
@@ -194,13 +194,13 @@ def test_raw_debug_logging_writes_full_body_when_enabled(tmp_path: Path) -> None
     log_wecom_raw_body(
         raw_logger,
         direction="request",
-        path_template="/wework/journal/get_journal_list",
+        path_template="/formcol/detail",
         body='{"template_id": "REAL-TEMPLATE-VALUE", "limit": 50}',
     )
     log_wecom_raw_body(
         raw_logger,
         direction="response",
-        path_template="/wework/journal/get_journal_list",
+        path_template="/formcol/detail",
         body='{"errcode": "", "entrys": []}',
     )
     shutdown_wecom_logging()
@@ -224,7 +224,7 @@ def test_raw_debug_logging_still_scrubs_credential_patterns(tmp_path: Path) -> N
     log_wecom_raw_body(
         logging.getLogger(WECOM_RAW_LOGGER_NAME),
         direction="response",
-        path_template="/wework/journal/get_journal_list",
+        path_template="/formcol/detail",
         body="wedoc_sid=COOKIE-SECRET Authorization: Bearer eyJheader.payload.signature",
     )
     shutdown_wecom_raw_debug_logging()

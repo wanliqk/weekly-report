@@ -22,6 +22,7 @@ import pytest
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _RAW_SAMPLE_DIR = _BACKEND_ROOT / "wx-ribao"
+_RIBAO_TXT_PATH = _RAW_SAMPLE_DIR / "ribao.txt"
 _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "wecom"
 
 # JSON keys known (from the real captured `answer_page` request/response) to carry
@@ -30,16 +31,19 @@ _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "wecom"
 # intentionally reuse to preserve protocol shape.
 _SENSITIVE_JSON_KEYS = {
     "create_name",
+    "creater_name",
     "reply_name",
     "user_name",
     "avatar",
     "text_reply",
+    "plain_text_reply",
     "form_id",
     "base_form_id",
     "template_id",
     "templateid",
     "journaluuid",
     "create_vid",
+    "creater_vid",
     "reply_id",
     "user_vid",
     "vid",
@@ -52,7 +56,7 @@ _MIN_TOKEN_LENGTH = 6
 # generic 6-char threshold used for cookie values/identifiers, which exists to
 # avoid false positives on short generic strings.
 _MIN_NAME_LENGTH = 2
-_NAME_KEYS = {"create_name", "reply_name", "user_name"}
+_NAME_KEYS = {"create_name", "creater_name", "reply_name", "user_name"}
 _COOKIE_LINE = re.compile(r"^cookie:\s*[A-Za-z0-9_]+=(\S+)", re.MULTILINE)
 _REFERER_LINE = re.compile(r"^referer:\s*(\S+)", re.MULTILINE)
 _MULTIPART_FIELD_NAME = re.compile(r'name="([^"]+)"')
@@ -158,11 +162,67 @@ def _extract_from_reference_script(tokens: set[str]) -> None:
             tokens.add(value)
 
 
+def _iter_balanced_json_objects(text: str) -> list[str]:
+    """Finds every top-level `{...}` block by brace-depth counting — good
+    enough for `ribao.txt`'s shape (curl commands interleaved with
+    pretty-printed JSON response bodies), not a general JSON tokenizer."""
+    blocks: list[str] = []
+    depth = 0
+    start: int | None = None
+    for index, char in enumerate(text):
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    blocks.append(text[start : index + 1])
+                    start = None
+    return blocks
+
+
+def _extract_from_ribao_txt(tokens: set[str]) -> None:
+    """`ISS-040`: a second, differently-shaped real sample the user pasted
+    directly into conversation and referenced by path (`GET formcol/detail`
+    -> `POST formcol/answer_page`, curl commands + prose, not the
+    `WECOM-00`-era `http_raw_request.txt`/`http_raw_response.txt`/
+    `wx-ribao.py` trio the other three extractors cover)."""
+    if not _RIBAO_TXT_PATH.exists():
+        return
+    text = _RIBAO_TXT_PATH.read_text(encoding="utf-8")
+
+    for cookie_header in re.findall(r"cookie:\s*([^'\r\n]+)", text):
+        for pair in cookie_header.split(";"):
+            _name, _sep, value = pair.strip().partition("=")
+            if len(value) >= _MIN_TOKEN_LENGTH:
+                tokens.add(value)
+
+    for referer in re.findall(r"referer:\s*(\S+)", text):
+        for param in ("journaluuid", "template_id"):
+            value_match = re.search(rf"[?&]{param}=([^&\s#']+)", referer)
+            if value_match and len(value_match.group(1)) >= _MIN_TOKEN_LENGTH:
+                tokens.add(value_match.group(1))
+
+    for form_id in re.findall(r"-F 'form_id=([^']+)'", text):
+        if len(form_id) >= _MIN_TOKEN_LENGTH:
+            tokens.add(form_id)
+
+    for block in _iter_balanced_json_objects(text):
+        try:
+            parsed: object = json.loads(block)
+        except ValueError:
+            continue
+        _collect_json_values(parsed, tokens)
+
+
 def _extract_sensitive_tokens() -> set[str]:
     tokens: set[str] = set()
     _extract_from_raw_request(tokens)
     _extract_from_raw_response(tokens)
     _extract_from_reference_script(tokens)
+    _extract_from_ribao_txt(tokens)
     return tokens
 
 

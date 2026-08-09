@@ -38,12 +38,11 @@ from app.integrations.wecom.client import (
 from app.integrations.wecom.schemas import (
     WeComAnswerItem,
     WeComCookieIn,
-    WeComJournalEntry,
-    WeComJournalPage,
+    WeComFormDetail,
+    WeComFormDetailForkItem,
     WeComQuestionItem,
     WeComSubmissionResult,
     WeComSubmitDailyPayload,
-    WeComTemplateInfo,
 )
 from app.models import WeComDailySyncRecord, WeComSyncProfile, WeComUserBinding
 from app.repositories.daily_report_day import DailyReportDayRepository
@@ -73,21 +72,14 @@ from app.services.wecom_mapper import (
 class WeComClientLike(Protocol):
     """Duck-typed subset of `WeComInternalClient` — see
     `app/services/wecom_connection.py`'s identically-named Protocol for why
-    tests inject a stub instead of a real HTTP client. This one needs all
-    three protocol methods since `execute()` uses each of them."""
+    tests inject a stub instead of a real HTTP client. `execute()` uses both
+    protocol methods below: `get_form_detail()` (structure re-check +
+    fork-based duplicate check) replaces the old `get_template_info()` +
+    `list_journals()` pair."""
 
-    async def get_template_info(
+    async def get_form_detail(
         self, cookie_jar: Sequence[WeComCookieIn], form_id: str
-    ) -> WeComTemplateInfo: ...
-
-    async def list_journals(
-        self,
-        cookie_jar: Sequence[WeComCookieIn],
-        template_id: str,
-        cursor: str | None,
-        *,
-        limit: int,
-    ) -> WeComJournalPage: ...
+    ) -> WeComFormDetail: ...
 
     async def submit_daily(
         self, cookie_jar: Sequence[WeComCookieIn], payload: WeComSubmitDailyPayload
@@ -195,7 +187,7 @@ def _app_error_for(status: str, kind: str | None = None) -> AppError:
 
 def _classify_read_client_error(exc: WeComClientError) -> tuple[str, str, str, str | None]:
     """`(status, last_error_kind, last_error_message, binding_status)` for a
-    read-only Client call (`get_template_info`/`list_journals`)."""
+    read-only Client call (`get_form_detail`)."""
     if isinstance(exc, WeComAuthExpired):
         return "auth_required", "auth_expired", "登录状态已失效,请重新连接企业微信", "expired"
     if isinstance(exc, WeComSchemaChanged | WeComProtocolChanged):
@@ -248,50 +240,45 @@ def _rebuild_current_specs(
     return specs[0], specs[1], specs[2]
 
 
-def _entry_matches_work_date(entry: WeComJournalEntry, work_date: date) -> bool:
-    """`createtime` is a Unix-epoch *submission* timestamp — no verified
-    endpoint exposes an explicit "which work date does this journal
-    represent" field. Converting to the fixed Asia/Shanghai offset
-    (`app/core/timezone.py`) and comparing calendar dates is a documented
-    best-effort heuristic (same-day submission is this integration's normal
-    case), not a claim that it's exact for a backfilled/late entry."""
-    submitted_at = datetime.fromtimestamp(entry.createtime, tz=UTC)
-    return to_shanghai(submitted_at).date() == work_date
+# `_FORK_ITEM_LIVE_STATUS`: the one `status` value observed on a real
+# `fork_items` entry across every capture seen so far. Anything else is
+# treated as not-live (e.g. a deleted/archived fork) and excluded from the
+# duplicate check rather than assumed to still count.
+_FORK_ITEM_LIVE_STATUS = 1
 
 
-def _resolve_duplicate_state(
-    entries: Sequence[WeComJournalEntry],
-    *,
-    template_id: str,
-    work_date: date,
-    expected_user_vid: str,
-    known_remote_journal_uuid: str | None,
-) -> tuple[str, WeComJournalEntry | None]:
-    """`docs/方案设计.md` §10.2. `entry.reply_id` is treated as a proxy for
-    "submitted by me" (the same field name `WeComTemplateEntry` uses for a
-    submission's owner in `get_template_combine_info`); no verified endpoint
-    field is named `user_vid` on a *journal list* entry specifically.
+def _fork_item_matches_work_date(fork_item: WeComFormDetailForkItem, work_date: date) -> bool:
+    """`ctime` is a Unix-epoch *creation* timestamp for that fork (one past
+    submission of this recurring personal journal form) — no field on
+    `fork_items` names an explicit "which work date" the entry represents.
+    Converting to the fixed Asia/Shanghai offset (`app/core/timezone.py`)
+    and comparing calendar dates is the same best-effort heuristic the
+    now-removed `get_journal_list`-based check used (same-day submission is
+    this integration's normal case), not a claim that it's exact for a
+    backfilled/late entry."""
+    created_at = datetime.fromtimestamp(fork_item.ctime, tz=UTC)
+    return to_shanghai(created_at).date() == work_date
 
-    Returns `("none", None)` when nothing matches (safe to submit),
-    `("unprovable", None)` when candidates exist but none can be tied to a
-    remote ID this record already knows about, or `("reconciled", entry)`
-    when a candidate's `journalid` matches `known_remote_journal_uuid` — the
-    from-`uncertain` reconciliation path `docs/方案设计.md` §10.3 describes.
+
+def _has_duplicate_fork(fork_items: Sequence[WeComFormDetailForkItem], *, work_date: date) -> bool:
+    """`docs/方案设计.md` §10.2's revised duplicate check, sourced from
+    `formcol/detail`'s `fork_items` instead of the removed `list_journals`
+    call. Every fork here is already this user's own submission history
+    (`WeComFormDetailForkItem`'s docstring) — no per-user identity field to
+    filter on the way the old `get_journal_list`-based check did.
+
+    Unlike the removed check, there is no `journalid` to compare against a
+    record's own `remote_journal_uuid`, so this can no longer reconcile an
+    `uncertain` record to `succeeded` by finding its own past write — any
+    same-date fork is reported as `duplicate_detected` and left for the user
+    to confirm manually, the conservative side of `docs/方案设计.md` §10.3's
+    "对不确定结果保守处理" principle.
     """
-    candidates = [
-        entry
-        for entry in entries
-        if entry.template_id == template_id
-        and entry.reply_id == expected_user_vid
-        and _entry_matches_work_date(entry, work_date)
-    ]
-    if not candidates:
-        return "none", None
-    if known_remote_journal_uuid is not None:
-        for candidate in candidates:
-            if candidate.journalid == known_remote_journal_uuid:
-                return "reconciled", candidate
-    return "unprovable", None
+    return any(
+        fork_item.status == _FORK_ITEM_LIVE_STATUS
+        and _fork_item_matches_work_date(fork_item, work_date)
+        for fork_item in fork_items
+    )
 
 
 @dataclass
@@ -665,7 +652,7 @@ class WeComSyncService:
         owns_client = self._injected_client is None
         try:
             try:
-                template_info = await client.get_template_info(cookie_jar, profile.form_id)
+                form_detail = await client.get_form_detail(cookie_jar, profile.form_id)
             except WeComClientError as exc:
                 status, kind, message, binding_status = _classify_read_client_error(exc)
                 return _SyncAttemptOutcome(
@@ -682,7 +669,7 @@ class WeComSyncService:
             question_mapping = WeComQuestionMappingConfig.model_validate_json(
                 profile.question_mapping_json
             )
-            fresh_specs = _rebuild_current_specs(template_info.questions, question_mapping)
+            fresh_specs = _rebuild_current_specs(form_detail.questions, question_mapping)
             if fresh_specs is None or (
                 compute_schema_fingerprint(*fresh_specs) != profile.schema_fingerprint
             ):
@@ -696,31 +683,7 @@ class WeComSyncService:
                     app_error=_app_error_for("schema_changed"),
                 )
 
-            try:
-                journal_page = await client.list_journals(
-                    cookie_jar, profile.template_id, None, limit=50
-                )
-            except WeComClientError as exc:
-                status, kind, message, binding_status = _classify_read_client_error(exc)
-                return _SyncAttemptOutcome(
-                    status=status,
-                    profile_id=profile.id,
-                    profile_version=profile.version,
-                    payload_fingerprint=fallback_payload_fingerprint,
-                    last_error_kind=kind,
-                    last_error_message=message,
-                    binding_status=binding_status,
-                    app_error=_app_error_for(status, kind),
-                )
-
-            duplicate_state, matched = _resolve_duplicate_state(
-                journal_page.entries,
-                template_id=profile.template_id,
-                work_date=day.work_date,
-                expected_user_vid=binding.wecom_vid,
-                known_remote_journal_uuid=record.remote_journal_uuid,
-            )
-            if duplicate_state == "unprovable":
+            if _has_duplicate_fork(form_detail.fork_items, work_date=day.work_date):
                 return _SyncAttemptOutcome(
                     status="duplicate_detected",
                     profile_id=profile.id,
@@ -730,17 +693,16 @@ class WeComSyncService:
                     last_error_message="检测到企业微信可能已存在同日日报,请先在企业微信内确认",
                     app_error=_app_error_for("duplicate_detected"),
                 )
-            if duplicate_state == "reconciled":
-                assert matched is not None
-                return _SyncAttemptOutcome(
-                    status="succeeded",
-                    profile_id=profile.id,
-                    profile_version=profile.version,
-                    payload_fingerprint=fallback_payload_fingerprint,
-                    remote_answer_id=record.remote_answer_id,
-                    remote_reply_id=matched.reply_id,
-                    remote_journal_uuid=matched.journalid,
-                )
+
+            raw_reply_type_by_question_id = {
+                question.question_id: question.reply_type for question in form_detail.questions
+            }
+
+            def _is_rich_text(question_id: str) -> bool:
+                # `24` is WeCom's own raw "rich text" question type — the one
+                # value confirmed (`docs/方案设计.md` §2.4) to require the
+                # `rich_text_reply` wire shape instead of bare `text_reply`.
+                return raw_reply_type_by_question_id.get(question_id) == 24
 
             snapshot = parse_day_archive_snapshot(day.archive_snapshot_json)
             field_mapping = WeComFieldMappingConfig.model_validate_json(profile.field_mapping_json)
@@ -769,14 +731,17 @@ class WeComSyncService:
                         WeComAnswerItem(
                             question_id=question_mapping.date_question.question_id,
                             text_reply=preview.date_answer,
+                            rich_text=_is_rich_text(question_mapping.date_question.question_id),
                         ),
                         WeComAnswerItem(
                             question_id=question_mapping.today_question.question_id,
                             text_reply=preview.today_work_answer,
+                            rich_text=_is_rich_text(question_mapping.today_question.question_id),
                         ),
                         WeComAnswerItem(
                             question_id=question_mapping.tomorrow_question.question_id,
                             text_reply=preview.tomorrow_plan_answer,
+                            rich_text=_is_rich_text(question_mapping.tomorrow_question.question_id),
                         ),
                     ],
                     mngreporter_vids=recipient_config.mngreporter_vids,

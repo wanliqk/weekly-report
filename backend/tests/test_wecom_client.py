@@ -21,7 +21,7 @@ import pytest
 
 from app.core.wecom_logging import WECOM_RAW_LOGGER_NAME
 from app.integrations.wecom.client import (
-    _MAX_JOURNAL_ENTRIES,
+    _MAX_FORK_ITEMS,
     WeComAuthExpired,
     WeComBusinessRejected,
     WeComInternalClient,
@@ -210,24 +210,35 @@ async def test_get_template_info_supports_live_template_entry_shape() -> None:
     assert entry.form_id == "SYNTHETIC-LIVE-FORM-1"
 
 
-async def test_list_journals_success() -> None:
-    fixture = _load_json_fixture("get_journal_list_response.json")
+async def test_get_form_detail_success() -> None:
+    fixture = _load_json_fixture("formcol_detail_response.json")
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/wework/journal/get_journal_list"
-        assert request.url.params.get("sid") == "SYNTHETIC_WEDOC_SID_0000000000"
+        assert request.url.path == "/formcol/detail"
+        assert request.url.params.get("form_id") == "SYNTHETIC-FORM-x"
+        assert request.url.params.get("f") == "json"
+        assert request.url.params.get("lang") == "zh"
+        assert "_t" in request.url.params
+        # Unlike every other endpoint, this one carries no `sid`/`wedoc_xsrf`.
+        assert request.url.params.get("sid") is None
         return _json_response(200, fixture)
 
     client = WeComInternalClient(transport=httpx.MockTransport(handler))
     try:
-        page = await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+        detail = await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
     finally:
         await client.aclose()
 
-    assert len(page.entries) == 6
-    assert page.entries[0].journalid == "SYNTHETIC-JOURNAL-0000000000000001"
-    assert page.entries[0].reply_id == "9000000000000011"
-    assert page.entries[-1].journalid == "SYNTHETIC-JOURNAL-0000000000000006"
+    assert detail.form_id == "SYNTHETIC-FORM-0000000000000000000base"
+    assert detail.creater_vid == "9000000000000011"
+    assert detail.creater_name == "王小明"
+    assert len(detail.questions) == 3
+    question_ids = [question.question_id for question in detail.questions]
+    assert question_ids == ["1000000001", "1000000002", "1000000003"]
+    assert detail.questions[1].reply_type == 24
+    assert len(detail.fork_items) == 1
+    assert detail.fork_items[0].form_id == "SYNTHETIC-FORM-0000000000000000000fork"
+    assert detail.fork_items[0].status == 1
 
 
 async def test_submit_daily_success() -> None:
@@ -334,6 +345,73 @@ async def test_submit_daily_multipart_shape_matches_fixture_field_order() -> Non
         "form_id": "SYNTHETIC-FORM-0000000000000000000base",
         "template_id": "SYNTHETIC-TEMPLATE-0000000000000001",
     }
+
+
+async def test_submit_daily_rich_text_item_uses_div_wrapped_html_shape() -> None:
+    """Real capture (`docs/方案设计.md` §2.4 revision, `ISS-040`): a WeCom
+    "rich text" question (`reply_type=24`) rejects/mangles a bare
+    `text_reply` and needs `rich_text_reply: {text_reply, plain_text_reply}`
+    instead — `text_reply` HTML-escaped and `<div>`-wrapped, `plain_text_reply`
+    the raw original string."""
+    response_fixture = _load_json_fixture("answer_page_response.json")
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return _json_response(200, response_fixture)
+
+    payload = _submit_payload(
+        items=[
+            WeComAnswerItem(question_id="1000000002", text_reply="完成 A&B <验收>", rich_text=True),
+            WeComAnswerItem(question_id="1000000001", text_reply="2026年01月01日", rich_text=False),
+        ]
+    )
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        await client.submit_daily(_valid_cookie_jar(), payload)
+    finally:
+        await client.aclose()
+
+    values = dict(_parse_multipart_fields(captured["request"]))
+    form_reply = json.loads(values["form_reply"])
+    items_by_question = {item["question_id"]: item for item in form_reply["items"]}
+
+    rich_item = items_by_question["1000000002"]
+    assert "text_reply" not in rich_item
+    assert rich_item["rich_text_reply"]["plain_text_reply"] == "完成 A&B <验收>"
+    assert rich_item["rich_text_reply"]["text_reply"] == "<div>完成 A&amp;B &lt;验收&gt;</div>"
+
+    date_item = items_by_question["1000000001"]
+    assert "rich_text_reply" not in date_item
+    assert date_item["text_reply"] == "2026年01月01日"
+
+
+async def test_submit_daily_rich_text_item_renders_multiline_text_with_br() -> None:
+    response_fixture = _load_json_fixture("answer_page_response.json")
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return _json_response(200, response_fixture)
+
+    payload = _submit_payload(
+        items=[
+            WeComAnswerItem(question_id="1000000002", text_reply="第一行\n第二行", rich_text=True)
+        ]
+    )
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        await client.submit_daily(_valid_cookie_jar(), payload)
+    finally:
+        await client.aclose()
+
+    values = dict(_parse_multipart_fields(captured["request"]))
+    form_reply = json.loads(values["form_reply"])
+    rich_item = form_reply["items"][0]
+    assert rich_item["rich_text_reply"]["text_reply"] == "<div>第一行<br>第二行</div>"
+    assert rich_item["rich_text_reply"]["plain_text_reply"] == "第一行\n第二行"
 
 
 async def test_submit_daily_boundary_is_randomized_per_request() -> None:
@@ -455,8 +533,8 @@ async def test_get_template_info_business_code_rejected() -> None:
     assert "12345" not in excinfo.value.detail
 
 
-async def test_list_journals_business_code_rejected() -> None:
-    payload = {"errcode": 100, "errmsg": "denied", "entrys": []}
+async def test_get_form_detail_business_code_rejected() -> None:
+    payload = {"head": {"ret": 100, "msg": "denied"}, "body": {}}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(200, payload)
@@ -464,13 +542,13 @@ async def test_list_journals_business_code_rejected() -> None:
     client = WeComInternalClient(transport=httpx.MockTransport(handler))
     try:
         with pytest.raises(WeComBusinessRejected) as excinfo:
-            await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+            await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
     finally:
         await client.aclose()
     assert excinfo.value.biz_code == 100
     assert excinfo.value.biz_message == "denied"
     assert excinfo.value.detail is not None
-    assert "errcode" in excinfo.value.detail
+    assert "head.ret" in excinfo.value.detail
 
 
 async def test_submit_daily_business_code_rejected() -> None:
@@ -492,7 +570,7 @@ async def test_submit_daily_business_code_rejected() -> None:
 
 
 async def test_business_message_is_bounded_length() -> None:
-    payload = {"errcode": 7, "errmsg": "x" * 500, "entrys": []}
+    payload = {"head": {"ret": 7, "msg": "x" * 500}, "body": {}}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(200, payload)
@@ -500,7 +578,7 @@ async def test_business_message_is_bounded_length() -> None:
     client = WeComInternalClient(transport=httpx.MockTransport(handler))
     try:
         with pytest.raises(WeComBusinessRejected) as excinfo:
-            await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+            await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
     finally:
         await client.aclose()
     assert excinfo.value.biz_message is not None
@@ -524,10 +602,10 @@ def _enable_client_logger() -> logging.Logger:
     return target_logger
 
 
-async def test_list_journals_business_rejection_is_logged(
+async def test_get_form_detail_business_rejection_is_logged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    payload = {"errcode": 100, "errmsg": "no permission", "entrys": []}
+    payload = {"head": {"ret": 100, "msg": "no permission"}, "body": {}}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(200, payload)
@@ -539,7 +617,7 @@ async def test_list_journals_business_rejection_is_logged(
         try:
             with caplog.at_level(logging.DEBUG, logger="app.integrations.wecom.client"):
                 with pytest.raises(WeComBusinessRejected):
-                    await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+                    await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
         finally:
             await client.aclose()
     finally:
@@ -551,7 +629,7 @@ async def test_list_journals_business_rejection_is_logged(
     diagnostics = record.wecom_diagnostics  # type: ignore[attr-defined]
     assert diagnostics["business_code"] == 100
     assert diagnostics["business_message"] == "no permission"
-    assert "errcode" in diagnostics["schema_paths"]
+    assert "head.ret" in diagnostics["schema_paths"]
 
 
 async def test_submit_daily_business_rejection_is_logged(
@@ -584,16 +662,17 @@ async def test_submit_daily_business_rejection_is_logged(
     assert "head.ret" in diagnostics["schema_paths"]
 
 
-async def test_list_journals_non_numeric_errcode_still_yields_key_diagnostics(
+async def test_get_form_detail_non_numeric_ret_still_yields_key_diagnostics(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Regression for a real production observation: a live response whose
-    `errcode` doesn't coerce to a normal integer (e.g. the endpoint has moved
-    to a different success-signalling shape, mirroring the `head`-envelope
-    drift already seen on the other two endpoints) previously surfaced only
-    as an opaque `business_code=-1` with no way to tell *what* the response
-    actually looked like. `schema_paths` now always accompanies it."""
-    payload: dict[str, Any] = {"errcode": None, "head": {"ret": 0}, "body": {"entrys": []}}
+    """Regression for a real production observation on the now-removed
+    `list_journals` endpoint (`ISS-038`): a live response whose business code
+    doesn't coerce to a normal integer previously surfaced only as an opaque
+    `business_code=-1` with no way to tell *what* the response actually
+    looked like. `get_form_detail` shares the same `head.ret`-based parsing
+    as every other endpoint, so this same failure mode is covered here too:
+    `schema_paths` always accompanies it."""
+    payload: dict[str, Any] = {"head": {"ret": None}, "body": {"stat_info": {}}}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(200, payload)
@@ -605,7 +684,7 @@ async def test_list_journals_non_numeric_errcode_still_yields_key_diagnostics(
         try:
             with caplog.at_level(logging.DEBUG, logger="app.integrations.wecom.client"):
                 with pytest.raises(WeComBusinessRejected) as excinfo:
-                    await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+                    await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
         finally:
             await client.aclose()
     finally:
@@ -616,20 +695,19 @@ async def test_list_journals_non_numeric_errcode_still_yields_key_diagnostics(
     assert "None" in excinfo.value.biz_message
     assert excinfo.value.detail is not None
     assert "head.ret" in excinfo.value.detail
-    assert "body.entrys" in excinfo.value.detail
 
     diagnostics = caplog.records[0].wecom_diagnostics  # type: ignore[attr-defined]
     assert "head.ret" in diagnostics["schema_paths"]
     assert diagnostics["business_message"] == excinfo.value.biz_message
 
 
-async def test_list_journals_empty_string_errcode_is_described_not_silent() -> None:
-    """A real production observation: `errcode` came back as an empty string
-    (no `errmsg` key at all) rather than the documented `0`/non-zero int.
-    Whether that's WeCom's own quirky "success" shape or a genuine rejection
-    is exactly what the previous silent `business_code=-1` couldn't answer —
-    this asserts the description says *what* was wrong, not just `-1`."""
-    payload = {"errcode": "", "entrys": []}
+async def test_get_form_detail_empty_string_ret_is_described_not_silent() -> None:
+    """A real production observation on the now-removed `list_journals`
+    endpoint (`ISS-038`): its business code came back as an empty string
+    with no accompanying message, rather than the documented `0`/non-zero
+    int. This asserts the same coercion-failure description applies equally
+    to `get_form_detail`'s `head.ret`."""
+    payload = {"head": {"ret": ""}, "body": {"stat_info": {}}}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(200, payload)
@@ -637,7 +715,7 @@ async def test_list_journals_empty_string_errcode_is_described_not_silent() -> N
     client = WeComInternalClient(transport=httpx.MockTransport(handler))
     try:
         with pytest.raises(WeComBusinessRejected) as excinfo:
-            await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+            await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
     finally:
         await client.aclose()
 
@@ -698,8 +776,8 @@ async def test_get_template_info_missing_body_is_protocol_changed() -> None:
         await client.aclose()
 
 
-async def test_list_journals_missing_entrys_is_protocol_changed() -> None:
-    payload = {"errcode": 0, "errmsg": ""}
+async def test_get_form_detail_missing_stat_info_is_protocol_changed() -> None:
+    payload = {"head": {"ret": 0}, "body": {}}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(200, payload)
@@ -707,25 +785,30 @@ async def test_list_journals_missing_entrys_is_protocol_changed() -> None:
     client = WeComInternalClient(transport=httpx.MockTransport(handler))
     try:
         with pytest.raises(WeComProtocolChanged):
-            await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+            await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
     finally:
         await client.aclose()
 
 
-async def test_list_journals_oversized_entrys_is_protocol_changed() -> None:
-    huge_entry = {
-        "journalid": "x",
-        "createtime": 1,
-        "reply_id": "1",
-        "reply_name": "n",
-        "template_id": "t",
-        "form_id": "f",
-        "submission_type": 1,
+async def test_get_form_detail_oversized_fork_items_is_protocol_changed() -> None:
+    huge_fork_item = {
+        "form_id": "SYNTHETIC-FORM-0000000000000000000fork",
+        "title": "日报",
+        "ctime": 1,
+        "mtime": 1,
+        "status": 1,
     }
     payload = {
-        "errcode": 0,
-        "errmsg": "",
-        "entrys": [huge_entry] * (_MAX_JOURNAL_ENTRIES + 1),
+        "head": {"ret": 0},
+        "body": {
+            "stat_info": {
+                "form_id": "SYNTHETIC-FORM-x",
+                "creater_vid": "1",
+                "creater_name": "n",
+                "question_infos": [],
+                "fork_items": [huge_fork_item] * (_MAX_FORK_ITEMS + 1),
+            }
+        },
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -734,7 +817,7 @@ async def test_list_journals_oversized_entrys_is_protocol_changed() -> None:
     client = WeComInternalClient(transport=httpx.MockTransport(handler))
     try:
         with pytest.raises(WeComProtocolChanged):
-            await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+            await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
     finally:
         await client.aclose()
 

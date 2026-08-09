@@ -4,7 +4,7 @@ Not a `test_*.py` module itself (pytest's default discovery pattern never
 collects it), imported by `test_wecom_connection_service.py` and
 `test_wecom_sync_service.py`. Field values mirror
 `tests/fixtures/wecom/get_template_combine_info_response.json` /
-`get_journal_list_response.json` / `answer_page_response.json` so the shapes
+`formcol_detail_response.json` / `answer_page_response.json` so the shapes
 built here stay consistent with what `WECOM-04`'s own contract tests already
 verify the real `WeComInternalClient` produces — this module only replaces
 the network boundary (`WeComClientLike`'s duck-typed Protocol,
@@ -19,8 +19,8 @@ from collections.abc import Sequence
 from app.integrations.wecom.client import WeComClientError
 from app.integrations.wecom.schemas import (
     WeComCookieIn,
-    WeComJournalEntry,
-    WeComJournalPage,
+    WeComFormDetail,
+    WeComFormDetailForkItem,
     WeComQuestionItem,
     WeComSubmissionResult,
     WeComSubmitDailyPayload,
@@ -38,6 +38,8 @@ TOMORROW_QUESTION_ID = "1000000003"
 
 
 def build_target_questions() -> list[WeComQuestionItem]:
+    """Connect-time shape (`get_template_combine_info`) — still carries
+    `pos`/`ext`, unlike `build_form_detail_questions()` below."""
     return [
         WeComQuestionItem(
             question_id=DATE_QUESTION_ID,
@@ -62,6 +64,25 @@ def build_target_questions() -> list[WeComQuestionItem]:
             must_reply=True,
             pos=3,
             ext=None,
+        ),
+    ]
+
+
+def build_form_detail_questions() -> list[WeComQuestionItem]:
+    """Execute-time shape (`formcol/detail`'s `question_infos[]`) — never
+    carries `pos`/`ext` (both already-optional fields on `WeComQuestionItem`),
+    matching what `WeComInternalClient._parse_form_detail` actually produces.
+    Same `question_id`/`reply_type`/`must_reply` as `build_target_questions()`
+    so a stub-driven schema-fingerprint comparison still matches by default."""
+    return [
+        WeComQuestionItem(
+            question_id=DATE_QUESTION_ID, title="日期", reply_type=11, must_reply=False
+        ),
+        WeComQuestionItem(
+            question_id=TODAY_QUESTION_ID, title="今日工作", reply_type=1, must_reply=True
+        ),
+        WeComQuestionItem(
+            question_id=TOMORROW_QUESTION_ID, title="明日计划", reply_type=1, must_reply=True
         ),
     ]
 
@@ -94,23 +115,24 @@ def build_template_info(
     )
 
 
-def build_journal_entry(
+def build_fork_item(*, form_id: str, ctime: int, status: int = 1) -> WeComFormDetailForkItem:
+    return WeComFormDetailForkItem(form_id=form_id, ctime=ctime, status=status)
+
+
+def build_form_detail(
     *,
-    journalid: str,
-    createtime: int,
-    reply_id: str = DEFAULT_REPLY_VID,
-    reply_name: str = DEFAULT_REPLY_NAME,
-    template_id: str = DEFAULT_TEMPLATE_ID,
     form_id: str = DEFAULT_FORM_ID,
-) -> WeComJournalEntry:
-    return WeComJournalEntry(
-        journalid=journalid,
-        createtime=createtime,
-        reply_id=reply_id,
-        reply_name=reply_name,
-        template_id=template_id,
+    creater_vid: str = DEFAULT_REPLY_VID,
+    creater_name: str = DEFAULT_REPLY_NAME,
+    questions: list[WeComQuestionItem] | None = None,
+    fork_items: list[WeComFormDetailForkItem] | None = None,
+) -> WeComFormDetail:
+    return WeComFormDetail(
         form_id=form_id,
-        submission_type=1,
+        creater_vid=creater_vid,
+        creater_name=creater_name,
+        questions=questions if questions is not None else build_form_detail_questions(),
+        fork_items=fork_items if fork_items is not None else [],
     )
 
 
@@ -128,12 +150,13 @@ def build_submission_result(
 
 class StubWeComClient:
     """Implements the `WeComClientLike` Protocol from both
-    `app/services/wecom_connection.py` and `app/services/wecom_sync.py`
-    (structural typing — one stub satisfies both). Each of the three remote
-    calls independently returns a fixed value or raises a fixed error;
-    call counts are tracked so tests can assert a call was (or wasn't) made
-    — e.g. `submit_daily` must never be invoked when a duplicate is merely
-    "unprovable" (`docs/方案设计.md` §10.2).
+    `app/services/wecom_connection.py` (`get_template_info`/`submit_daily`)
+    and `app/services/wecom_sync.py` (`get_form_detail`/`submit_daily`) —
+    structural typing, one stub satisfies both. Each remote call
+    independently returns a fixed value or raises a fixed error; call counts
+    are tracked so tests can assert a call was (or wasn't) made — e.g.
+    `submit_daily` must never be invoked when a duplicate fork was found
+    (`docs/方案设计.md` §10.2).
     """
 
     def __init__(
@@ -141,24 +164,22 @@ class StubWeComClient:
         *,
         template_info: WeComTemplateInfo | None = None,
         template_error: WeComClientError | None = None,
-        journal_page: WeComJournalPage | None = None,
-        journal_error: WeComClientError | None = None,
+        form_detail: WeComFormDetail | None = None,
+        form_detail_error: WeComClientError | None = None,
         submission_result: WeComSubmissionResult | None = None,
         submit_error: WeComClientError | None = None,
     ) -> None:
         self.template_info = template_info if template_info is not None else build_template_info()
         self.template_error = template_error
-        self.journal_page = (
-            journal_page if journal_page is not None else WeComJournalPage(entries=[])
-        )
-        self.journal_error = journal_error
+        self.form_detail = form_detail if form_detail is not None else build_form_detail()
+        self.form_detail_error = form_detail_error
         self.submission_result = (
             submission_result if submission_result is not None else build_submission_result()
         )
         self.submit_error = submit_error
         self.closed = False
         self.get_template_info_calls = 0
-        self.list_journals_calls = 0
+        self.get_form_detail_calls = 0
         self.submit_daily_calls = 0
 
     async def get_template_info(
@@ -169,18 +190,13 @@ class StubWeComClient:
             raise self.template_error
         return self.template_info
 
-    async def list_journals(
-        self,
-        cookie_jar: Sequence[WeComCookieIn],
-        template_id: str,
-        cursor: str | None,
-        *,
-        limit: int = 50,
-    ) -> WeComJournalPage:
-        self.list_journals_calls += 1
-        if self.journal_error is not None:
-            raise self.journal_error
-        return self.journal_page
+    async def get_form_detail(
+        self, cookie_jar: Sequence[WeComCookieIn], form_id: str
+    ) -> WeComFormDetail:
+        self.get_form_detail_calls += 1
+        if self.form_detail_error is not None:
+            raise self.form_detail_error
+        return self.form_detail
 
     async def submit_daily(
         self, cookie_jar: Sequence[WeComCookieIn], payload: WeComSubmitDailyPayload

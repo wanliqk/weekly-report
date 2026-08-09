@@ -33,7 +33,7 @@ _DIAGNOSTICS_ATTRIBUTE: Final = "wecom_diagnostics"
 _ALLOWED_PATH_TEMPLATES: Final = frozenset(
     {
         "/journal/get_template_combine_info",
-        "/wework/journal/get_journal_list",
+        "/formcol/detail",
         "/formcol/answer_page",
     }
 )

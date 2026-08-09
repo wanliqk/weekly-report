@@ -4,7 +4,7 @@ journal endpoints (`docs/方案设计.md` §2.4/§8).
 Scope boundary (`WECOM-04`): this module is a pure protocol client. It does
 not know about local users, templates, `daily_report_days`, or the sync
 state machine — it only knows how to turn a Cookie jar + a small set of
-already-resolved values into one of the three verified requests, and how to
+already-resolved values into one of the verified requests, and how to
 turn the raw HTTP response back into a typed DTO or a classified exception.
 Field mapping (which local field becomes which `question_id`) is `WECOM-05`;
 orchestration/idempotency/retry policy is `WECOM-06`.
@@ -23,6 +23,7 @@ Security posture (`docs/方案设计.md` §12, `SEC-013`/`SEC-014`):
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -39,9 +40,10 @@ from pydantic import ValidationError
 from app.core.clock import Clock, utc_now
 from app.core.wecom_logging import WECOM_RAW_LOGGER_NAME, log_wecom_event, log_wecom_raw_body
 from app.integrations.wecom.schemas import (
+    WeComAnswerItem,
     WeComCookieIn,
-    WeComJournalEntry,
-    WeComJournalPage,
+    WeComFormDetail,
+    WeComFormDetailForkItem,
     WeComQuestionItem,
     WeComSubmissionResult,
     WeComSubmitDailyPayload,
@@ -56,7 +58,7 @@ _ALLOWED_HOST: Final = "doc.weixin.qq.com"
 _BASE_URL: Final = f"https://{_ALLOWED_HOST}"
 
 _GET_TEMPLATE_INFO_PATH: Final = "/journal/get_template_combine_info"
-_LIST_JOURNALS_PATH: Final = "/wework/journal/get_journal_list"
+_GET_FORM_DETAIL_PATH: Final = "/formcol/detail"
 _SUBMIT_DAILY_PATH: Final = "/formcol/answer_page"
 
 _SID_COOKIE_NAME: Final = "wedoc_sid"
@@ -70,12 +72,10 @@ _MAX_SCHEMA_DIAGNOSTIC_DEPTH: Final = 6
 _MAX_SCHEMA_DIAGNOSTIC_PATHS: Final = 64
 _SCHEMA_KEY_PATTERN: Final = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 
-# "远端列表接口的分页必须有最大页数和总项数限制,避免异常响应导致无限扫描"
-# (docs/方案设计.md §10.2). This Client only makes one call per invocation (no
-# looping), but a single response claiming an implausible number of entries
-# is itself treated as a protocol anomaly rather than trusted.
-_MAX_JOURNAL_ENTRIES: Final = 200
-_DEFAULT_JOURNAL_LIMIT: Final = 50
+# A single `fork_items` response claiming an implausible number of past
+# submissions is treated as a protocol anomaly rather than trusted, same
+# reasoning as `docs/方案设计.md` §10.2's now-superseded list-pagination cap.
+_MAX_FORK_ITEMS: Final = 200
 
 _DEFAULT_TIMEOUT: Final = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
 
@@ -194,6 +194,31 @@ def _describe_unparseable_code(value: object) -> str:
     if isinstance(value, dict | list):
         return f"<{type(value).__name__}>"
     return repr(value)[:64]
+
+
+def _rich_text_html(text: str) -> str:
+    """Best-effort reconstruction of WeCom's own rich-text-editor wire
+    format for a plain string. Only the single-line case has been observed
+    in a real capture (`<div>...</div>`, HTML-escaped); a multi-line answer
+    is rendered here as one `<div>` with `<br>` line breaks, matching a
+    common rich-text-editor convention — this specific multi-line rendering
+    is unverified against a real WeCom submission and worth re-checking if
+    a multi-line answer ever renders unexpectedly on the WeCom side.
+    """
+    escaped = html.escape(text, quote=False)
+    return f"<div>{escaped.replace(chr(10), '<br>')}</div>"
+
+
+def _serialize_answer_item(item: WeComAnswerItem) -> dict[str, Any]:
+    if item.rich_text:
+        return {
+            "question_id": item.question_id,
+            "rich_text_reply": {
+                "text_reply": _rich_text_html(item.text_reply),
+                "plain_text_reply": item.text_reply,
+            },
+        }
+    return {"question_id": item.question_id, "text_reply": item.text_reply}
 
 
 def _business_message_for_unparseable_code(
@@ -395,11 +420,14 @@ def _parse_json_response(response: httpx.Response, *, on_send: bool) -> dict[str
 
 
 class WeComInternalClient:
-    """Async HTTP client for the three verified WeCom internal endpoints.
+    """Async HTTP client for the four verified WeCom internal endpoints.
 
-    Exposes exactly three methods: `get_template_info`, `list_journals`,
-    `submit_daily` (`docs/方案设计.md` §8). Not thread-safe across event
-    loops, same as any `httpx.AsyncClient`; construct one per request scope.
+    Exposes `get_template_info` (connect-time only), `get_form_detail`
+    (execute-time structure re-check + duplicate check), and `submit_daily`
+    (`docs/方案设计.md` §8, revised — the previous `list_journals` duplicate
+    check has been retired in favor of `get_form_detail`'s own `fork_items`).
+    Not thread-safe across event loops, same as any `httpx.AsyncClient`;
+    construct one per request scope.
     """
 
     def __init__(
@@ -455,33 +483,26 @@ class WeComInternalClient:
             parse=self._parse_template_info,
         )
 
-    async def list_journals(
-        self,
-        cookie_jar: Sequence[WeComCookieIn],
-        template_id: str,
-        cursor: str | None,
-        *,
-        limit: int = _DEFAULT_JOURNAL_LIMIT,
-    ) -> WeComJournalPage:
-        cookie_header, sid = self._select_or_raise(cookie_jar, _LIST_JOURNALS_PATH)
-        return await self._send_json(
-            _LIST_JOURNALS_PATH,
-            params={"sid": sid, "wedoc_xsrf": "1"},
-            json_body={
-                "lastjournal_id": cursor or "",
-                "direction": 1,
-                "limit": limit,
-                "isconditionquery": True,
-                "querydetail": {
-                    "submission_type": 1,
-                    "template_id": template_id,
-                    "partyids": [],
-                    "vids": [],
-                },
+    async def get_form_detail(
+        self, cookie_jar: Sequence[WeComCookieIn], form_id: str
+    ) -> WeComFormDetail:
+        """`GET /formcol/detail` — the execute-time structure/duplicate-check
+        source. Replaces the previous `get_template_info()` re-check plus the
+        separate `list_journals()` duplicate-check call (both retired: see
+        `docs/方案设计.md` §2.4/§10.2's revision history). Unlike every other
+        method here, WeCom's own real traffic for this endpoint carries no
+        `sid`/`wedoc_xsrf` query parameter — only Cookie auth."""
+        cookie_header, _sid = self._select_or_raise(cookie_jar, _GET_FORM_DETAIL_PATH)
+        return await self._send_get(
+            _GET_FORM_DETAIL_PATH,
+            params={
+                "_t": str(int(self._clock().timestamp() * 1000)),
+                "f": "json",
+                "lang": "zh",
+                "form_id": form_id,
             },
             cookie_header=cookie_header,
-            on_send=False,
-            parse=self._parse_journal_page,
+            parse=self._parse_form_detail,
         )
 
     async def submit_daily(
@@ -492,7 +513,8 @@ class WeComInternalClient:
         cookie_header, sid = self._select_or_raise(cookie_jar, _SUBMIT_DAILY_PATH)
 
         form_reply = json.dumps(
-            {"items": [item.model_dump() for item in payload.items]}, ensure_ascii=False
+            {"items": [_serialize_answer_item(item) for item in payload.items]},
+            ensure_ascii=False,
         )
         check_setting = json.dumps({"can_anonymous": 2}, ensure_ascii=False)
         wwjournal_data = json.dumps(
@@ -578,6 +600,43 @@ class WeComInternalClient:
         # every post-200 business rejection silently unlogged.
         try:
             payload = _parse_json_response(response, on_send=on_send)
+            result = parse(payload)
+        except WeComClientError as exc:
+            self._log(path, started, http_status=response.status_code, error=exc)
+            raise
+        self._log(path, started, http_status=response.status_code)
+        return result
+
+    async def _send_get(
+        self,
+        path: str,
+        *,
+        params: dict[str, str],
+        cookie_header: str,
+        parse: Callable[[dict[str, Any]], T],
+    ) -> T:
+        self._dump_raw_request(path, json.dumps(params, ensure_ascii=False))
+        started = time.monotonic()
+        try:
+            response = await self._client.get(
+                path, params=params, headers={"Cookie": cookie_header}
+            )
+        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as exc:
+            transport_error = WeComTransportFailed("无法连接企业微信服务")
+            self._log(path, started, error=transport_error)
+            raise transport_error from exc
+        except (httpx.WriteTimeout, httpx.ReadTimeout) as exc:
+            uncertain_error = WeComOutcomeUncertain("请求超时,结果不确定")
+            self._log(path, started, error=uncertain_error)
+            raise uncertain_error from exc
+        except httpx.HTTPError as exc:
+            http_error = WeComTransportFailed("网络请求失败")
+            self._log(path, started, error=http_error)
+            raise http_error from exc
+        self._dump_raw_response(path, response)
+
+        try:
+            payload = _parse_json_response(response, on_send=False)
             result = parse(payload)
         except WeComClientError as exc:
             self._log(path, started, http_status=response.status_code, error=exc)
@@ -750,35 +809,85 @@ class WeComInternalClient:
             questions=questions,
         )
 
-    def _parse_journal_page(self, payload: dict[str, Any]) -> WeComJournalPage:
-        if "errcode" not in payload:
-            raise WeComProtocolChanged("响应缺少 errcode 节点")
-        errcode = payload["errcode"]
-        if errcode != 0:
-            coerced_code = _coerce_biz_code(errcode)
+    def _parse_form_detail(self, payload: dict[str, Any]) -> WeComFormDetail:
+        head = payload.get("head")
+        if not isinstance(head, dict) or "ret" not in head:
+            raise WeComProtocolChanged("响应缺少 head.ret 节点")
+        ret = head["ret"]
+        if ret != 0:
+            coerced_code = _coerce_biz_code(ret)
             raise WeComBusinessRejected(
-                "获取日报列表被拒绝",
+                "获取表单结构被拒绝",
                 biz_code=coerced_code,
                 biz_message=_business_message_for_unparseable_code(
                     coerced_code=coerced_code,
-                    explicit_message=_coerce_biz_message(payload.get("errmsg")),
-                    raw_code=errcode,
+                    explicit_message=_coerce_biz_message(head.get("msg")),
+                    raw_code=ret,
                 ),
                 detail=_schema_paths(payload),
             )
 
-        entrys = payload.get("entrys")
-        if not isinstance(entrys, list):
-            raise WeComProtocolChanged("响应缺少 entrys 节点")
-        if len(entrys) > _MAX_JOURNAL_ENTRIES:
-            raise WeComProtocolChanged("entrys 数量超出合理范围,判定为协议异常")
+        body = payload.get("body")
+        stat_info = body.get("stat_info") if isinstance(body, dict) else None
+        if not isinstance(stat_info, dict):
+            raise WeComProtocolChanged(
+                "响应缺少 body.stat_info 节点", detail=_schema_paths(payload)
+            )
+
+        form_id = stat_info.get("form_id")
+        creater_vid = stat_info.get("creater_vid")
+        creater_name = stat_info.get("creater_name")
+        question_infos = stat_info.get("question_infos")
+        fork_items_raw = stat_info.get("fork_items")
+        if (
+            not isinstance(form_id, str | int)
+            or not isinstance(creater_vid, str | int)
+            or not isinstance(creater_name, str)
+            or not isinstance(question_infos, list)
+            or not isinstance(fork_items_raw, list)
+        ):
+            raise WeComProtocolChanged(
+                "响应 body.stat_info 缺少必需节点", detail=_schema_paths(payload)
+            )
+        if len(fork_items_raw) > _MAX_FORK_ITEMS:
+            raise WeComProtocolChanged("fork_items 数量超出合理范围,判定为协议异常")
 
         try:
-            entries = [WeComJournalEntry.model_validate(entry) for entry in entrys]
+            questions = [
+                WeComQuestionItem.model_validate(
+                    {
+                        "question_id": item.get("question_id") if isinstance(item, dict) else None,
+                        "title": item.get("title") if isinstance(item, dict) else None,
+                        "reply_type": item.get("type") if isinstance(item, dict) else None,
+                        "must_reply": item.get("must_reply") if isinstance(item, dict) else None,
+                    }
+                )
+                for item in question_infos
+            ]
         except ValidationError as exc:
-            raise WeComProtocolChanged("entrys 元素结构与预期不符") from exc
+            raise WeComSchemaChanged("表单题目结构与预期不符") from exc
 
-        return WeComJournalPage(entries=entries)
+        # `fork_items` only feeds a best-effort duplicate check (`WECOM-06`);
+        # a malformed individual entry is skipped rather than failing the
+        # whole call, unlike the stricter all-or-nothing validation above for
+        # the three target questions this integration cannot function
+        # without.
+        fork_items: list[WeComFormDetailForkItem] = []
+        for raw_item in fork_items_raw:
+            if not isinstance(raw_item, dict):
+                continue
+            try:
+                fork_items.append(WeComFormDetailForkItem.model_validate(raw_item))
+            except ValidationError:
+                continue
+
+        return WeComFormDetail(
+            form_id=str(form_id),
+            creater_vid=str(creater_vid),
+            creater_name=creater_name,
+            questions=questions,
+            fork_items=fork_items,
+        )
 
     def _parse_submission_result(self, payload: dict[str, Any]) -> WeComSubmissionResult:
         head = payload.get("head")

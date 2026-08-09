@@ -316,17 +316,18 @@ def compute_schema_fingerprint(
     for structure freshly re-read from the remote form, then compare the
     two digests to detect drift.
 
-    `question_id`/`reply_type`/`sub_type` all participate; JSON's `null`
-    (Python `None`) and `""` serialize to distinct tokens, so a question
-    whose `sub_type` is unset never collides with one whose `sub_type` is
-    an empty string.
+    Only `question_id`/`reply_type` participate. `sub_type` (from the
+    connect-time-only `ext.qdata_sub_type`) deliberately does not: the
+    execute-time structure source (`formcol/detail`, `WECOM-06` revision)
+    never carries `ext` and so can never populate it, which would otherwise
+    make every execute-time comparison against a connect-time fingerprint
+    mismatch permanently rather than just detect real drift.
     """
 
-    def _spec_payload(spec: WeComQuestionSpec) -> dict[str, str | None]:
+    def _spec_payload(spec: WeComQuestionSpec) -> dict[str, str]:
         return {
             "question_id": spec.question_id,
             "reply_type": spec.reply_type,
-            "sub_type": spec.sub_type,
         }
 
     normalized = json.dumps(

@@ -70,9 +70,9 @@ class WeComQuestionItem(BaseModel):
 
 class WeComTemplateEntry(BaseModel):
     """One `body.entrys[]` entry from `get_template_combine_info` — an
-    existing submission summary, distinct from `WeComJournalEntry` (which
-    comes from the separate `get_journal_list` endpoint and carries different
-    fields such as `submission_type`)."""
+    existing submission summary, connect-time only (see
+    `WeComFormDetailForkItem` for the execute-time equivalent used for
+    duplicate-checking, sourced from a different endpoint/shape)."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -84,7 +84,8 @@ class WeComTemplateEntry(BaseModel):
 
 
 class WeComTemplateInfo(BaseModel):
-    """Return value of `WeComInternalClient.get_template_info()`."""
+    """Return value of `WeComInternalClient.get_template_info()` (connect-time
+    only — see `WeComFormDetail` for the execute-time equivalent)."""
 
     template_id: RemoteId
     form_id: RemoteId
@@ -92,41 +93,59 @@ class WeComTemplateInfo(BaseModel):
     questions: list[WeComQuestionItem]
 
 
-class WeComJournalEntry(BaseModel):
-    """One `entrys[]` entry from `get_journal_list`."""
+class WeComFormDetailForkItem(BaseModel):
+    """One `body.stat_info.fork_items[]` entry from `formcol/detail` — one
+    past submission of this recurring personal journal form. No per-user
+    identity field exists on this entry (unlike the old, now-removed
+    `get_journal_list` endpoint's `reply_id`); `formcol/detail` is only ever
+    called with the current user's own Cookie against their own form, so
+    every fork here is treated as this user's own submission history."""
 
     model_config = ConfigDict(extra="ignore")
 
-    journalid: RemoteId
-    createtime: int
-    reply_id: RemoteId
-    reply_name: str
-    template_id: RemoteId
     form_id: RemoteId
-    submission_type: int
+    ctime: int
+    status: int
 
 
-class WeComJournalPage(BaseModel):
-    """Return value of `WeComInternalClient.list_journals()`.
+class WeComFormDetail(BaseModel):
+    """Return value of `WeComInternalClient.get_form_detail()` — the
+    execute-time structure/duplicate-check source (`GET /formcol/detail`),
+    replacing the old `get_template_info()` re-check plus the separate,
+    now-removed `list_journals()` duplicate-check call. `questions` reuses
+    `WeComQuestionItem` (`formcol/detail`'s `question_infos[]` never carries
+    `pos`/`note`/`ext`, all already-optional fields on that model)."""
 
-    A single page only — the Client does not loop pages itself
-    (`docs/方案设计.md` §2.4: "Client 层本身不做循环翻页"); callers drive pagination
-    using `WeComJournalEntry.journalid` as the next `cursor`.
-    """
-
-    entries: list[WeComJournalEntry]
+    form_id: RemoteId
+    creater_vid: RemoteId
+    creater_name: str
+    questions: list[WeComQuestionItem]
+    fork_items: list[WeComFormDetailForkItem]
 
 
 class WeComAnswerItem(BaseModel):
-    """One already-mapped `question_id -> text_reply` pair.
+    """One already-mapped `question_id -> answer text` pair.
 
     Deciding *which* local field maps to which `question_id` is the Mapper's
     job (`WECOM-05`); this Client only knows how to serialize whatever items
     it's given into the exact `form_reply` shape `answer_page` expects.
+
+    `rich_text` distinguishes the wire shape, not the content: a real
+    captured submission (`docs/方案设计.md` §2.4) shows a WeCom "rich text"
+    question (raw `reply_type` 24 — this integration's date/today/tomorrow
+    trio's today/tomorrow questions, in the one live account observed so
+    far) rejects/mangles a bare `text_reply` and instead needs
+    `{"rich_text_reply": {"text_reply": "<div>...</div>", "plain_text_reply":
+    "..."}}`; only the date question (`reply_type` 11) uses bare
+    `text_reply`. Callers (`WeComSyncService`) set this from the freshly
+    fetched question's raw remote `reply_type`, never from the locally
+    stored `WeComReplyType` Literal (which collapses 1/24 to the same
+    `"text"` bucket and was never meant to carry wire-format detail).
     """
 
     question_id: str = Field(min_length=1, max_length=64)
     text_reply: str = Field(max_length=10_000)
+    rich_text: bool = False
 
 
 class WeComSubmitDailyPayload(BaseModel):

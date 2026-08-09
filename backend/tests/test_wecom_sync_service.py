@@ -7,11 +7,9 @@ from conftest import STAGE5_PASSWORD
 from sqlalchemy.ext.asyncio import AsyncEngine
 from wecom_service_support import (
     DEFAULT_FORM_ID,
-    DEFAULT_REPLY_VID,
-    DEFAULT_TEMPLATE_ID,
     StubWeComClient,
-    build_journal_entry,
-    build_template_info,
+    build_fork_item,
+    build_form_detail,
 )
 
 from app.core.config import Settings
@@ -21,7 +19,7 @@ from app.db.engine import create_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
 from app.integrations.wecom.client import WeComAuthExpired, WeComOutcomeUncertain
-from app.integrations.wecom.schemas import WeComJournalPage, WeComQuestionItem
+from app.integrations.wecom.schemas import WeComQuestionItem
 from app.models import DailyReport, DailyReportDay, User, WeComDailySyncRecord
 from app.repositories.daily_report_day import DailyReportDayRepository
 from app.repositories.wecom import WeComDailySyncRecordRepository
@@ -248,7 +246,7 @@ async def test_execute_succeeds_and_finalizes_the_record(wecom_engine: AsyncEngi
     async with session_factory() as session:
         record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
 
-    stub = StubWeComClient(journal_page=WeComJournalPage(entries=[]))
+    stub = StubWeComClient()
     async with session_factory() as session:
         finished = await WeComSyncService(session, client=stub).execute(
             user.id, record.id, cookie_jar=[]
@@ -259,8 +257,7 @@ async def test_execute_succeeds_and_finalizes_the_record(wecom_engine: AsyncEngi
     assert finished.attempt_token is None
     assert finished.remote_answer_id == "1"
     assert finished.succeeded_at is not None
-    assert stub.get_template_info_calls == 1
-    assert stub.list_journals_calls == 1
+    assert stub.get_form_detail_calls == 1
     assert stub.submit_daily_calls == 1
 
 
@@ -275,7 +272,7 @@ async def test_execute_maps_auth_expired_and_marks_the_binding_expired(
     async with session_factory() as session:
         record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
 
-    stub = StubWeComClient(template_error=WeComAuthExpired("login expired"))
+    stub = StubWeComClient(form_detail_error=WeComAuthExpired("login expired"))
     async with session_factory() as session:
         # `_perform_remote_sync`'s auth_required branch raises a plain
         # `AppError(code=40911, ...)` via `_app_error_for()` — not the
@@ -319,12 +316,11 @@ async def test_execute_maps_missing_target_question_to_schema_changed(
             question_id="1000000003", title="明日计划", reply_type=1, must_reply=True, pos=3
         ),
     ]
-    stub = StubWeComClient(template_info=build_template_info(questions=drifted_questions))
+    stub = StubWeComClient(form_detail=build_form_detail(questions=drifted_questions))
     async with session_factory() as session:
         with pytest.raises(Exception) as excinfo:  # AppError, code 40912
             await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
     assert getattr(excinfo.value, "code", None) == 40912
-    assert stub.list_journals_calls == 0
     assert stub.submit_daily_calls == 0
 
     async with session_factory() as session:
@@ -333,7 +329,7 @@ async def test_execute_maps_missing_target_question_to_schema_changed(
         assert refreshed.status == "schema_changed"
 
 
-async def test_execute_detects_an_unprovable_duplicate_and_never_submits(
+async def test_execute_detects_a_duplicate_fork_and_never_submits(
     wecom_engine: AsyncEngine,
 ) -> None:
     session_factory = create_session_factory(wecom_engine)
@@ -344,14 +340,8 @@ async def test_execute_detects_an_unprovable_duplicate_and_never_submits(
     async with session_factory() as session:
         record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
 
-    candidate = build_journal_entry(
-        journalid="SYNTHETIC-JOURNAL-EXISTING",
-        createtime=_shanghai_noon_epoch(work_date),
-        reply_id=DEFAULT_REPLY_VID,
-        template_id=DEFAULT_TEMPLATE_ID,
-        form_id=DEFAULT_FORM_ID,
-    )
-    stub = StubWeComClient(journal_page=WeComJournalPage(entries=[candidate]))
+    candidate = build_fork_item(form_id=DEFAULT_FORM_ID, ctime=_shanghai_noon_epoch(work_date))
+    stub = StubWeComClient(form_detail=build_form_detail(fork_items=[candidate]))
     async with session_factory() as session:
         with pytest.raises(Exception) as excinfo:
             await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
@@ -364,7 +354,43 @@ async def test_execute_detects_an_unprovable_duplicate_and_never_submits(
         assert refreshed.status == "duplicate_detected"
 
 
-async def test_execute_reconciles_a_known_duplicate_to_succeeded_without_resubmitting(
+async def test_execute_never_auto_reconciles_a_duplicate_fork_even_with_a_known_journal_uuid(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """`fork_items` (`ISS-040`, replacing the removed `list_journals` check)
+    carries no `journalid`/submitter identity to cross-verify against a
+    record's own `remote_journal_uuid` the way the old check could — so even
+    a record that already knows its own past remote id must still be
+    reported as `duplicate_detected` on any same-date fork, never silently
+    reconciled to `succeeded` (`docs/方案设计.md` §10.2/§10.3's revised,
+    intentionally conservative behavior)."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    work_date = date(2026, 8, 5)
+    await _prepare_archived_day(session_factory, owner_id=user.id, work_date=work_date)
+    await _connect(session_factory, owner_id=user.id)
+    async with session_factory() as session:
+        record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
+        db_record = await session.get(WeComDailySyncRecord, record.id)
+        assert db_record is not None
+        db_record.remote_journal_uuid = "SYNTHETIC-JOURNAL-EXISTING"
+        await session.commit()
+
+    candidate = build_fork_item(form_id=DEFAULT_FORM_ID, ctime=_shanghai_noon_epoch(work_date))
+    stub = StubWeComClient(form_detail=build_form_detail(fork_items=[candidate]))
+    async with session_factory() as session:
+        with pytest.raises(Exception) as excinfo:
+            await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
+    assert getattr(excinfo.value, "code", None) == 40915
+    assert stub.submit_daily_calls == 0
+
+    async with session_factory() as session:
+        refreshed = await WeComDailySyncRecordRepository(session).get_for_owner(record.id, user.id)
+        assert refreshed is not None
+        assert refreshed.status == "duplicate_detected"
+
+
+async def test_execute_ignores_a_non_live_fork_on_a_matching_date(
     wecom_engine: AsyncEngine,
 ) -> None:
     session_factory = create_session_factory(wecom_engine)
@@ -374,33 +400,18 @@ async def test_execute_reconciles_a_known_duplicate_to_succeeded_without_resubmi
     await _connect(session_factory, owner_id=user.id)
     async with session_factory() as session:
         record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
-        # Simulate a record that already carries a previously-learned remote
-        # journal id (this codebase has no code path that populates this
-        # itself yet — see `WeComSyncService.retry()`'s docstring on the
-        # documented reconciliation gap — but the state machine's own
-        # reconciliation rule (`docs/方案设计.md` §10.2/§10.3) must still be
-        # exercised directly).
-        db_record = await session.get(WeComDailySyncRecord, record.id)
-        assert db_record is not None
-        db_record.remote_journal_uuid = "SYNTHETIC-JOURNAL-EXISTING"
-        await session.commit()
 
-    candidate = build_journal_entry(
-        journalid="SYNTHETIC-JOURNAL-EXISTING",
-        createtime=_shanghai_noon_epoch(work_date),
-        reply_id=DEFAULT_REPLY_VID,
-        template_id=DEFAULT_TEMPLATE_ID,
-        form_id=DEFAULT_FORM_ID,
+    deleted_fork = build_fork_item(
+        form_id=DEFAULT_FORM_ID, ctime=_shanghai_noon_epoch(work_date), status=0
     )
-    stub = StubWeComClient(journal_page=WeComJournalPage(entries=[candidate]))
+    stub = StubWeComClient(form_detail=build_form_detail(fork_items=[deleted_fork]))
     async with session_factory() as session:
         finished = await WeComSyncService(session, client=stub).execute(
             user.id, record.id, cookie_jar=[]
         )
 
     assert finished.status == "succeeded"
-    assert finished.remote_journal_uuid == "SYNTHETIC-JOURNAL-EXISTING"
-    assert stub.submit_daily_calls == 0
+    assert stub.submit_daily_calls == 1
 
 
 async def test_execute_maps_an_uncertain_outcome_and_blocks_direct_retry(
@@ -440,16 +451,16 @@ async def test_execute_already_succeeded_short_circuits_without_calling_the_clie
     async with session_factory() as session:
         record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
 
-    stub = StubWeComClient(journal_page=WeComJournalPage(entries=[]))
+    stub = StubWeComClient()
     async with session_factory() as session:
         await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
-    assert stub.get_template_info_calls == 1
+    assert stub.get_form_detail_calls == 1
 
     async with session_factory() as session:
         with pytest.raises(WeComAlreadySucceededError):
             await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
     # No new remote calls were made for the already-succeeded record.
-    assert stub.get_template_info_calls == 1
+    assert stub.get_form_detail_calls == 1
 
 
 async def test_execute_rejects_a_concurrent_call_while_already_syncing(
@@ -476,7 +487,7 @@ async def test_execute_rejects_a_concurrent_call_while_already_syncing(
     async with session_factory() as session:
         with pytest.raises(WeComSyncInProgressError):
             await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
-    assert stub.get_template_info_calls == 0
+    assert stub.get_form_detail_calls == 0
 
 
 async def test_retry_moves_a_recoverable_failure_back_to_pending(
@@ -490,7 +501,7 @@ async def test_retry_moves_a_recoverable_failure_back_to_pending(
     async with session_factory() as session:
         record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
 
-    stub = StubWeComClient(template_error=WeComAuthExpired("login expired"))
+    stub = StubWeComClient(form_detail_error=WeComAuthExpired("login expired"))
     async with session_factory() as session:
         with pytest.raises(Exception) as excinfo:
             await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])

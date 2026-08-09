@@ -606,32 +606,25 @@ def test_schema_fingerprint_changes_when_reply_type_changes() -> None:
     assert changed != baseline
 
 
-def test_schema_fingerprint_changes_when_sub_type_changes() -> None:
+def test_schema_fingerprint_ignores_sub_type() -> None:
+    """`ISS-040`: `sub_type` deliberately does not participate — the
+    execute-time structure source (`formcol/detail`) never carries `ext`
+    and so can never populate it, which would otherwise make every
+    execute-time fingerprint permanently mismatch the connect-time one."""
     today_q = _spec("q-today", reply_type="text", submit_order=1)
     tomorrow_q = _spec("q-tomorrow", reply_type="text", submit_order=2)
-    baseline = compute_schema_fingerprint(
+
+    full_fp = compute_schema_fingerprint(
         _spec("q-date", reply_type="date", sub_type="full", submit_order=0), today_q, tomorrow_q
     )
-
-    changed = compute_schema_fingerprint(
+    short_fp = compute_schema_fingerprint(
         _spec("q-date", reply_type="date", sub_type="short", submit_order=0), today_q, tomorrow_q
     )
-
-    assert changed != baseline
-
-
-def test_schema_fingerprint_distinguishes_none_sub_type_from_empty_string_sub_type() -> None:
-    today_q = _spec("q-today", reply_type="text", submit_order=1)
-    tomorrow_q = _spec("q-tomorrow", reply_type="text", submit_order=2)
-
     none_fp = compute_schema_fingerprint(
         _spec("q-date", reply_type="date", sub_type=None, submit_order=0), today_q, tomorrow_q
     )
-    blank_fp = compute_schema_fingerprint(
-        _spec("q-date", reply_type="date", sub_type="", submit_order=0), today_q, tomorrow_q
-    )
 
-    assert none_fp != blank_fp
+    assert full_fp == short_fp == none_fp
 
 
 # --- payload_fingerprint (via build_wecom_preview) -----------------------------
