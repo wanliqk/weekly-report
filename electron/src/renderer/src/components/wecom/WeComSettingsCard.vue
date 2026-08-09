@@ -446,7 +446,11 @@ function runHistoryAction(record: WeComSyncRecordData): void {
           是企业微信内部成员标识，无法在本应用内查询，请从原表单已提交记录或管理员处获取后手动输入，按
           Enter 添加。
         </span>
-        <el-button type="primary" :loading="savingMapping" @click="saveMapping"
+        <el-button
+          style="margin-top: 20px"
+          type="primary"
+          :loading="savingMapping"
+          @click="saveMapping"
           >保存同步设置</el-button
         >
       </el-form>
@@ -486,7 +490,7 @@ function runHistoryAction(record: WeComSyncRecordData): void {
         <el-table-column label="更新时间" min-width="180">
           <template #default="scope">{{ formatShanghaiTime(scope.row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column align="right" width="170">
+        <el-table-column align="right" width="120">
           <template #default="scope">
             <el-button
               link
