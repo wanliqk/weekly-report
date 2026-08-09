@@ -9,7 +9,7 @@ const authStore = useAuthStore()
 const router = useRouter()
 const submitting = ref(false)
 const errorMessage = ref<string | null>(null)
-const form = reactive({ username: 'admin', displayName: '', password: '' })
+const form = reactive({ username: '', displayName: '', password: '' })
 
 async function submit(): Promise<void> {
   errorMessage.value = null
@@ -44,7 +44,7 @@ async function submit(): Promise<void> {
     <section class="auth-card">
       <div class="auth-card-heading">
         <span>步骤 1 / 1</span>
-        <h2>创建管理员</h2>
+        <h2>创建用户</h2>
       </div>
       <el-alert
         v-if="errorMessage"
