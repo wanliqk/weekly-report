@@ -59,6 +59,41 @@ def test_missing_expected_secret_rejects_every_request() -> None:
     assert response.status_code == 401
 
 
+def test_internal_wecom_prefix_is_exempt_even_without_a_secret_header() -> None:
+    """Regression test for the WECOM-06 gap: `WeComBridgeClient` never sends
+    `X-Runtime-Secret` (`docs/方案设计.md` §3.1 says the internal endpoints are
+    protected by `X-Main-Bridge-Secret` + JWT instead), so this middleware
+    must not 401 those requests before they ever reach that check."""
+    probe_app = FastAPI()
+    probe_app.add_middleware(RuntimeSecretMiddleware, expected_secret=EXPECTED_SECRET)
+
+    @probe_app.post("/api/v1/internal/wecom/sync-records/{record_id}/execute")
+    async def execute(record_id: str) -> dict[str, str]:
+        return {"record_id": record_id}
+
+    with TestClient(probe_app) as client:
+        response = client.post("/api/v1/internal/wecom/sync-records/abc123/execute")
+
+    assert response.status_code == 200
+
+
+def test_public_wecom_path_still_requires_the_runtime_secret() -> None:
+    """The exemption must be scoped to `/api/v1/internal/wecom/**` only —
+    the public `/api/v1/wecom/**` REST surface stays behind the normal
+    runtime-secret gate like every other public endpoint."""
+    probe_app = FastAPI()
+    probe_app.add_middleware(RuntimeSecretMiddleware, expected_secret=EXPECTED_SECRET)
+
+    @probe_app.get("/api/v1/wecom/connection")
+    async def connection() -> dict[str, str]:
+        return {"status": "ok"}
+
+    with TestClient(probe_app) as client:
+        response = client.get("/api/v1/wecom/connection")
+
+    assert response.status_code == 401
+
+
 def test_cors_preflight_reaches_cors_middleware_before_runtime_secret_check() -> None:
     application = create_app(Settings(environment="test", runtime_secret=EXPECTED_SECRET))
 

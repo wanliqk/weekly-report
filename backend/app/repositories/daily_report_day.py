@@ -23,6 +23,18 @@ class DailyReportDayRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_for_owner_by_id(self, owner_id: str, day_id: str) -> DailyReportDay | None:
+        """Added for WECOM-06's preview endpoint, whose request body carries
+        `daily_report_day_id` directly (`docs/方案设计.md` §5.2) rather than a
+        `work_date` path segment."""
+        result = await self._session.execute(
+            select(DailyReportDay).where(
+                DailyReportDay.id == day_id,
+                DailyReportDay.user_id == owner_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def list_in_range(
         self, owner_id: str, *, date_from: date, date_to: date
     ) -> list[DailyReportDay]:

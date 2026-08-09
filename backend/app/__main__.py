@@ -13,6 +13,7 @@ from app.db.session import create_session_factory
 from app.main import create_app
 from app.services.backup import cleanup_stale_manual_backups
 from app.services.export import ExportService
+from app.services.wecom_sync import WeComSyncService
 
 
 class _AnnouncingServer(uvicorn.Server):
@@ -45,12 +46,23 @@ async def _cleanup_expired_exports(settings: Settings) -> None:
         await engine.dispose()
 
 
+async def _recover_stale_wecom_syncs(settings: Settings) -> None:
+    engine = create_db_engine(settings)
+    try:
+        session_factory = create_session_factory(engine)
+        async with session_factory() as session:
+            await WeComSyncService(session).recover_stale_syncing_records()
+    finally:
+        await engine.dispose()
+
+
 def main() -> None:
     settings = get_settings()
     ensure_runtime_directories(settings)
     run_startup_migrations(settings)
     cleanup_stale_manual_backups(settings)
     asyncio.run(_cleanup_expired_exports(settings))
+    asyncio.run(_recover_stale_wecom_syncs(settings))
     application = create_app(settings)
     config = uvicorn.Config(
         application,

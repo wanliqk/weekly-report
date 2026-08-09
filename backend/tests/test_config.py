@@ -23,9 +23,35 @@ def test_short_runtime_secret_is_rejected() -> None:
 
 
 def test_sufficiently_long_runtime_secret_is_accepted() -> None:
-    settings = Settings(environment="development", runtime_secret="a" * 32)
+    settings = Settings(
+        environment="development", runtime_secret="a" * 32, main_bridge_secret="b" * 32
+    )
 
     assert settings.runtime_secret == "a" * 32
+
+
+def test_development_environment_requires_a_main_bridge_secret() -> None:
+    with pytest.raises(ValidationError):
+        Settings(environment="development", runtime_secret="a" * 32)
+
+
+def test_short_main_bridge_secret_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(environment="development", runtime_secret="a" * 32, main_bridge_secret="short")
+
+
+def test_sufficiently_long_main_bridge_secret_is_accepted() -> None:
+    settings = Settings(
+        environment="development", runtime_secret="a" * 32, main_bridge_secret="b" * 32
+    )
+
+    assert settings.main_bridge_secret == "b" * 32
+
+
+def test_test_environment_does_not_require_a_main_bridge_secret() -> None:
+    settings = Settings(environment="test")
+
+    assert settings.main_bridge_secret is None
 
 
 def test_data_and_log_dir_are_resolved_to_absolute_paths() -> None:

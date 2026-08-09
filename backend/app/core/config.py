@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     export_temp_dir: Path = PROJECT_ROOT / ".local-data" / "temp" / "exports"
     manual_backup_temp_dir: Path = PROJECT_ROOT / ".local-data" / "temp" / "manual-backups"
     runtime_secret: str | None = None
+    # SEC-014 (`docs/方案设计.md` §3.1/§9.2): a second, independent secret from
+    # `runtime_secret` — the latter reaches the renderer via preload and can
+    # never be trusted to gate the Cookie-carrying `/api/v1/internal/wecom/**`
+    # endpoints. Only Electron Main (via its sidecar child-process env) ever
+    # holds this value; it must never reach Vite, preload, renderer, logs, or
+    # persisted files.
+    main_bridge_secret: str | None = None
     cors_origins: list[str] = [
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -56,6 +63,20 @@ class Settings(BaseSettings):
         if self.runtime_secret is None or len(self.runtime_secret) < MIN_RUNTIME_SECRET_LENGTH:
             raise ValueError(
                 "runtime_secret is required and must be at least "
+                f"{MIN_RUNTIME_SECRET_LENGTH} characters outside the test environment"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_main_bridge_secret_outside_tests(self) -> Self:
+        if self.environment == "test":
+            return self
+        if (
+            self.main_bridge_secret is None
+            or len(self.main_bridge_secret) < MIN_RUNTIME_SECRET_LENGTH
+        ):
+            raise ValueError(
+                "main_bridge_secret is required and must be at least "
                 f"{MIN_RUNTIME_SECRET_LENGTH} characters outside the test environment"
             )
         return self

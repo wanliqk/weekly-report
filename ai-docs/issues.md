@@ -1,6 +1,6 @@
 # 问题、风险与阻塞记录
 
-> 更新日期：2026-08-08
+> 更新日期：2026-08-09
 > 严重度：P0 安全/数据损失；P1 核心功能/契约；P2 可维护性/体验；P3 建议
 > 状态：`OPEN`、`MITIGATED`、`RESOLVED`、`BLOCKED`
 
@@ -39,6 +39,8 @@
 | ISS-027 | P1 | OPEN | 企业微信日报使用非官方内部接口，协议、Cookie、风控或条款可能变化 | 若变化，可能导致认证失效、模板解析失败、重复提交风险或功能不可用；不得以猜测字段绕过 | `WECOM-04` 契约隔离与 fixture 测试，`WECOM-08` 受控测试账号真实冒烟；发布前确认组织制度/相关条款 |
 | ISS-028 | P0 | RESOLVED | `backend/wx-ribao/http_raw_request.txt`、`http_raw_response.txt` 和参考脚本 `wx-ribao.py`（其硬编码 URL 内含真实 `journaluuid`）是用户提供的真实协议样例，存在 Cookie、账号标识和日报正文被误提交/打包的风险 | `WECOM-00` 已实现：根 `.gitignore` 新增 `backend/wx-ribao/` 精确忽略规则（`git status --ignored` 确认为 `!!`）；`backend/tests/fixtures/wecom/` 新增四份全合成 fixture 替代原始样例供后续 Client 契约测试使用；`backend/tests/test_wecom_fixture_hygiene.py` 新增可复跑敏感扫描（本机存在原始样例时动态比对 Cookie/姓名/标识/正文取值，已用正向注入验证扫描逻辑真实生效）；原始三份文件本身未被修改、未被暂存、未被读入任何已提交文档 | `WECOM-00` 已交付；`WECOM-02` 起的真实数据/协议/凭证实现仍须继续遵守“测试只用合成 fixture”的约束 |
 | ISS-029 | P3 | OPEN | `uv run ruff format --check .` 报告 `backend/app/services/export_style.py` 需要重新格式化 | `WECOM-00` 会话中执行门禁时发现；`git status` 确认该文件本次会话未被改动，判断是更早提交（可能是 `150d20f`）遗留未跑 format 门禁所致，与本次改动无关；未顺手修改以避免把无关格式改动混入 `WECOM-00` 阶段提交 | 后续任意触碰该文件的阶段顺手执行 `uv run ruff format .` 修复；非阻塞，不影响任何测试或运行时行为 |
+| ISS-030 | P1 | RESOLVED | `WeComConnectionService._upsert_binding`/`_upsert_profile` 的并发回退逻辑（插入冲突后改查现有行更新）在捕获 `IntegrityError` 后直接复用同一 `AsyncSession` 继续查询，未先 `rollback()`；SQLAlchemy 在一次 `flush()` 抛出 `IntegrityError` 后会把整个事务标记为 `DEACTIVE`，任何后续查询立即抛 `PendingRollbackError`，导致真实并发/重复的 `validate_connection()` 调用直接 500，而不是设计文档承诺的"回退为更新其行" | `WECOM-06` 用真实 `asyncio.gather` 双会话并发调用复现（`test_concurrent_validate_connection_only_creates_one_binding_and_profile`），已修复：把两处 `add()` 分别包进 `await self._session.begin_nested()`（SAVEPOINT），失败只回滚这一次插入尝试；未采用更简单的整体 `session.rollback()`（`WeComSyncService.get_or_create_record()` 用的那种），因为 `_upsert_profile` 若整体回滚会连带撤销同一 `validate_connection` 事务内更早已成功的 `_upsert_binding` 写入，破坏"binding+profile 要么同时成功要么同时失败"的原子性承诺 | `WECOM-06` 已随实现同一批修复并补充并发回归测试 |
+| ISS-031 | P2 | OPEN | Electron `register-wecom-bridge.ts::connect()` 调用 `bridgeClient.validateConnection(cookieJar, '')` 时 `form_id` 传空字符串（`WECOM-03` 自身注释已记录为"form_id 发现是 WECOM-06/07 范围"），且 `WeComBridgeClient.validateConnection()` 从未把 `credentialStore.save()` 返回的 `slot` 传给后端；而 `WECOM-06` 按 `docs/方案设计.md` §5.1 步骤 4 把 `WeComConnectionValidateRequest.credential_slot` 实现为必填字段 | 当前 Electron 侧"连接"入口在真实点击时仍无法完整走通（空 `form_id` 会被模板结构校验拒绝，且请求体缺少必填的 `credential_slot` 会被 422 拒绝）；不是回归，是 `WECOM-03` 当时已知且记录在案的范围边界的自然延伸——真正可用的"连接"UI（含表单发现和 `credential_slot` 透传）本就是后续任务的范围，`WECOM-06` 未越权提前修改 `electron/**` | `WECOM-07` 实现真实连接 UI 时需同时补上表单发现（`form_id`）和把 `credential_slot` 加入 `WeComBridgeClient.validateConnection()` 的调用签名与请求体 |
 
 ## 2. 非阻塞产品/发布风险
 

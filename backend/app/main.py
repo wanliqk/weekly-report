@@ -12,11 +12,14 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.daily_report_days import router as daily_report_days_router
 from app.api.v1.daily_reports import router as daily_reports_router
 from app.api.v1.exports import router as exports_router
+from app.api.v1.internal_wecom import router as internal_wecom_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.statistics import router as statistics_router
 from app.api.v1.system import router as system_router
 from app.api.v1.templates import router as templates_router
 from app.api.v1.users import router as users_router
+from app.api.v1.wecom import day_sync_router as wecom_day_sync_router
+from app.api.v1.wecom import router as wecom_router
 from app.api.v1.weekly_reports import router as weekly_reports_router
 from app.core.backup_registry import BackupRegistry
 from app.core.config import Settings, get_settings
@@ -92,4 +95,7 @@ def create_app(settings: Settings | None = None, *, jwt_secret: str | None = Non
     application.include_router(exports_router)
     application.include_router(weekly_reports_router)
     application.include_router(statistics_router)
+    application.include_router(wecom_router)
+    application.include_router(wecom_day_sync_router)
+    application.include_router(internal_wecom_router)
     return application

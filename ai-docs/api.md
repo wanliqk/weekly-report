@@ -359,38 +359,39 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 
 创建请求的 `client_request_id` 由 renderer 生成并在同一意图重试时复用；同键返回既有条目，不同键可创建同日新条目。现有 404 所有权隐藏、40902 状态冲突、40904 乐观锁和 50301 数据库繁忙继续使用。
 
-## 14. 企业微信同步目标 API（CR-20260808-02）
+## 14. 企业微信同步目标 API（CR-20260808-02，WECOM-06 已实现）
 
-> 尚未实现；当前 `GET /capabilities` 仍返回 `wecom_sync:false`。
+> 后端 Service/Repository/API 均已实现并通过测试；`GET /capabilities` 仍返回 `wecom_sync:false`（能力开关切换是 `WECOM-07`/`WECOM-08` 范围），renderer 尚无任何调用入口。
 
-### 14.1 公开 REST
+### 14.1 公开 REST（`backend/app/api/v1/wecom.py`）
 
 | 方法 | 路径 | 权限/用途 |
 |---|---|---|
-| GET | `/wecom/connection` | 本人连接状态和非敏感账号摘要 |
-| GET/PUT | `/wecom/profile` | 本人读取/版本化更新映射配置 |
-| POST | `/wecom/previews` | 本人预览指定日期正式日报的转换结果 |
-| POST | `/daily-report-days/{work_date}/wecom-syncs` | 本人幂等创建/取得同步记录 |
-| GET | `/wecom/sync-records` | 本人按日期/状态查询历史 |
-| GET | `/wecom/sync-records/{record_id}` | 本人同步详情，不含请求/响应原文 |
-| POST | `/wecom/sync-records/{record_id}/retry` | 只允许明确可重试状态 |
+| GET | `/wecom/connection` | 本人连接状态和非敏感账号摘要；从未连接过返回 `connected:false,status:null`，区别于"曾连接后断开"的 `status:"disconnected"` |
+| GET/PUT | `/wecom/profile` | 本人读取/版本化更新映射配置；未连接返回 `40911`；`PUT` 只接受 `expected_version`+可选 `recipient_config`/`field_mapping`，`question_mapping`/`schema_fingerprint`/`form_id` 只能由连接时发现产生；版本冲突复用 `40904` |
+| POST | `/wecom/previews` | 本人预览指定 `daily_report_day_id` 的转换结果；非本人/不存在 `40401`，未归档复用 `40902`，未连接 `40911`；从不落库、不写日志 |
+| POST | `/daily-report-days/{work_date}/wecom-syncs` | 本人幂等创建/取得同步记录（响应含 `created` 标记，与日报创建同一模式）；未归档/未连接同上 |
+| GET | `/wecom/sync-records` | 本人按 `status`/`date_from`/`date_to`/`page`/`page_size` 查询历史 |
+| GET | `/wecom/sync-records/{record_id}` | 本人同步详情，不含请求/响应原文；非本人 `404` |
+| POST | `/wecom/sync-records/{record_id}/retry` | 只对 `failed/auth_required/schema_changed/duplicate_detected` 生效；`pending/syncing` 为无操作幂等返回；`succeeded` 复用 `40913`；`uncertain` 返回 `40914` |
 
-所有公开接口继续使用 `/api/v1` 前缀，同时校验 runtime secret、JWT、强制改密状态和 owner；越权统一 `40401`。
+所有公开接口继续使用 `/api/v1` 前缀，同时校验 runtime secret、JWT（`get_current_user`，含强制改密 `40303` 拦截）和 owner；越权统一 `40401`。
 
-### 14.2 Main-only REST
+### 14.2 Main-only REST（`backend/app/api/v1/internal_wecom.py`）
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/internal/wecom/connections/validate` | Main 传入单次内存 Cookie jar，验证并保存非敏感绑定 |
-| POST | `/internal/wecom/sync-records/{record_id}/execute` | Main 解密凭证后执行已预留记录 |
-| POST | `/internal/wecom/connections/disconnect` | 标记断开；凭证由 Main 删除 |
+| POST | `/internal/wecom/connections/validate` | Main 传入单次内存 Cookie jar + `credential_slot` + `form_id`，验证并保存非敏感绑定 |
+| POST | `/internal/wecom/sync-records/{record_id}/execute` | Main 解密凭证后执行已预留记录；业务失败（`schema_changed`/`duplicate_detected`/`uncertain` 等）以对应错误码的非 2xx 响应返回，记录本身仍已落库为终态 |
+| POST | `/internal/wecom/connections/disconnect` | 标记断开；凭证由 Main 删除；无绑定视为已满足的无操作 |
 
-路径仍位于 `/api/v1` 下，但同时要求用户 JWT 和 `X-Main-Bridge-Secret`，默认不进入公开 OpenAPI。只接受结构化 Cookie jar，不接受原始 Cookie header、文件路径或任意目标 URL。
+路径仍位于 `/api/v1` 下，同时要求用户 JWT 和 `X-Main-Bridge-Secret`（`app/api/dependencies.py::require_main_bridge_secret`，`secrets.compare_digest` 恒定时间比较，缺失/错误返回 `40104`），`include_in_schema=False` 确保不进入公开 OpenAPI；`RuntimeSecretMiddleware` 已按路径前缀豁免该组端点（不要求也不校验 `X-Runtime-Secret`）。只接受结构化 Cookie jar，不接受原始 Cookie header、文件路径或任意目标 URL。
 
-### 14.3 拟新增错误码
+### 14.3 新增错误码（已实现）
 
 | code | HTTP | 含义 |
 |---:|---:|---|
+| 40104 | 401 | `X-Main-Bridge-Secret` 缺失或无效 |
 | 40911 | 409 | 企业微信未连接或登录已失效 |
 | 40912 | 409 | 模板结构已变化 |
 | 40913 | 409 | 正式日报已成功同步 |
@@ -399,4 +400,8 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 | 50201 | 502 | 内部协议不符合已知契约 |
 | 50302 | 503 | 企业微信暂时不可用且可确认未受理 |
 
-远端响应、Cookie、请求体和日报正文不得透传。最终字段契约以 `docs/方案设计.md` CR-20260808-02 §9 为准。
+日期未归档复用现有 `40902`（同步执行中也复用该码，附加 `data.status:"syncing"` 供调用方区分）。远端响应、Cookie、请求体和日报正文不透传；`last_error_message` 固定中文文案。
+
+### 14.4 崩溃恢复
+
+`app/__main__.py::main()` 启动时调用 `WeComSyncService.recover_stale_syncing_records()`：任何 `syncing` 超过 5 分钟（`STALE_SYNCING_LEASE_SECONDS`）仍未完成的记录转为 `uncertain`（绝不直接转 `failed`），与 `docs/方案设计.md` §10.3 一致；不区分用户，是启动期维护性清理（同 `cleanup_stale_manual_backups`/`ExportService.cleanup_expired` 的既有模式）。

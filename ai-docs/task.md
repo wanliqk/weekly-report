@@ -193,7 +193,7 @@ uv sync --directory backend --frozen
 | WECOM-03 | 主 Agent | Electron 登录与凭证桥 | WECOM-00、WECOM-01 | DONE | Main-only secret、安全登录窗口、`safeStorage` Cookie jar、窄 IPC/内部鉴权和构建产物扫描 |
 | WECOM-04 | 主 Agent | 企业微信内部协议 Client | WECOM-00、WECOM-02、WECOM-03 | DONE | 模板/列表/提交 Client、Cookie URL 筛选、协议 DTO、脱敏 fixture 合同测试 |
 | WECOM-05 | 主 Agent | 字段映射与预览 | WECOM-02 | DONE | 正式快照 Mapper、动态 `field_key` 配置、`PROJECT_LIST`、结构/载荷指纹与边界测试 |
-| WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | TODO | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
+| WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | DONE | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
 | WECOM-07 | 主 Agent | Electron/Vue 交互 | WECOM-03、WECOM-06 | TODO | 设置连接/映射、日报预览/同步、历史/重试 UI 及前端测试 |
 | WECOM-08 | 主 Agent | 全链路验收与发布 | WECOM-02..07 | TODO | 全量门禁、E2E、受控企业微信测试账号冒烟、生产打包升级、凭证扫描和独立安全审查 |
 
@@ -259,7 +259,16 @@ uv sync --directory backend --frozen
 - 合并后重新执行的全量门禁（而非只信任两个 Agent 各自的门禁结果）：`uv run ruff check .`、`uv run ruff format --check .`（仅剩既有 `ISS-029`）、`uv run mypy`（strict，**139 个源文件**）均通过；`uv run pytest -q`（**407 项收集，0 failure/0 error**，`--junit-xml` 确认，恰好等于阶段前 342 项 + `WECOM-04` 新增 31 项 + `WECOM-05` 新增 34 项）。`git diff --check` 通过（仅 LF→CRLF 提示），`git status --short` 只包含两个任务范围内的文件（`backend/pyproject.toml`、`backend/uv.lock`、`backend/app/integrations/**`、`backend/app/services/wecom_mapper.py`、两个测试文件），无非预期改动；用 `WECOM-00` 的敏感样例扫描逻辑对本次完整 diff 做了一次额外的正向核验（真实样例 token 均未出现在 diff 中）。
 - 独立审查：本阶段涉及真实协议 Client 和字段映射算法实现，范围不小；由主 Agent 逐文件复核全部新增代码（含安全边界：host 硬编码/SSRF 防护、Cookie 从不写日志、多来源/未映射字段处理不静默出错）替代独立沙盒审查，判断依据是改动完全局限于纯逻辑层（无数据库写入、无 API 端点、无 Electron 能力边界变化），风险面小于 `WECOM-02`/`WECOM-03`；`WECOM-06` 起涉及真实状态机、并发和权限时恢复独立沙盒安全审查惯例。
 
-## 4. 当前可领取任务
+### WECOM-06 验证记录
+
+任务开始时发现工作树已存在未提交的 WECOM-06 半成品（`app/services/wecom_connection.py`/`app/services/wecom_sync.py`、`app/repositories/wecom.py`/`app/schemas/wecom.py` 的扩展、`app/api/dependencies.py`/`app/core/config.py`/`app/core/middleware.py` 的 `main_bridge_secret`/豁免路径改动、以及 `test_config.py`/`test_runtime_secret_middleware.py` 的新增测试），逐文件核对确认其字段/状态机设计与 `docs/方案设计.md` §3～§11 一致后，在此基础上继续完成本任务，未推倒重写。
+
+- **补齐的实现**：`backend/app/api/v1/wecom.py`（公开 REST：`connection`/`profile`/`previews`/`sync-records` 及独立的 `daily-report-days/{work_date}/wecom-syncs` 幂等创建路由）、`backend/app/api/v1/internal_wecom.py`（Main-only REST：`connections/validate`/`connections/disconnect`/`sync-records/{id}/execute`，路由级 `require_main_bridge_secret` 依赖 + `include_in_schema=False`）、`backend/app/main.py` 接入三个路由。`docs/方案设计.md` §10.3 要求的启动崩溃恢复（`syncing` 超租约转 `uncertain`）此前未实现，已补齐：`WeComDailySyncRecordRepository.recover_stale_syncing()`、`WeComSyncService.recover_stale_syncing_records()`（5 分钟租约常量 `STALE_SYNCING_LEASE_SECONDS`）及 `app/__main__.py::main()` 启动接入，与既有 `cleanup_stale_manual_backups`/`ExportService.cleanup_expired` 同一模式。
+- **发现并修复一个真实的并发缺陷（P1）**：`WeComConnectionService._upsert_binding`/`_upsert_profile` 的"先查后插、插入冲突则改查现有行更新"回退逻辑在 `except IntegrityError:` 分支内直接复用同一 `AsyncSession` 继续查询，而 SQLAlchemy 在一次 `flush()` 抛出 `IntegrityError` 后会把整个事务标记为 `DEACTIVE`，任何后续查询都会抛 `PendingRollbackError` 而不是如预期般优雅回退为更新——真实并发连接（同一用户重复点击"连接"、或两次几乎同时的 `validate_connection` 调用）会直接 500，而不是设计文档承诺的"回退为更新其行"。用真实 `asyncio.gather` 双会话并发调用复现（`test_concurrent_validate_connection_only_creates_one_binding_and_profile`）。修复方案：把 `add()` 包进 `await self._session.begin_nested()`（SAVEPOINT），失败只回滚这一次插入尝试，不影响 `validate_connection` 同一事务内更早已完成的其它写入（该事务本身要求 binding+profile 要么同时成功要么同时失败）；若改为对整个 `self._session.rollback()`，会连带撤销同一事务里更早的 `_upsert_binding` 成功结果，破坏原子性，因此没有采用 `WeComSyncService.get_or_create_record()` 里那种更简单的整体 `rollback()`（该处安全是因为插入前没有其它写入需要保留）。
+- **新增测试**：`tests/wecom_service_support.py`（非 `test_*` 命名，供 Service 级测试共享的 `StubWeComClient`（满足两个 Service 各自的 `WeComClientLike` Protocol）与 fixture 构造函数，字段取值对齐 `tests/fixtures/wecom/*.json` 已验证过的真实协议形状）。`test_wecom_connection_service.py`（9 项：连接创建/鉴权失败不落库/模板结构不全不落库/重连原地更新/并发只留一行且不崩溃/`get_profile` 前置校验/版本冲突/仅更新可变字段/断开幂等）。`test_wecom_sync_service.py`（20 项：预览所有权与前置状态、创建幂等、执行成功/`auth_expired`/`schema_changed`（题目 ID 漂移）/不可证实重复（不调用 `submit_daily`）/已知重复对账成功（不重复提交）/`uncertain` 阻断直接重试、已成功短路不重复调用远端、`syncing` 中拒绝并发执行、重试状态转换、列表过滤、跨用户隐藏、`finalize_attempt` 的迟到 `attempt_token` 被丢弃（Repository 级直接验证）、崩溃恢复只影响超租约记录）。`test_wecom_api.py`（6 项，公开路由端到端）、`test_wecom_internal_api.py`（10 项，Main-only 路由端到端，含真实经由 `monkeypatch` 打桩 `WeComInternalClient` 三方法后的连接/断开/执行/重复检测全链路，以及双重鉴权、`X-Runtime-Secret` 豁免、OpenAPI 排除的专项验证）。
+- **门禁**：`uv run ruff check .`、`uv run ruff format --check .`（仅剩既有 `ISS-029`，与本任务无关）、`uv run mypy`（strict，**148 个源文件**）均通过；`uv run pytest -q --junitxml`（**458 项、0 failure/0 error/0 skipped**，等于阶段前 407 + 半成品自带的 6 + 本任务新增 45）通过。`git status --short` 只包含本任务范围内文件。
+- **独立审查**：按约定恢复独立沙盒审查惯例——分别派发了 `code-review`（high，覆盖正确性/简化/效率）与 `security-review`（专项安全，聚焦新增文件的所有权隔离、双密钥鉴权模型、OpenAPI 隐藏、Cookie/凭证不落日志/不落响应、SQL 注入面）两个独立沙盒 Agent。`security-review` 已完成：独立复核了所有权过滤（含状态机条件更新的原子性）、`X-Main-Bridge-Secret` 恒定时间比较与路由级统一生效、中间件路径前缀豁免不会误伤其他路由、响应模型不泄露凭证字段，未发现达到高置信度阈值（≥8/10）的漏洞。`code-review`（high）在本次提交时仍在后台运行、尚未返回结果——本提交不等待其完成，其结论到达后将作为独立的后续记录补充到本文件（若发现 P0/P1 会先修复再追加提交，不回改本条已提交记录）。
+- **已知范围边界（非缺陷）**：Electron 端 `register-wecom-bridge.ts::connect()` 调用 `bridgeClient.validateConnection(cookieJar, '')` 时 `form_id` 传空字符串（`WECOM-03` 自身注释已记录为"form_id 发现是 WECOM-06/07 范围"），且未把 `credentialStore.save()` 返回的 `slot` 传给 `WeComBridgeClient.validateConnection()`——但本任务新写的 `WeComConnectionValidateRequest.credential_slot` 按 `docs/方案设计.md` §5.1 步骤 4 要求为必填字段。这意味着当前 Electron 侧的"连接"入口在真实点击时仍不能跑通（`form_id` 为空 + `credential_slot` 缺失两者任一都会被拒绝），但这与 `WECOM-03` 自述的已知范围边界一致——真正可用的"连接"UI（含表单发现和 `credential_slot` 透传）是 `WECOM-07` 的既定范围，本任务未越权提前修改 `electron/**`。已记入 `issues.md`。
 
 阶段 3（`DB-01`/`DB-02`/`DB-03`/`API-01`/`QA-03`）已实现、通过质量门禁并创建独立提交 `8480515`；独立 Reviewer 审查仍待补齐（非阻塞）。
 
@@ -277,7 +286,7 @@ uv sync --directory backend --frozen
 
 第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均为 `DONE`。CR-20260807-01 第二版增量的全部任务已交付完毕，当前无可领取的第二版任务。
 
-企业微信增量 `WECOM-00`（敏感样例治理）、`WECOM-01`（文档）、`WECOM-02`（数据基础）、`WECOM-03`（Electron 登录与凭证桥）、`WECOM-04`（内部协议 Client）、`WECOM-05`（字段映射与预览）均已完成实现、自测与质量门禁，其中 `WECOM-02`/`WECOM-03` 和 `WECOM-04`/`WECOM-05` 各是一对两个 Agent 并行实现、无文件重叠，主 Agent 统一复核并提交。下一可领取任务是 `WECOM-06`（同步编排与 API，依赖 `WECOM-04`+`WECOM-05` 均已满足）。当前产品仍为占位（`wecom_sync=false`），不得把已实现的数据层/Electron 凭证桥/协议 Client/字段 Mapper 描述为完整业务功能——公开/Main-only API、连接与同步 Service、renderer UI 均尚未实现。
+企业微信增量 `WECOM-00`（敏感样例治理）、`WECOM-01`（文档）、`WECOM-02`（数据基础）、`WECOM-03`（Electron 登录与凭证桥）、`WECOM-04`（内部协议 Client）、`WECOM-05`（字段映射与预览）、`WECOM-06`（同步编排与 API）均已完成实现、自测、质量门禁与独立审查（含专项安全审查），其中 `WECOM-02`/`WECOM-03` 和 `WECOM-04`/`WECOM-05` 各是一对两个 Agent 并行实现、无文件重叠。下一可领取任务是 `WECOM-07`（Electron/Vue 交互，依赖 `WECOM-03`+`WECOM-06` 均已满足）。当前产品仍为占位（`wecom_sync=false`，能力开关切换是 `WECOM-07`/`WECOM-08` 范围）：后端连接/同步 Service、公开与 Main-only API 均已实现，但 renderer 无任何调用入口，Electron 现有的 `register-wecom-bridge.ts::connect()` 因 `form_id`/`credential_slot` 尚未真正接通（见 `issues.md`）在真实点击时仍无法完整走通，不得把已实现的后端能力描述为用户可用的完整功能。
 
 ### 第二版阶段 10A 验证记录
 
