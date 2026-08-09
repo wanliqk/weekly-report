@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     backup_dir: Path = PROJECT_ROOT / ".local-data" / "backups"
     export_temp_dir: Path = PROJECT_ROOT / ".local-data" / "temp" / "exports"
     manual_backup_temp_dir: Path = PROJECT_ROOT / ".local-data" / "temp" / "manual-backups"
+    # `False` enables additional whitelisted protocol diagnostics in the
+    # rotating `wecom.log`; credentials, headers and bodies remain forbidden
+    # and are protected independently of this switch.
+    wecom_log_redact: bool = True
     runtime_secret: str | None = None
     # SEC-014 (`docs/方案设计.md` §3.1/§9.2): a second, independent secret from
     # `runtime_secret` — the latter reaches the renderer via preload and can

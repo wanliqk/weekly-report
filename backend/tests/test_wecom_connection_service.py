@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -106,6 +107,7 @@ async def test_validate_connection_maps_auth_error_and_persists_nothing(
 
 async def test_validate_connection_rejects_incomplete_template_and_persists_nothing(
     wecom_engine: AsyncEngine,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     session_factory = create_session_factory(wecom_engine)
     user = await _bootstrap_user(session_factory)
@@ -115,11 +117,31 @@ async def test_validate_connection_rejects_incomplete_template_and_persists_noth
     ]
     stub = StubWeComClient(template_info=build_template_info(questions=incomplete_questions))
 
-    async with session_factory() as session:
-        with pytest.raises(WeComTemplateStructureUnresolvedError):
-            await WeComConnectionService(session, client=stub).validate_connection(
-                user.id, cookie_jar=[], credential_slot="slot-1", form_id="form-1"
-            )
+    target_logger = logging.getLogger("app.integrations.wecom.connection")
+    was_disabled = target_logger.disabled
+    target_logger.disabled = False
+    try:
+        async with session_factory() as session:
+            with (
+                caplog.at_level(logging.DEBUG, logger=target_logger.name),
+                pytest.raises(WeComTemplateStructureUnresolvedError),
+            ):
+                await WeComConnectionService(session, client=stub).validate_connection(
+                    user.id, cookie_jar=[], credential_slot="slot-1", form_id="form-1"
+                )
+    finally:
+        target_logger.disabled = was_disabled
+
+    diagnostic_records = [
+        record for record in caplog.records if "outcome=template_unresolved" in record.getMessage()
+    ]
+    assert diagnostic_records
+    diagnostics = diagnostic_records[-1].__dict__["wecom_diagnostics"]
+    assert diagnostics["question_count"] == 1
+    assert diagnostics["recognized_question_count"] == 1
+    assert diagnostics["date_candidate_count"] == 0
+    assert diagnostics["today_candidate_count"] == 1
+    assert diagnostics["tomorrow_candidate_count"] == 0
 
     async with session_factory() as session:
         assert await WeComConnectionService(session).get_binding(user.id) is None

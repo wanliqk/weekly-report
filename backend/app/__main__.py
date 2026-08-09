@@ -7,6 +7,7 @@ import uvicorn
 
 from app.core.config import Settings, get_settings
 from app.core.paths import ensure_runtime_directories
+from app.core.wecom_logging import configure_wecom_logging
 from app.db.engine import create_engine as create_db_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
@@ -60,6 +61,7 @@ def main() -> None:
     settings = get_settings()
     ensure_runtime_directories(settings)
     run_startup_migrations(settings)
+    configure_wecom_logging(settings)
     cleanup_stale_manual_backups(settings)
     asyncio.run(_cleanup_expired_exports(settings))
     asyncio.run(_recover_stale_wecom_syncs(settings))

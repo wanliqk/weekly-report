@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Protocol
@@ -24,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import Clock, utc_now
 from app.core.errors import AppError
 from app.core.ulid import generate_ulid
+from app.core.wecom_logging import log_wecom_event
 from app.integrations.wecom.client import (
     WeComAuthExpired,
     WeComBusinessRejected,
@@ -44,6 +47,8 @@ from app.schemas.wecom import (
     WeComReplyType,
 )
 from app.services.wecom_mapper import compute_schema_fingerprint
+
+logger = logging.getLogger("app.integrations.wecom.connection")
 
 
 class WeComClientLike(Protocol):
@@ -181,6 +186,25 @@ def _select_target_question_specs(
     return date_spec, today_spec, tomorrow_spec
 
 
+def _template_resolution_diagnostics(
+    questions: list[WeComQuestionItem],
+) -> dict[str, str | int | bool | None]:
+    return {
+        "question_count": len(questions),
+        "recognized_question_count": sum(item.reply_type in _REPLY_TYPE_MAP for item in questions),
+        "date_candidate_count": sum(
+            any(hint in item.title for hint in _DATE_HINTS) for item in questions
+        ),
+        "today_candidate_count": sum(
+            any(hint in item.title for hint in _TODAY_HINTS) for item in questions
+        ),
+        "tomorrow_candidate_count": sum(
+            any(hint in item.title for hint in _TOMORROW_HINTS) for item in questions
+        ),
+        "unique_submit_order_count": len({item.pos for item in questions if item.pos is not None}),
+    }
+
+
 def compute_destination_fingerprint(form_id: str, template_id: str) -> str:
     """SHA-256 of the normalized `(form_id, template_id)` pair
     (`docs/方案设计.md` §6.3: "对 form_id + template_id 的规范化 SHA-256")."""
@@ -229,17 +253,49 @@ class WeComConnectionService:
         neither does — every failure path raises before either repository
         write happens, and the one place that writes commits both together.
         """
+        validation_started = time.monotonic()
         client = self._injected_client if self._injected_client is not None else self._new_client()
         owns_client = self._injected_client is None
         try:
             try:
                 template_info = await client.get_template_info(cookie_jar, form_id)
             except WeComClientError as exc:
+                log_wecom_event(
+                    logger,
+                    event="connection_validation",
+                    path_template="/journal/get_template_combine_info",
+                    outcome="client_error",
+                    duration_ms=int((time.monotonic() - validation_started) * 1000),
+                    diagnostics={
+                        "error_type": type(exc).__name__,
+                        "error_message": exc.message,
+                        **(
+                            {"business_code": exc.biz_code}
+                            if isinstance(exc, WeComBusinessRejected)
+                            else {}
+                        ),
+                    },
+                )
                 raise _map_connection_client_error(exc) from exc
 
-            date_spec, today_spec, tomorrow_spec = _select_target_question_specs(
-                template_info.questions
-            )
+            try:
+                date_spec, today_spec, tomorrow_spec = _select_target_question_specs(
+                    template_info.questions
+                )
+            except WeComTemplateStructureUnresolvedError as exc:
+                log_wecom_event(
+                    logger,
+                    event="connection_validation",
+                    path_template="/journal/get_template_combine_info",
+                    outcome="template_unresolved",
+                    duration_ms=int((time.monotonic() - validation_started) * 1000),
+                    diagnostics={
+                        "error_type": type(exc).__name__,
+                        "error_message": exc.message,
+                        **_template_resolution_diagnostics(template_info.questions),
+                    },
+                )
+                raise
             question_mapping = WeComQuestionMappingConfig(
                 schema_version=1,
                 date_question=date_spec,
@@ -289,6 +345,14 @@ class WeComConnectionService:
                 schema_fingerprint=schema_fingerprint,
             )
             await self._session.commit()
+            log_wecom_event(
+                logger,
+                event="connection_validation",
+                path_template="/journal/get_template_combine_info",
+                outcome="ok",
+                duration_ms=int((time.monotonic() - validation_started) * 1000),
+                diagnostics=_template_resolution_diagnostics(template_info.questions),
+            )
         except BaseException:
             await self._session.rollback()
             raise

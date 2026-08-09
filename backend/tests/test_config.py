@@ -63,3 +63,8 @@ def test_data_and_log_dir_are_resolved_to_absolute_paths() -> None:
 
     assert settings.data_dir.is_absolute()
     assert settings.log_dir.is_absolute()
+
+
+def test_wecom_log_redaction_defaults_on_and_can_be_disabled() -> None:
+    assert Settings(environment="test", wecom_log_redact=True).wecom_log_redact is True
+    assert Settings(environment="test", wecom_log_redact=False).wecom_log_redact is False

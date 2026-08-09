@@ -35,6 +35,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.core.clock import Clock, utc_now
+from app.core.wecom_logging import log_wecom_event
 from app.integrations.wecom.schemas import (
     WeComCookieIn,
     WeComJournalEntry,
@@ -129,6 +130,20 @@ class WeComOutcomeUncertain(WeComClientError):
     malformed after HTTP 200 — the remote may or may not have accepted the
     write. Callers must reconcile remotely before ever retrying
     (`SEC-015`/`docs/方案设计.md` §10.3)."""
+
+
+def _outcome_for_error(exc: WeComClientError) -> str:
+    if isinstance(exc, WeComAuthExpired):
+        return "auth_expired"
+    if isinstance(exc, WeComSchemaChanged):
+        return "schema_changed"
+    if isinstance(exc, WeComBusinessRejected):
+        return "business_rejected"
+    if isinstance(exc, WeComProtocolChanged):
+        return "protocol_changed"
+    if isinstance(exc, WeComTransportFailed):
+        return "transport_failed"
+    return "outcome_uncertain"
 
 
 def _coerce_biz_code(value: object) -> int:
@@ -427,21 +442,24 @@ class WeComInternalClient:
                 path, params=params, json=json_body, headers={"Cookie": cookie_header}
             )
         except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as exc:
-            self._log(path, "transport_failed", started)
-            raise WeComTransportFailed("无法连接企业微信服务") from exc
+            transport_error = WeComTransportFailed("无法连接企业微信服务")
+            self._log(path, started, error=transport_error)
+            raise transport_error from exc
         except (httpx.WriteTimeout, httpx.ReadTimeout) as exc:
-            self._log(path, "outcome_uncertain", started)
-            raise WeComOutcomeUncertain("请求超时,结果不确定") from exc
+            uncertain_error = WeComOutcomeUncertain("请求超时,结果不确定")
+            self._log(path, started, error=uncertain_error)
+            raise uncertain_error from exc
         except httpx.HTTPError as exc:
-            self._log(path, "transport_failed", started)
-            raise WeComTransportFailed("网络请求失败") from exc
+            http_error = WeComTransportFailed("网络请求失败")
+            self._log(path, started, error=http_error)
+            raise http_error from exc
 
         try:
             result = _parse_json_response(response, on_send=on_send)
-        except WeComClientError:
-            self._log(path, "protocol_error", started)
+        except WeComClientError as exc:
+            self._log(path, started, http_status=response.status_code, error=exc)
             raise
-        self._log(path, "ok", started)
+        self._log(path, started, http_status=response.status_code)
         return result
 
     async def _send_multipart(
@@ -466,32 +484,49 @@ class WeComInternalClient:
                 path, params=params, files=files, headers={"Cookie": cookie_header}
             )
         except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as exc:
-            self._log(path, "transport_failed", started)
-            raise WeComTransportFailed("无法连接企业微信服务") from exc
+            transport_error = WeComTransportFailed("无法连接企业微信服务")
+            self._log(path, started, error=transport_error)
+            raise transport_error from exc
         except (httpx.WriteTimeout, httpx.ReadTimeout) as exc:
-            self._log(path, "outcome_uncertain", started)
-            raise WeComOutcomeUncertain("请求超时,结果不确定") from exc
+            uncertain_error = WeComOutcomeUncertain("请求超时,结果不确定")
+            self._log(path, started, error=uncertain_error)
+            raise uncertain_error from exc
         except httpx.HTTPError as exc:
-            self._log(path, "transport_failed", started)
-            raise WeComTransportFailed("网络请求失败") from exc
+            http_error = WeComTransportFailed("网络请求失败")
+            self._log(path, started, error=http_error)
+            raise http_error from exc
 
         try:
             result = _parse_json_response(response, on_send=True)
-        except WeComClientError:
-            self._log(path, "protocol_error", started)
+        except WeComClientError as exc:
+            self._log(path, started, http_status=response.status_code, error=exc)
             raise
-        self._log(path, "ok", started)
+        self._log(path, started, http_status=response.status_code)
         return result
 
-    def _log(self, path: str, outcome: str, started: float) -> None:
-        # Method/host/path template/outcome/duration only — never headers,
-        # Cookie values, query strings, or bodies (docs/方案设计.md §8 point 2).
-        logger.debug(
-            "wecom_client request host=%s path=%s outcome=%s duration_ms=%d",
-            _ALLOWED_HOST,
-            path,
-            outcome,
-            int((time.monotonic() - started) * 1000),
+    def _log(
+        self,
+        path: str,
+        started: float,
+        *,
+        http_status: int | None = None,
+        error: WeComClientError | None = None,
+    ) -> None:
+        diagnostics: dict[str, str | int | bool | None] = {}
+        if http_status is not None:
+            diagnostics["http_status"] = http_status
+        if error is not None:
+            diagnostics["error_type"] = type(error).__name__
+            diagnostics["error_message"] = error.message
+            if isinstance(error, WeComBusinessRejected):
+                diagnostics["business_code"] = error.biz_code
+        log_wecom_event(
+            logger,
+            event="request",
+            path_template=path,
+            outcome=_outcome_for_error(error) if error is not None else "ok",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            diagnostics=diagnostics,
         )
 
     # -- response parsing -----------------------------------------------------

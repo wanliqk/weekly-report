@@ -195,6 +195,7 @@ uv sync --directory backend --frozen
 | WECOM-05 | 主 Agent | 字段映射与预览 | WECOM-02 | DONE | 正式快照 Mapper、动态 `field_key` 配置、`PROJECT_LIST`、结构/载荷指纹与边界测试 |
 | WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | DONE | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
 | WECOM-07 | 主 Agent | Electron/Vue 交互 | WECOM-03、WECOM-06 | DONE | 设置连接/映射、日报预览/同步、历史/重试 UI、重启安全的 Main 凭证槽恢复及前后端测试 |
+| WECOM-07A | 主 Agent | 企业微信轮转诊断日志 | WECOM-04、WECOM-06 | DONE | 独立 `wecom.log`、2 MiB × 5 轮转、默认脱敏/详细诊断开关、凭证强制保护和日志测试 |
 | WECOM-08 | 主 Agent | 全链路验收与发布 | WECOM-02..07 | TODO | 全量门禁、E2E、受控企业微信测试账号冒烟、生产打包升级、凭证扫描和独立安全审查 |
 
 ### WECOM-00 验证记录
@@ -279,6 +280,14 @@ uv sync --directory backend --frozen
 - 能力开关已由 `wecom_sync=false` 切换为 `true`；`SettingsView.vue` 与 `DailyDetailView.vue` 完成入口接入。新增 renderer 企业微信 REST 类型/API/纯函数与 45 项单测，并扩充 Electron bridge、Credential Store、Main IPC、后端 Main-only API/能力开关测试；全量结果为后端 `pytest` **460 项通过**，前端 Vitest **27 文件 254 项通过**。
 - **门禁与冒烟**：`uv run --directory backend ruff check .`、`uv run --directory backend mypy`（strict，148 个源文件）、`uv run --directory backend pytest -q`（460 项）通过；`ruff format --check .` 仅报告既有 `ISS-029` 的 `app/services/export_style.py` 漂移。`npm run lint`、`npm run typecheck`、`npm test`（27 文件 254 项）、`npm run build` 均通过；构建产物扫描未发现 `credential_slot`、Cookie 名称或 Main-only secret 泄露到 preload/renderer。用一次性断言扩展现有 `admin-guard.spec.ts` 后运行真实 Electron/sidecar 冒烟，确认设置页出现企业微信表单入口、连接按钮可用且不再显示“功能暂未开放”（1 项通过）；一次性断言随后移除，未使用真实企业微信账号或发起外部登录。
 - `WECOM-08` 边界保持不变：受控企业微信测试账号的真实连接/提交/对账、生产 sidecar/electron-builder 打包、安装升级、完整 Playwright E2E、发布级凭证扫描与独立安全审查仍未执行，不得把 WECOM-07 的开发态能力描述为已发布验收。
+
+### WECOM-07A 验证记录
+
+- 用户在真实点击连接时只看到“企业微信内部服务请求失败（HTTP 502）”，现有 DEBUG 摘要既不持久化，也无法区分企业微信业务拒绝、协议结构变化与模板三题识别失败。新增 `app/core/wecom_logging.py`，后端迁移完成后配置独立 `app.integrations.wecom` logger，写入 `log_dir/wecom.log`；`RotatingFileHandler` 单文件上限 2 MiB，保留 `wecom.log.1` 至 `.5` 五个备份。开发态位置为根 `.local-data/logs/wecom.log`，生产态沿用 Electron 注入的 `userData/logs/wecom.log`。
+- `Settings.wecom_log_redact` 默认 `true`，可用 `WEEKLY_REPORT_WECOM_LOG_REDACT=false` 并重启应用开启详细诊断。默认模式只记录固定 method/host/path 模板、结果分类和耗时；详细模式额外记录 HTTP 状态、异常类型/固定安全文案、业务码，以及模板题目总数、可识别类型数和日期/今日/明日候选计数。两种模式都不接收请求/响应 header/body、Cookie jar、form/template/member ID 或日报正文；详细字段有键白名单，Formatter 对 Cookie/Authorization/JWT/两类运行期密钥做不可关闭的二次清洗。
+- Client 的成功、认证失效、业务拒绝、协议变化、transport failure 和 uncertain 均写分类事件；连接 Service 对三题自动识别失败单独写 `template_unresolved` 与纯计数诊断，因此下一次 502 可直接从日志判断是业务码/协议响应还是模板识别问题。
+- 新增 5 项测试（配置开关 1、日志模块 4），并扩充 Client/连接 Service 既有日志断言。定向 54 项通过；完整后端 `ruff check`、mypy strict（150 个源文件）和 pytest（465 项）通过；`ruff format --check .` 仍只报告既有 `ISS-029` 的 `app/services/export_style.py`，本任务全部涉及文件已格式化。`git diff --check` 通过（仅 Windows LF→CRLF 提示）。未修改 Electron/renderer，未启动真实企业微信登录或记录任何真实凭证/正文。
+- `WECOM-08` 状态不变：轮转诊断日志是发布验收前的可观测性补强，不替代受控真实账号连接/提交/对账、生产打包安装和独立安全审查。
 
 阶段 3（`DB-01`/`DB-02`/`DB-03`/`API-01`/`QA-03`）已实现、通过质量门禁并创建独立提交 `8480515`；独立 Reviewer 审查仍待补齐（非阻塞）。
 

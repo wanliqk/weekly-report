@@ -671,3 +671,7 @@ async def test_debug_log_never_contains_cookie_or_body(
         assert secret_cookie_value not in message
         assert "Cookie" not in message
         assert "form_id" not in message
+    assert any(
+        getattr(record, "wecom_diagnostics", {}).get("http_status") == 200
+        for record in caplog.records
+    )
