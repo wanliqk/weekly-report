@@ -339,12 +339,22 @@ class WeComConnectionService:
             best_guess_entry = template_info.entries[0] if template_info.entries else None
             wecom_vid = best_guess_entry.reply_id if best_guess_entry is not None else ""
             display_name = best_guess_entry.reply_name if best_guess_entry is not None else ""
-            # §5.1 step 6 / §6.3: no reliable source can discover
-            # recipients at connect time; an empty list is the only honest
-            # initial value (a real UI for choosing them is out of scope —
-            # `WECOM-07`+).
+            # §5.1 step 6 / §6.3: no reliable source can discover a general
+            # recipient *list* at connect time, but real submitted traffic
+            # (`ISS-042`) shows WeCom rejects a write whose `wwjournal_data.
+            # entry.reporter` is empty — this integration's whole purpose is
+            # "sync my own daily report", so defaulting `reporter_vids` to
+            # the same best-guess `wecom_vid` already computed above (rather
+            # than leaving it empty and requiring everyone to hand-enter
+            # their own vid in Settings before their first successful sync)
+            # is the honest, low-risk default: it's never worse than empty
+            # (which is proven to always fail), and Settings still lets a
+            # user override/add more recipients afterward.
             recipient_config = WeComRecipientConfig(
-                schema_version=1, mngreporter_vids=[], reporter_vids=[], remote_version=0
+                schema_version=1,
+                mngreporter_vids=[],
+                reporter_vids=[wecom_vid] if wecom_vid else [],
+                remote_version=0,
             )
             field_mapping = WeComFieldMappingConfig(
                 schema_version=1, rules=[], unmapped_policy="block"

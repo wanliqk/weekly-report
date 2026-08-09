@@ -96,7 +96,10 @@ async def test_validate_connection_creates_binding_and_active_profile(
         assert profile.form_id == "SYNTHETIC-FORM-0000000000000000000fork"
         recipient_config = WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
         assert recipient_config.mngreporter_vids == []
-        assert recipient_config.reporter_vids == []
+        # `ISS-042`: defaults to the connecting user's own best-guess vid
+        # (proven by real submitted traffic to be required — WeCom rejects a
+        # write with no reporter at all), not an empty list.
+        assert recipient_config.reporter_vids == [binding.wecom_vid]
         field_mapping = WeComFieldMappingConfig.model_validate_json(profile.field_mapping_json)
         assert field_mapping.rules == []
         assert field_mapping.unmapped_policy == "block"
@@ -104,6 +107,32 @@ async def test_validate_connection_creates_binding_and_active_profile(
     # An injected client is caller-owned; the Service only auto-closes a
     # client it constructed itself (`_new_client()`'s `owns_client` guard).
     assert stub.closed is False
+
+
+async def test_validate_connection_leaves_reporter_vids_empty_without_a_best_guess_entry(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """`ISS-042`: defaulting `reporter_vids` to the best-guess `wecom_vid`
+    must not turn into `[""]` (which `WeComRecipientConfig`'s
+    `_vids_are_non_blank` validator rejects, crashing the whole connect
+    flow) when there is no best-guess entry to guess from at all."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    stub = StubWeComClient(template_info=build_template_info(entries=[]))
+
+    async with session_factory() as session:
+        await WeComConnectionService(session, client=stub).validate_connection(
+            user.id, cookie_jar=[], credential_slot="slot-1", form_id="form-1"
+        )
+
+    async with session_factory() as session:
+        binding = await WeComConnectionService(session).get_binding(user.id)
+        assert binding is not None
+        assert binding.wecom_vid == ""
+
+        profile = await WeComConnectionService(session).get_profile(user.id)
+        recipient_config = WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
+        assert recipient_config.reporter_vids == []
 
 
 async def test_validate_connection_maps_auth_error_and_persists_nothing(

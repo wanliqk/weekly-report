@@ -584,3 +584,11 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - `docs/方案设计.md` §2.4/§5.3/§10.2/§10.3/§11 追加"第二次修订"说明，未删除 `ISS-040` 第一次修订的记录，保留完整决策轨迹。
 - 移除 3 个已过时的查重专项测试，新增 2 个"存在 fork 也必须成功提交"的回归测试（`test_wecom_sync_service.py`/`test_wecom_internal_api.py` 各一个），防止这个 100% 误判行为再次出现。`ruff check`/`mypy` strict/定向 `pytest`/全量 `pytest` 均通过。
 - 教训：`fork_items` 这类"实例列表"字段，在没有真实多日、多状态样本佐证前不能想当然地当作"提交历史"使用——这正是 `ISS-040` 实现时踩的坑，`ISS-041` 是紧接着的一次真实纠正，两者相隔不到一次重连+重试的时间。
+
+## 20. reporter_vids 默认留空导致提交被拒，改为默认本人 vid（`ISS-042`）
+
+- `ISS-041` 修复后用户重试，请求第一次真正打到 `formcol/answer_page`，但被业务拒绝（`business_code=-120000035`，无文案）。用户追问"为什么要我手填 vid，这不该自动获取吗"——是个合理的产品问题，不只是排障问题。
+- 用 `WEEKLY_REPORT_WECOM_DEBUG_RAW_BODY` 的原始请求日志逐字段比对用户真实成功抓包，定位到唯一结构性差异：真实成功提交的 `wwjournal_data.entry.reporter` 是 `[{"vid": "本人 vid"}]`，失败请求的 `reporter`/`mngreporter` 全是空数组。原设计（`WeComConnectionService.validate_connection()`）在连接时把 `recipient_config.reporter_vids` 无条件初始化为空列表，理由是"没有可靠来源发现收件人"，把配置完全推给用户在设置页手填一个他们通常不知道的数字 vid。
+- 直接查库确认：该用户 `wecom_user_bindings.wecom_vid`（连接时已经算出并保存的"猜测归属"值）与其真实成功抓包里的 `reporter` vid 完全一致。这说明"留空"从来不是保守选项，而是必然失败的选项——本人 vid 本来就已经在数据库里，只是没有被用上。
+- 已改为连接时默认 `reporter_vids=[wecom_vid]`（`wecom_vid` 为空时仍保持空列表，避免 `WeComRecipientConfig` 的非空校验因 `[""]` 报错）；设置页仍保留手动覆盖/新增收件人的能力。更新 1 个既有测试的默认值断言，新增 1 个"无最佳猜测 entry 时不产出空字符串 vid"的边界测试。`docs/方案设计.md` §6.3 已同步修订。`ruff check`/`mypy` strict/定向 `pytest`/全量 `pytest` 均通过。
+- 已知未处理的邻近问题（未在本次范围内）：`_upsert_profile()` 对已存在 profile 的重连会无条件用刚计算出的新 `recipient_config`/`field_mapping` 覆盖，这是本次改动之前就存在的既有行为——重新连接会连带覆盖用户此前在设置页手动配置的收件人/字段映射。是否应改为"仅在从未手动配置过时才套用默认值"是一个产品决策，留作后续观察项。
