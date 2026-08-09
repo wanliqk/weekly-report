@@ -182,6 +182,41 @@ def _connect(client: TestClient, headers: dict[str, str], monkeypatch: pytest.Mo
     assert response.status_code == 200, response.text
 
 
+def _login(client: TestClient, username: str, password: str) -> dict[str, str]:
+    response = client.post(
+        "/api/v1/auth/login",
+        headers=RUNTIME_HEADERS,
+        json={"username": username, "password": password},
+    )
+    assert response.status_code == 200, response.text
+    token = cast(str, response.json()["data"]["access_token"])
+    return {**RUNTIME_HEADERS, "Authorization": f"Bearer {token}"}
+
+
+def _create_second_user(client: TestClient, username: str) -> dict[str, str]:
+    admin_headers = _login(client, "admin", PASSWORD)
+    changed = client.put(
+        "/api/v1/auth/password",
+        headers=admin_headers,
+        json={"current_password": PASSWORD, "new_password": "new admin password"},
+    )
+    assert changed.status_code == 200, changed.text
+    admin_headers = _login(client, "admin", "new admin password")
+    user_password = f"{username} secure password"
+    created = client.post(
+        "/api/v1/users",
+        headers=admin_headers,
+        json={
+            "username": username,
+            "password": user_password,
+            "display_name": username.title(),
+            "role": "user",
+        },
+    )
+    assert created.status_code == 200, created.text
+    return _login(client, username, user_password)
+
+
 def test_internal_endpoints_require_the_main_bridge_secret_header(client: TestClient) -> None:
     headers = _bootstrap_and_login(client)
     response = client.post(
@@ -226,6 +261,20 @@ def test_internal_endpoints_work_without_the_ordinary_runtime_secret_header(
     assert response.status_code == 200, response.text
 
 
+def test_validate_connection_rejects_an_empty_form_id_before_calling_wecom(
+    client: TestClient,
+) -> None:
+    headers = _bootstrap_and_login(client)
+    response = client.post(
+        "/api/v1/internal/wecom/connections/validate",
+        headers={**headers, **MAIN_BRIDGE_HEADER},
+        json={"cookie_jar": _COOKIE_JAR, "credential_slot": "slot-1", "form_id": ""},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 40001
+
+
 def test_internal_endpoints_are_excluded_from_the_public_openapi_schema(
     client: TestClient,
 ) -> None:
@@ -234,6 +283,49 @@ def test_internal_endpoints_are_excluded_from_the_public_openapi_schema(
     paths = response.json()["paths"]
     assert all("/internal/wecom/" not in path for path in paths)
     assert any("/api/v1/wecom/" in path for path in paths)
+
+
+def test_credential_slot_lookup_is_restart_safe_and_owner_isolated(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alice_headers = _bootstrap_and_login(client)
+    bob_headers = _create_second_user(client, "bob")
+    _connect(client, alice_headers, monkeypatch)
+
+    alice_lookup = client.get(
+        "/api/v1/internal/wecom/connections/credential-slot",
+        headers={**alice_headers, **MAIN_BRIDGE_HEADER},
+    )
+    bob_lookup = client.get(
+        "/api/v1/internal/wecom/connections/credential-slot",
+        headers={**bob_headers, **MAIN_BRIDGE_HEADER},
+    )
+
+    assert alice_lookup.status_code == 200, alice_lookup.text
+    assert alice_lookup.json()["data"] == {
+        "credential_slot": "slot-1",
+        "connection_status": "connected",
+    }
+    assert bob_lookup.status_code == 200, bob_lookup.text
+    assert bob_lookup.json()["data"] == {
+        "credential_slot": None,
+        "connection_status": None,
+    }
+
+    disconnect_response = client.post(
+        "/api/v1/internal/wecom/connections/disconnect",
+        headers={**alice_headers, **MAIN_BRIDGE_HEADER},
+    )
+    assert disconnect_response.status_code == 200, disconnect_response.text
+    disconnected_lookup = client.get(
+        "/api/v1/internal/wecom/connections/credential-slot",
+        headers={**alice_headers, **MAIN_BRIDGE_HEADER},
+    )
+    assert disconnected_lookup.status_code == 200, disconnected_lookup.text
+    assert disconnected_lookup.json()["data"] == {
+        "credential_slot": "slot-1",
+        "connection_status": "disconnected",
+    }
 
 
 def test_validate_connection_end_to_end_creates_a_connection(

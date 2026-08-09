@@ -35,7 +35,7 @@ declare global {
         readonly save: (suggestedName: string, data: Uint8Array) => Promise<BackupSaveResult>
       }
       readonly wecom: {
-        readonly connect: () => Promise<WeComConnectResult>
+        readonly connect: (formId: string) => Promise<WeComConnectResult>
         readonly disconnect: () => Promise<WeComDisconnectResult>
         readonly executeSync: (recordId: string) => Promise<WeComExecuteSyncResult>
       }

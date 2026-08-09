@@ -21,6 +21,7 @@ from app.models import User
 from app.schemas.common import ApiResponse
 from app.schemas.wecom import (
     WeComConnectionValidateRequest,
+    WeComCredentialSlotData,
     WeComInternalAckData,
     WeComSyncExecuteRequest,
 )
@@ -48,6 +49,27 @@ async def validate_connection(
         form_id=payload.form_id,
     )
     return ApiResponse(data=WeComInternalAckData(status="connected"))
+
+
+@router.get("/connections/credential-slot", response_model=ApiResponse[WeComCredentialSlotData])
+async def get_connection_credential_slot(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ApiResponse[WeComCredentialSlotData]:
+    """Return only the current user's opaque slot to Electron Main.
+
+    This hidden, double-authenticated endpoint is the restart-safe bridge
+    between the database's non-sensitive binding metadata and Main's encrypted
+    credential files. The slot never crosses preload or renderer.
+    """
+
+    binding = await WeComConnectionService(session).get_binding(current_user.id)
+    return ApiResponse(
+        data=WeComCredentialSlotData(
+            credential_slot=binding.credential_slot if binding is not None else None,
+            connection_status=binding.status if binding is not None else None,
+        )
+    )
 
 
 @router.post("/connections/disconnect", response_model=ApiResponse[WeComInternalAckData])

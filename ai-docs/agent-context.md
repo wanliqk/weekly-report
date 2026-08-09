@@ -63,14 +63,15 @@
 - 2026-08-08 已完成 `WECOM-02`（企业微信数据基础）与 `WECOM-03`（Electron 登录与凭证桥），两个 Agent 按 backend/electron 无重叠文件并行实现，主 Agent 逐文件复核并统一提交。`WECOM-02`：三张 ORM 表（`wecom_user_bindings`/`wecom_sync_profiles`/`wecom_daily_sync_records`，迁移 `f19f6d677a36`）、Repository、`app/schemas/wecom.py` 的三个 Pydantic 配置契约，只是数据层，不含 Service/API/协议 Client。`WECOM-03`：`WeComCredentialStore`（`safeStorage` 加密、随机 `credential_slot`、无明文回退）、`WeComAuthWindowController`（隔离 session partition、精确主机名导航白名单、轮询 Cookie 判定登录完成）、`WeComBridgeClient`（调用尚不存在的 Main-only 端点会 404，是已知范围边界）、独立 `main_bridge_secret` 随子进程环境变量下发且不接入任何 IPC。合并后实际门禁：后端 `ruff check`/`mypy`（strict，132 个源文件）通过，`pytest`（342 项收集，0 failure/0 error）通过；前端 `lint`/`typecheck`/`test`（26 文件 192 项）/`build` 均通过；构建产物已复核无密钥/Cookie 泄露。
 - 2026-08-08 已完成 `WECOM-04`（企业微信内部协议 Client）与 `WECOM-05`（字段映射与预览），两个 Agent 均在 backend 内并行实现，文件范围不重叠（`app/integrations/wecom/**` vs `app/services/wecom_mapper.py`），唯一共享的 `pyproject.toml`/`uv.lock`（`httpx` 迁移为生产依赖）只由 `WECOM-04` 改动且已尽早一次完成，主 Agent 逐文件复核并统一提交。`WECOM-04`：`WeComInternalClient` 三方法（`get_template_info`/`list_journals`/`submit_daily`）、host 硬编码 + 每请求二次校验防 SSRF、六种分类异常、RFC 6265 风格 Cookie URL 筛选、httpx 随机边界 multipart。`WECOM-05`：`wecom_mapper.py` 严格实现 §7.1 四条路由优先级、`PROJECT_LIST` 格式化、多来源"日报 N"分段、`schema_fingerprint`/`payload_fingerprint` 两个确定性纯函数；过程中解决了设计文档"责任人"表述的歧义并反向修正了 `docs/方案设计.md` §7.2 的示例文本（含冒号全角/半角的仓库惯例统一）。合并后实际门禁：后端 `ruff check`/`ruff format --check`（仅剩既有 `ISS-029`）/`mypy`（strict，139 个源文件）均通过，`pytest`（407 项收集，0 failure/0 error，等于 342+31+34）通过；用 `WECOM-00` 敏感样例扫描逻辑对完整 diff 做了额外正向核验。企业微信公开/Main-only API、连接与同步编排 Service（幂等/状态机/重复检查）、renderer UI 仍未开始，`wecom_sync` 仍为 `false`。
 - 2026-08-09 已完成 `WECOM-06`（同步编排与 API）。开工时发现工作树已存在未提交的半成品（两个 Service 主体、Repository/Schema 扩展、`main_bridge_secret` 相关基础设施改动），核对与 `docs/方案设计.md` 一致后续建，补齐了 API 路由层（`app/api/v1/wecom.py` 公开 REST、`app/api/v1/internal_wecom.py` Main-only REST，路由级 `require_main_bridge_secret` + `include_in_schema=False`）、`main.py` 接入，以及设计文档要求但半成品缺失的启动崩溃恢复（`syncing` 超 5 分钟租约转 `uncertain`）。过程中发现并修复一个真实并发缺陷（`ISS-030`）：`WeComConnectionService` 的插入冲突回退逻辑在 `IntegrityError` 后未 `rollback()` 就复用同一 Session，真实并发连接会直接抛 `PendingRollbackError` 而非按设计回退为更新；已改用 `begin_nested()`（SAVEPOINT）修复并用真实 `asyncio.gather` 并发测试验证。新增 45 项测试（Service 级 29 项 + API 级 16 项）。全量门禁：`ruff check`/`ruff format --check`（仅剩既有 `ISS-029`）/`mypy`（strict，148 个源文件）均通过，`pytest`（458 项，0 failure/0 error）通过；独立审查已派发 `code-review`（high）与 `security-review` 两个沙盒 Agent，`security-review` 已完成且未发现高置信度安全漏洞，`code-review` 提交时仍在后台运行、结果待补记。已知边界（`ISS-031`，非缺陷）：Electron 现有 `register-wecom-bridge.ts::connect()` 的 `form_id`/`credential_slot` 尚未真正接通，真实"连接"UI 是 `WECOM-07` 的既定范围，本任务未越权修改 `electron/**`。企业微信后端至此全部就位，`wecom_sync` 能力开关仍为 `false`，renderer 无任何调用入口。
+- 2026-08-09 已完成 `WECOM-07`（Electron/Vue 交互）：设置页提供表单连接/重连/断开、账号与模板信息、字段映射/收件人/未映射策略配置和同步历史；已归档日报详情提供预览、未映射字段就地修正、同步状态与保守重试。Electron `connect(form_id)` 已透传 Main 创建的 `credential_slot`；双鉴权且不进入 OpenAPI 的 Main-only 查询按当前 JWT 返回本人槽位与 binding status，解决重启/切换账号恢复（`ISS-032`）并支持断开响应对账。凭证删除失败通过只含 opaque slot 的空 marker 持久重试；历史 `pending` 可继续执行且未连接时禁用。Cookie/槽位不进入 preload/renderer；`ISS-031..034` 已解决，`wecom_sync=true`。全量门禁通过：后端 Ruff/mypy/pytest（460 项），前端 lint/typecheck/Vitest（27 文件 254 项）/build；真实 Electron 冒烟验证设置页入口可用；独立三轮窄复审最终无剩余 P0/P1/P2。受控真实企业微信账号、生产打包和发布级验收仍属于 `WECOM-08`。
 
 “依赖已列入清单”不等于对应业务已完成；“技术方案已描述”也不等于已经落地。
 
 ## 5. 当前阶段与下一步
 
 - 已完成阶段：工程基线（`3a9fdbc`）、Desktop Bootstrap（`7386cae`）、数据基础与 API Foundation（`8480515`）、认证与用户管理（`1a50e75`）、模板、设置与日报闭环（`1d965fe`）、查询导出与桌面保存（`d6ab86e`）、周报闭环（`346b0ea`）、设置能力与受控备份（`00caa33`）、质量与发布（`0148171`）。
-- 当前阶段：CR-20260808-02 已完成 `WECOM-00`（敏感样例治理）、`WECOM-01`（文档）、`WECOM-02`（数据基础）、`WECOM-03`（Electron 登录与凭证桥）、`WECOM-04`（内部协议 Client）、`WECOM-05`（字段映射与预览）；同步编排 Service（幂等/状态机/重复检查）、公开/Main-only API、renderer UI 仍未实现，`wecom_sync` 占位保持有效。
-- 下一步：`WECOM-06`（同步编排与 API，依赖 `WECOM-04`+`WECOM-05` 均已满足）是唯一可领取任务，需要把已就位的 Client（`WeComInternalClient`）、Mapper（`build_wecom_preview`/`compute_schema_fingerprint`）和 Electron 凭证桥（`WeComBridgeClient` 调用的 Main-only 端点）真正接起来；`WECOM-07`（renderer UI）仍需等待 `WECOM-06`。测试一律使用 `backend/tests/fixtures/wecom/` 的合成 fixture，不得读取或依赖已被 `.gitignore` 排除的 `backend/wx-ribao/`。
+- 当前阶段：CR-20260808-02 已完成 `WECOM-00..07`，数据、凭证桥、协议 Client、字段 Mapper、同步编排/API 和 Electron/Vue 用户交互均已落地，`wecom_sync=true`。
+- 下一步：`WECOM-08` 是唯一可领取任务，需完成受控企业微信测试账号冒烟、生产打包/安装升级、全链路 E2E、凭证扫描和独立安全审查。测试仍须优先使用 `backend/tests/fixtures/wecom/` 的合成 fixture，不得读取或依赖已被 `.gitignore` 排除的 `backend/wx-ribao/`；使用真实测试账号必须保持受控且不得把凭证/正文写入日志或仓库。
 - 未获用户明确授权，不得推送远端。
 
 具体任务编号、依赖和状态以 `ai-docs/task.md` 为准；完成事实以 `ai-docs/progress.md` 为准。
@@ -85,7 +86,7 @@
 - JWT 由 Electron `safeStorage` 保存，不得写入 `localStorage` 或 `sessionStorage`。
 - 不记录密码、JWT、runtime secret、完整日报或周报正文。
 - 开发环境使用仓库 `.local-data/`；生产数据使用 Electron `userData`，安装目录保持只读。
-- 企业微信当前实现仍只做“功能暂未开放”占位；CR-20260808-02 已批准后续真实同步方案，但只有 `WECOM-00..08` 按阶段交付后才能启用。AI 模型仍不在范围。
+- 企业微信开发态能力已随 `WECOM-07` 启用（`wecom_sync=true`），但尚未完成 `WECOM-08` 的受控真实账号、生产打包和发布级验收；AI 模型仍不在范围。
 - 企业微信 Cookie 只能由 Electron Main 通过 `safeStorage` 保存；不得进入 renderer、SQLite、备份、日志或错误响应。携带 Cookie 的内部端点必须使用独立 Main-only secret，不能只依赖 renderer 可见的 runtime secret。
 
 ## 7. 工作与交付规则

@@ -6,4 +6,4 @@ class SettingsData(BaseModel):
 
 
 class CapabilitiesData(BaseModel):
-    wecom_sync: bool = False
+    wecom_sync: bool = True

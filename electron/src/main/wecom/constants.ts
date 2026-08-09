@@ -2,7 +2,8 @@
  * Generic entry point that triggers WeCom's own SSO/login flow (docs/方案设计.md
  * §4.1: "不要假设一个具体的表单 URL...导航到一个能触发企业微信 SSO 登录的通用入口即可，
  * 比如企业微信文档首页"). The concrete per-org form id is only known once a user
- * completes connection setup (WECOM-06/07), well outside this task's scope.
+ * completes connection setup; WECOM-07 now supplies it separately to the
+ * Main-only validation endpoint after this fixed login flow succeeds.
  */
 export const WECOM_LOGIN_ENTRY_URL = 'https://doc.weixin.qq.com/'
 

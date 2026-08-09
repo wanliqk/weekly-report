@@ -221,23 +221,23 @@ app/
 
 | 模块 | 目标职责 | 依赖 | 禁止事项 | 状态 |
 |---|---|---|---|---|
-| M23 WeCom Auth Bridge | 受控登录窗口、Cookie 提取、`safeStorage`、Main-only 调用 | M02、M03、M05 | Cookie 进入 renderer/SQLite、任意 URL IPC | IN_PROGRESS（Electron 侧登录窗口/凭证存储/IPC 骨架、后端 Main-only 端点均已交付；Electron `connect()` 尚未把 `form_id`/`credential_slot` 传给后端，真实点击仍无法完整走通，见下方说明和 `issues.md` `ISS-031`，是 `WECOM-07` 的范围） |
-| M24 WeCom Connection | 账号校验、模板发现、绑定/配置版本 | M05、M23、M27 | 保存 Cookie、admin 读取他人配置 | DONE（`WECOM-06`，`WeComConnectionService` + 公开/Main-only API；Electron 侧真实连接 UI 是 `WECOM-07` 的范围） |
+| M23 WeCom Auth Bridge | 受控登录窗口、Cookie 提取、`safeStorage`、Main-only 调用 | M02、M03、M05 | Cookie 进入 renderer/SQLite、任意 URL IPC | DONE（`WECOM-03`/`WECOM-07`：真实 `form_id`/`credential_slot` 透传、按当前 JWT 恢复槽位、持久 marker 重试旧槽清理、断开状态对账） |
+| M24 WeCom Connection | 账号校验、模板发现、绑定/配置版本 | M05、M23、M27 | 保存 Cookie、admin 读取他人配置 | DONE（`WECOM-06`/`WECOM-07`：Service/API 与设置页连接、重连、断开、映射交互） |
 | M25 WeCom Mapper | 正式快照到日期/今日/明日的确定性转换与预览 | M18、M07 | 读取开放日期、按标签运行时猜测 | DONE（`WECOM-05`，纯转换层，不含 Service/持久化） |
 | M26 WeCom Sync | 幂等记录、状态机、重复检查、结果对账 | M18、M24、M25、M27 | 自动重试 `uncertain`、修改本地日报 | DONE（`WECOM-06`，`WeComSyncService` + 公开/Main-only API，含启动崩溃恢复） |
 | M27 WeCom Client | 内部模板/列表/提交协议和错误分类 | M03 | 协议散落 Service、记录 header/body | DONE（`WECOM-04`，纯协议层，不含 Service/API） |
-| M28 WeCom UI | 设置连接/映射、日报预览/同步、历史状态 | M12、M23～M26 | Web Storage 凭证、前端自行判断所有权 | DESIGN |
+| M28 WeCom UI | 设置连接/映射、日报预览/同步、历史状态 | M12、M23～M26 | Web Storage 凭证、前端自行判断所有权 | DONE（`WECOM-07`） |
 
 主要代码落点：
 
-- Electron Main：`electron/src/main/wecom/**`（`auth-window-controller.ts`/`bridge-client.ts`）、`electron/src/main/security/wecom-credential-store.ts`、`electron/src/main/ipc/register-wecom-bridge.ts`，均已随 `WECOM-03` 落地。
+- Electron Main：`electron/src/main/wecom/**`（`auth-window-controller.ts`/`bridge-client.ts`）、`electron/src/main/security/wecom-credential-store.ts`、`electron/src/main/ipc/register-wecom-bridge.ts`；安全骨架随 `WECOM-03` 落地，真实连接、槽位恢复与同步执行随 `WECOM-07` 接通。
 - Backend：`app/models/wecom.py`、`app/repositories/wecom.py`、`app/schemas/wecom.py`（`WECOM-02`）、`app/integrations/wecom/{client,schemas}.py`（`WECOM-04`）、`app/services/wecom_mapper.py`（`WECOM-05`）、`app/services/wecom_connection.py`/`app/services/wecom_sync.py`/`app/api/v1/wecom.py`/`app/api/v1/internal_wecom.py`（`WECOM-06`）均已落地。
-- Renderer：`api/wecom.ts`、`components/wecom/**` 尚未实现，是 `WECOM-07` 的范围。
+- Renderer：`api/wecom.ts`、`types/wecom.ts`、`utils/wecom.ts`、`components/wecom/WeComSettingsCard.vue`/`WeComSyncDialog.vue` 及设置页、日报详情页集成均已随 `WECOM-07` 落地。
 
-已知、记录在案的范围边界（不是缺陷）：
+已落实的跨进程边界：
 
-- `WeComBridgeClient`（Electron）已按 `docs/方案设计.md` §9.2 的请求形状（loopback base URL、`X-Main-Bridge-Secret` + JWT header、结构化 JSON body）实现，调用的 `/api/v1/internal/wecom/**` 端点已随 `WECOM-06` 交付；但 `connect()` IPC 流程中的 `form_id` 参数仍传空字符串、且从未把 `credentialStore.save()` 的 `slot` 传给 `WeComBridgeClient.validateConnection()`，而后端要求 `credential_slot` 必填——真实点击"连接"仍无法完整走通，是 `WECOM-07` 的既定范围（`issues.md` `ISS-031`）。
+- `WeComBridgeClient`（Electron）按 `docs/方案设计.md` §9.2 使用 loopback base URL、`X-Main-Bridge-Secret` + JWT 和结构化请求；`connect(form_id)` 会把 Main 新建的 `credential_slot` 一并交给后端。应用重启或切换账号后，Main 通过不进入 OpenAPI 的双鉴权 `GET /api/v1/internal/wecom/connections/credential-slot` 查询当前 JWT 用户的槽位与连接状态，再从 `safeStorage` 读取 Cookie jar；断开响应异常按真实状态对账，旧槽删除失败用 Main-only marker 持久重试。槽位和 Cookie 都不进入 preload/renderer（`ISS-031..033` 已随 `WECOM-07` 解决）。
 - `WeComInternalClient.get_template_info()` 拿到的题目结构与 `wecom_mapper.compute_schema_fingerprint()` 的比对胶水逻辑已随 `WECOM-06` 在 `WeComSyncService._perform_remote_sync()`/`_rebuild_current_specs()` 中实现（按已保存的 `question_id` 重新定位当前题目，从不按标题重新运行首次配置的启发式规则）。
 - `wecom_mapper.build_wecom_preview()` 只如实报告 `unmapped_field_keys`；是否按 `unmapped_policy=block` 拒绝同步的预检已随 `WECOM-06` 在 `WeComSyncService._perform_remote_sync()` 中实现（提交前检查，非空未映射字段即阻止提交）。
 
-实现顺序和验收门禁以 `task.md` 的 `WECOM-00..08` 为准。
+实现顺序和验收门禁以 `task.md` 的 `WECOM-00..08` 为准；`WECOM-08` 仍需完成受控真实账号、生产打包和发布级验收。

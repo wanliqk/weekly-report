@@ -194,7 +194,7 @@ uv sync --directory backend --frozen
 | WECOM-04 | 主 Agent | 企业微信内部协议 Client | WECOM-00、WECOM-02、WECOM-03 | DONE | 模板/列表/提交 Client、Cookie URL 筛选、协议 DTO、脱敏 fixture 合同测试 |
 | WECOM-05 | 主 Agent | 字段映射与预览 | WECOM-02 | DONE | 正式快照 Mapper、动态 `field_key` 配置、`PROJECT_LIST`、结构/载荷指纹与边界测试 |
 | WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | DONE | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
-| WECOM-07 | 主 Agent | Electron/Vue 交互 | WECOM-03、WECOM-06 | TODO | 设置连接/映射、日报预览/同步、历史/重试 UI 及前端测试 |
+| WECOM-07 | 主 Agent | Electron/Vue 交互 | WECOM-03、WECOM-06 | DONE | 设置连接/映射、日报预览/同步、历史/重试 UI、重启安全的 Main 凭证槽恢复及前后端测试 |
 | WECOM-08 | 主 Agent | 全链路验收与发布 | WECOM-02..07 | TODO | 全量门禁、E2E、受控企业微信测试账号冒烟、生产打包升级、凭证扫描和独立安全审查 |
 
 ### WECOM-00 验证记录
@@ -270,6 +270,16 @@ uv sync --directory backend --frozen
 - **独立审查**：按约定恢复独立沙盒审查惯例——分别派发了 `code-review`（high，覆盖正确性/简化/效率）与 `security-review`（专项安全，聚焦新增文件的所有权隔离、双密钥鉴权模型、OpenAPI 隐藏、Cookie/凭证不落日志/不落响应、SQL 注入面）两个独立沙盒 Agent。`security-review` 已完成：独立复核了所有权过滤（含状态机条件更新的原子性）、`X-Main-Bridge-Secret` 恒定时间比较与路由级统一生效、中间件路径前缀豁免不会误伤其他路由、响应模型不泄露凭证字段，未发现达到高置信度阈值（≥8/10）的漏洞。`code-review`（high）在本次提交时仍在后台运行、尚未返回结果——本提交不等待其完成，其结论到达后将作为独立的后续记录补充到本文件（若发现 P0/P1 会先修复再追加提交，不回改本条已提交记录）。
 - **已知范围边界（非缺陷）**：Electron 端 `register-wecom-bridge.ts::connect()` 调用 `bridgeClient.validateConnection(cookieJar, '')` 时 `form_id` 传空字符串（`WECOM-03` 自身注释已记录为"form_id 发现是 WECOM-06/07 范围"），且未把 `credentialStore.save()` 返回的 `slot` 传给 `WeComBridgeClient.validateConnection()`——但本任务新写的 `WeComConnectionValidateRequest.credential_slot` 按 `docs/方案设计.md` §5.1 步骤 4 要求为必填字段。这意味着当前 Electron 侧的"连接"入口在真实点击时仍不能跑通（`form_id` 为空 + `credential_slot` 缺失两者任一都会被拒绝），但这与 `WECOM-03` 自述的已知范围边界一致——真正可用的"连接"UI（含表单发现和 `credential_slot` 透传）是 `WECOM-07` 的既定范围，本任务未越权提前修改 `electron/**`。已记入 `issues.md`。
 
+### WECOM-07 验证记录
+
+- 任务开始时工作树已有未提交的 Electron Main/preload 与 renderer 半成品；主 Agent 先按 `docs/需求理解.md`/`docs/方案设计.md` 核对，再在原改动上续建并保留其已完成部分。设置页新增 `WeComSettingsCard.vue`：表单链接/ID 解析、连接/重连/断开、账号/模板信息、当前模板动态字段映射、未映射策略、收件人配置、乐观锁冲突重载、同步历史筛选/分页/状态展示。保存当前模板映射时会保留历史模板的规则，避免切换模板后误删旧日报所需配置。
+- 已归档日报详情新增 `WeComSyncDialog.vue`：加载连接/配置/预览/既有同步记录，展示日期、来源数、字符数、今日/明日正文和未映射字段；未映射字段可在对话框内映射到今日/明日/忽略并重新预览。同步只经 `window.runtimeBridge.wecom.executeSync(record_id)` 窄 IPC 进入 Main；`succeeded` 短路、`uncertain` 禁止直接重试，认证失效/结构变化/疑似重复分别要求重连、复核映射或先远端对账。历史页只有明确 `failed` 提供确认重试，`pending` 提供继续执行；未连接时两者均禁用并引导重连。
+- **解决 `ISS-031`/`ISS-032`**：preload 的连接签名改为 `connect(form_id)`，Main 新建 `credential_slot` 后连同真实 `form_id` 传给 `/connections/validate`；后端对空 `form_id` 显式拒绝。半成品原先仅在 Main 内存保存当前槽位，应用重启或本地账号切换后无法读取已持久化 Cookie jar；新增不进入 OpenAPI 的双鉴权 `GET /api/v1/internal/wecom/connections/credential-slot`，按当前 JWT 返回本人 `credential_slot + connection_status`，连接、断开和执行均即时查询，跨用户为 `null/null`。槽位/Cookie/Main-only secret 均未进入 preload 或 renderer。
+- **独立审查修复 `ISS-033`/`ISS-034`**：初审指出槽位删除失败被吞掉、断开本地删除后后端失败缺少补偿，以及历史 retry 可能把记录滞留为无操作入口的 `pending`。最终实现 `deleteEventually()` 的空 marker 持久队列并在后续连接/断开前重试；断开异常后用同一 Main-only 查询按真实 binding status 对账（`disconnected` 不恢复 Cookie，仍指向原槽才补偿恢复）；历史 `pending` 增加继续执行入口并在异常后重载。审查者经过三轮窄复审，最终确认无剩余 P0/P1/P2。
+- 能力开关已由 `wecom_sync=false` 切换为 `true`；`SettingsView.vue` 与 `DailyDetailView.vue` 完成入口接入。新增 renderer 企业微信 REST 类型/API/纯函数与 45 项单测，并扩充 Electron bridge、Credential Store、Main IPC、后端 Main-only API/能力开关测试；全量结果为后端 `pytest` **460 项通过**，前端 Vitest **27 文件 254 项通过**。
+- **门禁与冒烟**：`uv run --directory backend ruff check .`、`uv run --directory backend mypy`（strict，148 个源文件）、`uv run --directory backend pytest -q`（460 项）通过；`ruff format --check .` 仅报告既有 `ISS-029` 的 `app/services/export_style.py` 漂移。`npm run lint`、`npm run typecheck`、`npm test`（27 文件 254 项）、`npm run build` 均通过；构建产物扫描未发现 `credential_slot`、Cookie 名称或 Main-only secret 泄露到 preload/renderer。用一次性断言扩展现有 `admin-guard.spec.ts` 后运行真实 Electron/sidecar 冒烟，确认设置页出现企业微信表单入口、连接按钮可用且不再显示“功能暂未开放”（1 项通过）；一次性断言随后移除，未使用真实企业微信账号或发起外部登录。
+- `WECOM-08` 边界保持不变：受控企业微信测试账号的真实连接/提交/对账、生产 sidecar/electron-builder 打包、安装升级、完整 Playwright E2E、发布级凭证扫描与独立安全审查仍未执行，不得把 WECOM-07 的开发态能力描述为已发布验收。
+
 阶段 3（`DB-01`/`DB-02`/`DB-03`/`API-01`/`QA-03`）已实现、通过质量门禁并创建独立提交 `8480515`；独立 Reviewer 审查仍待补齐（非阻塞）。
 
 阶段 4 `AUTH-01`/`AUTH-02`/`USER-01`/`FE-01`/`FE-02`/`QA-04` 已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
@@ -286,7 +296,7 @@ uv sync --directory backend --frozen
 
 第二版 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均为 `DONE`。CR-20260807-01 第二版增量的全部任务已交付完毕，当前无可领取的第二版任务。
 
-企业微信增量 `WECOM-00`（敏感样例治理）、`WECOM-01`（文档）、`WECOM-02`（数据基础）、`WECOM-03`（Electron 登录与凭证桥）、`WECOM-04`（内部协议 Client）、`WECOM-05`（字段映射与预览）、`WECOM-06`（同步编排与 API）均已完成实现、自测、质量门禁与独立审查（含专项安全审查），其中 `WECOM-02`/`WECOM-03` 和 `WECOM-04`/`WECOM-05` 各是一对两个 Agent 并行实现、无文件重叠。下一可领取任务是 `WECOM-07`（Electron/Vue 交互，依赖 `WECOM-03`+`WECOM-06` 均已满足）。当前产品仍为占位（`wecom_sync=false`，能力开关切换是 `WECOM-07`/`WECOM-08` 范围）：后端连接/同步 Service、公开与 Main-only API 均已实现，但 renderer 无任何调用入口，Electron 现有的 `register-wecom-bridge.ts::connect()` 因 `form_id`/`credential_slot` 尚未真正接通（见 `issues.md`）在真实点击时仍无法完整走通，不得把已实现的后端能力描述为用户可用的完整功能。
+企业微信增量 `WECOM-00..07` 均已完成实现、自测和对应质量门禁；`WECOM-07` 已接通 Electron Main 与 Vue 用户交互，修复 `form_id`/`credential_slot` 透传和重启槽位恢复，`wecom_sync=true`。下一可领取任务是 `WECOM-08`（全链路验收与发布）：受控真实企业微信测试账号、生产打包/安装升级、完整 E2E、发布级凭证扫描和独立安全审查仍未执行，当前状态不得描述为已发布验收。
 
 ### 第二版阶段 10A 验证记录
 

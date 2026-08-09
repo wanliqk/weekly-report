@@ -109,6 +109,31 @@ describe('WeComCredentialStore', () => {
     await expect(store.load(slotB)).resolves.toEqual(jarB)
   })
 
+  it('restores a deleted credential under the same slot for disconnect compensation', async () => {
+    const directory = await credentialDir()
+    const store = new WeComCredentialStore(directory, adapter())
+    const jar = sampleCookieJar()
+    const slot = await store.save(jar)
+    await store.delete(slot)
+
+    await store.restore(slot, jar)
+
+    await expect(store.load(slot)).resolves.toEqual(jar)
+  })
+
+  it('retries a persisted pending-delete marker without retaining credential data', async () => {
+    const directory = await credentialDir()
+    const store = new WeComCredentialStore(directory, adapter())
+    const slot = await store.save(sampleCookieJar())
+    const marker = join(directory, `${slot}.delete-pending`)
+    await writeFile(marker, '')
+
+    await store.retryPendingDeletes()
+
+    await expect(store.load(slot)).resolves.toBeNull()
+    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('returns null for a slot that was never created', async () => {
     const directory = await credentialDir()
     const store = new WeComCredentialStore(directory, adapter())

@@ -51,7 +51,8 @@ const runtimeBridge = Object.freeze({
   // only. Never expose reading Cookies, sending arbitrary HTTP, opening
   // arbitrary URLs, or reading the credential file path.
   wecom: Object.freeze({
-    connect: (): Promise<WeComConnectResult> => ipcRenderer.invoke(IPC_CHANNELS.WECOM_CONNECT),
+    connect: (formId: string): Promise<WeComConnectResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WECOM_CONNECT, formId),
     disconnect: (): Promise<WeComDisconnectResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.WECOM_DISCONNECT),
     executeSync: (recordId: string): Promise<WeComExecuteSyncResult> =>

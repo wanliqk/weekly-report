@@ -7,7 +7,7 @@ import {
   type WeComDisconnectResult,
   type WeComExecuteSyncResult
 } from '../../shared/contracts'
-import type { WeComCredentialStore } from '../security/wecom-credential-store'
+import type { WeComCookie, WeComCredentialStore } from '../security/wecom-credential-store'
 import type { WeComAuthWindowController } from '../wecom/auth-window-controller'
 import type { WeComBridgeClient } from '../wecom/bridge-client'
 
@@ -16,29 +16,20 @@ import type { WeComBridgeClient } from '../wecom/bridge-client'
 // 格式...格式不对直接拒绝，不传给下游".
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/
 
+// Mirrors `backend/app/schemas/wecom.py`'s `WeComConnectionValidateRequest.form_id`
+// (`Field(max_length=128)`); this is just a boundary sanity check (empty/absurdly
+// long/non-string payloads rejected before opening a real login window), not a
+// claim about WeCom's own id format — the renderer is expected to have already
+// extracted a clean id via `parseWeComFormId()` before calling `connect()`.
+const MAX_FORM_ID_LENGTH = 128
+
+function isValidFormId(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_FORM_ID_LENGTH
+}
+
 function assertTrustedSender(event: IpcMainInvokeEvent, window: BrowserWindow): void {
   if (event.senderFrame !== window.webContents.mainFrame) {
     throw new Error('rejected IPC call from an untrusted frame')
-  }
-}
-
-/** Tracks which credential slot (if any) belongs to the current connected
- * session, entirely in Main-process memory — never persisted, never exposed
- * to preload/renderer. `register-wecom-bridge.ts`'s own small piece of state,
- * separate from `WeComCredentialStore` (which only knows how to read/write a
- * slot it's given, not which slot is "current"). */
-export interface WeComBridgeState {
-  getActiveSlot: () => string | null
-  setActiveSlot: (slot: string | null) => void
-}
-
-export function createInMemoryWeComBridgeState(): WeComBridgeState {
-  let activeSlot: string | null = null
-  return {
-    getActiveSlot: () => activeSlot,
-    setActiveSlot: (slot) => {
-      activeSlot = slot
-    }
   }
 }
 
@@ -47,11 +38,24 @@ function toReason(error: unknown, fallback: string): string {
 }
 
 async function connect(
+  formId: string,
   authWindowController: WeComAuthWindowController,
   credentialStore: WeComCredentialStore,
-  bridgeClient: WeComBridgeClient,
-  state: WeComBridgeState
+  bridgeClient: WeComBridgeClient
 ): Promise<WeComConnectResult> {
+  try {
+    await credentialStore.retryPendingDeletes()
+  } catch (error) {
+    return { status: 'failed', reason: toReason(error, '无法清理旧企业微信登录状态') }
+  }
+
+  let previousSlot: string | null
+  try {
+    previousSlot = (await bridgeClient.getCredentialSlot()).credentialSlot
+  } catch (error) {
+    return { status: 'failed', reason: toReason(error, '无法读取当前企业微信连接') }
+  }
+
   const outcome = await authWindowController.connect()
 
   if (outcome.status === 'canceled') {
@@ -72,37 +76,107 @@ async function connect(
   }
 
   try {
-    // form_id resolution (the per-org WeDoc form) is WECOM-06/07 scope; this
-    // task only wires the Main-only bridge call itself (docs/方案设计.md §5.1
-    // step 4's "任一步失败时删除本次新建的凭证槽" is what's under test here).
-    await bridgeClient.validateConnection(outcome.cookieJar, '')
+    await bridgeClient.validateConnection(outcome.cookieJar, formId, slot)
   } catch (error) {
-    await credentialStore.delete(slot).catch(() => {})
+    try {
+      await credentialStore.deleteEventually(slot)
+    } catch {
+      return {
+        status: 'failed',
+        reason: `${toReason(error, '连接校验失败')}；且无法清理本次登录状态，请检查本机数据目录权限`
+      }
+    }
     return { status: 'failed', reason: toReason(error, '连接校验失败') }
   }
 
-  state.setActiveSlot(slot)
+  // The old slot is resolved through the current user's double-authenticated
+  // Main-only binding, so reconnect cleanup also works after an app restart.
+  if (previousSlot !== null && previousSlot !== slot) {
+    try {
+      await credentialStore.deleteEventually(previousSlot)
+    } catch {
+      return {
+        status: 'connected',
+        reason: '企业微信已连接，但无法清理旧登录状态，请检查本机数据目录权限'
+      }
+    }
+  }
   return { status: 'connected', reason: null }
 }
 
 async function disconnect(
   credentialStore: WeComCredentialStore,
-  bridgeClient: WeComBridgeClient,
-  state: WeComBridgeState
+  bridgeClient: WeComBridgeClient
 ): Promise<WeComDisconnectResult> {
-  const slot = state.getActiveSlot()
+  try {
+    await credentialStore.retryPendingDeletes()
+  } catch (error) {
+    return { status: 'failed', reason: toReason(error, '无法清理旧企业微信登录状态') }
+  }
+
+  let slot: string | null
+  try {
+    slot = (await bridgeClient.getCredentialSlot()).credentialSlot
+  } catch (error) {
+    return { status: 'failed', reason: toReason(error, '无法读取当前企业微信连接') }
+  }
+  let cookieJar: WeComCookie[] | null = null
   if (slot !== null) {
     try {
-      await credentialStore.delete(slot)
+      cookieJar = await credentialStore.load(slot)
+      if (cookieJar === null) {
+        // The local state is already absent. Still ask the backend to heal its
+        // binding, but do not perform another irreversible local operation.
+      } else {
+        await credentialStore.delete(slot)
+      }
     } catch (error) {
       return { status: 'failed', reason: toReason(error, '无法清除企业微信登录状态') }
     }
-    state.setActiveSlot(null)
   }
 
   try {
     await bridgeClient.disconnect()
   } catch (error) {
+    if (slot === null) {
+      return { status: 'failed', reason: toReason(error, '无法通知后端断开连接') }
+    }
+
+    let currentConnection
+    try {
+      currentConnection = await bridgeClient.getCredentialSlot()
+    } catch {
+      return {
+        status: 'failed',
+        reason: `${toReason(error, '无法通知后端断开连接')}；暂时无法确认后端状态，请稍后重试断开`
+      }
+    }
+
+    // The backend intentionally retains the opaque slot on a disconnected
+    // binding, so status (not nullability) proves that the idempotent write
+    // committed and only its response was lost.
+    if (currentConnection.connectionStatus === 'disconnected') {
+      return { status: 'disconnected', reason: null }
+    }
+    if (currentConnection.credentialSlot !== slot) {
+      return {
+        status: 'failed',
+        reason: '企业微信连接已在别处更新，请刷新后重试'
+      }
+    }
+
+    // The backend still points at the exact slot we deleted, so this is a
+    // definite failure and restoring the encrypted credential is safe.
+    if (cookieJar !== null) {
+      try {
+        await credentialStore.restore(slot, cookieJar)
+      } catch {
+        return {
+          status: 'failed',
+          reason: `${toReason(error, '无法通知后端断开连接')}；且无法恢复本地登录状态，请重新连接企业微信`
+        }
+      }
+    }
     return { status: 'failed', reason: toReason(error, '无法通知后端断开连接') }
   }
   return { status: 'disconnected', reason: null }
@@ -111,13 +185,18 @@ async function disconnect(
 async function executeSync(
   recordId: string,
   credentialStore: WeComCredentialStore,
-  bridgeClient: WeComBridgeClient,
-  state: WeComBridgeState
+  bridgeClient: WeComBridgeClient
 ): Promise<WeComExecuteSyncResult> {
-  const slot = state.getActiveSlot()
-  if (slot === null) {
+  let connection
+  try {
+    connection = await bridgeClient.getCredentialSlot()
+  } catch (error) {
+    return { status: 'failed', reason: toReason(error, '无法读取当前企业微信连接') }
+  }
+  if (connection.credentialSlot === null || connection.connectionStatus !== 'connected') {
     return { status: 'failed', reason: '企业微信尚未连接，请先登录' }
   }
+  const slot = connection.credentialSlot
 
   let cookieJar
   try {
@@ -126,7 +205,6 @@ async function executeSync(
     return { status: 'failed', reason: toReason(error, '无法读取企业微信登录状态') }
   }
   if (cookieJar === null) {
-    state.setActiveSlot(null)
     return { status: 'failed', reason: '企业微信登录状态已丢失，请重新登录' }
   }
 
@@ -150,17 +228,31 @@ export function registerWeComBridge(
   window: BrowserWindow,
   authWindowController: WeComAuthWindowController,
   credentialStore: WeComCredentialStore,
-  bridgeClient: WeComBridgeClient,
-  state: WeComBridgeState = createInMemoryWeComBridgeState()
+  bridgeClient: WeComBridgeClient
 ): () => void {
-  ipcMain.handle(IPC_CHANNELS.WECOM_CONNECT, async (event): Promise<WeComConnectResult> => {
-    assertTrustedSender(event, window)
-    return connect(authWindowController, credentialStore, bridgeClient, state)
-  })
+  let connectInFlight = false
+  ipcMain.handle(
+    IPC_CHANNELS.WECOM_CONNECT,
+    async (event, formId: unknown): Promise<WeComConnectResult> => {
+      assertTrustedSender(event, window)
+      if (!isValidFormId(formId)) {
+        throw new Error('rejected invalid form id payload')
+      }
+      if (connectInFlight) {
+        return { status: 'failed', reason: '企业微信登录窗口已打开' }
+      }
+      connectInFlight = true
+      try {
+        return await connect(formId.trim(), authWindowController, credentialStore, bridgeClient)
+      } finally {
+        connectInFlight = false
+      }
+    }
+  )
 
   ipcMain.handle(IPC_CHANNELS.WECOM_DISCONNECT, async (event): Promise<WeComDisconnectResult> => {
     assertTrustedSender(event, window)
-    return disconnect(credentialStore, bridgeClient, state)
+    return disconnect(credentialStore, bridgeClient)
   })
 
   ipcMain.handle(
@@ -170,7 +262,7 @@ export function registerWeComBridge(
       if (typeof recordId !== 'string' || !ULID_PATTERN.test(recordId)) {
         throw new Error('rejected invalid record id payload')
       }
-      return executeSync(recordId, credentialStore, bridgeClient, state)
+      return executeSync(recordId, credentialStore, bridgeClient)
     }
   )
 

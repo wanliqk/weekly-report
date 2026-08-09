@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type { SafeStorageAdapter } from './secure-token-store'
@@ -10,6 +10,7 @@ import type { SafeStorageAdapter } from './secure-token-store'
 const MAX_COOKIE_JAR_SERIALIZED_BYTES = 65_536
 const SLOT_BYTES = 16
 const SLOT_PATTERN = /^[0-9a-f]{32}$/
+const PENDING_DELETE_SUFFIX = '.delete-pending'
 
 /**
  * Structured WeCom cookie (`docs/方案设计.md` §2.3): the full jar is kept, not a
@@ -86,6 +87,33 @@ export class WeComCredentialStore {
     return slot
   }
 
+  /**
+   * Restores a previously deleted credential under the same opaque slot.
+   * This is intentionally Main-only compensation for a disconnect whose
+   * backend step failed after the local file had already been removed.
+   */
+  async restore(slot: string, cookieJar: WeComCookie[]): Promise<void> {
+    validateSlot(slot)
+    if (!this.safeStorage.isEncryptionAvailable()) {
+      throw new WeComCredentialStoreError('系统未提供安全存储，无法恢复企业微信登录状态')
+    }
+    validateCookieJar(cookieJar)
+
+    let encrypted: Buffer
+    try {
+      encrypted = this.safeStorage.encryptString(JSON.stringify(cookieJar))
+    } catch {
+      throw new WeComCredentialStoreError('无法恢复企业微信登录状态')
+    }
+
+    try {
+      await mkdir(this.directory, { recursive: true, mode: 0o700 })
+      await writeFile(this.pathForSlot(slot), encrypted, { mode: 0o600 })
+    } catch {
+      throw new WeComCredentialStoreError('无法恢复企业微信登录状态')
+    }
+  }
+
   /** Returns the decrypted cookie jar for `slot`, or `null` if no such slot exists. */
   async load(slot: string): Promise<WeComCookie[] | null> {
     validateSlot(slot)
@@ -129,8 +157,61 @@ export class WeComCredentialStore {
     }
   }
 
+  /**
+   * Records cleanup intent before deleting an orphaned credential. If deletion
+   * fails, the empty marker retains only the opaque slot id so a later Main
+   * operation can retry without keeping Cookie data or exposing the slot to the
+   * renderer.
+   */
+  async deleteEventually(slot: string): Promise<void> {
+    validateSlot(slot)
+    try {
+      await mkdir(this.directory, { recursive: true, mode: 0o700 })
+      await writeFile(this.pendingDeletePath(slot), '', { mode: 0o600 })
+    } catch {
+      throw new WeComCredentialStoreError('无法登记企业微信登录状态清理任务')
+    }
+    await this.deletePendingSlot(slot)
+  }
+
+  /** Retries all Main-only cleanup markers left by an earlier I/O failure. */
+  async retryPendingDeletes(): Promise<void> {
+    let entries: string[]
+    try {
+      entries = await readdir(this.directory)
+    } catch (error) {
+      if (isFileNotFound(error)) {
+        return
+      }
+      throw new WeComCredentialStoreError('无法读取企业微信登录状态清理任务')
+    }
+
+    for (const entry of entries) {
+      if (!entry.endsWith(PENDING_DELETE_SUFFIX)) {
+        continue
+      }
+      const slot = entry.slice(0, -PENDING_DELETE_SUFFIX.length)
+      if (SLOT_PATTERN.test(slot)) {
+        await this.deletePendingSlot(slot)
+      }
+    }
+  }
+
   private pathForSlot(slot: string): string {
     return join(this.directory, `${slot}.bin`)
+  }
+
+  private pendingDeletePath(slot: string): string {
+    return join(this.directory, `${slot}${PENDING_DELETE_SUFFIX}`)
+  }
+
+  private async deletePendingSlot(slot: string): Promise<void> {
+    try {
+      await rm(this.pathForSlot(slot), { force: true })
+      await rm(this.pendingDeletePath(slot), { force: true })
+    } catch {
+      throw new WeComCredentialStoreError('无法清除企业微信登录状态')
+    }
   }
 }
 

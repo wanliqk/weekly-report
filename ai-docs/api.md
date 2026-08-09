@@ -361,7 +361,7 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 
 ## 14. 企业微信同步目标 API（CR-20260808-02，WECOM-06 已实现）
 
-> 后端 Service/Repository/API 均已实现并通过测试；`GET /capabilities` 仍返回 `wecom_sync:false`（能力开关切换是 `WECOM-07`/`WECOM-08` 范围），renderer 尚无任何调用入口。
+> 后端 Service/Repository/API 与 WECOM-07 renderer 交互均已实现；`GET /capabilities` 现返回 `wecom_sync:true`。真实企业微信账号和生产发布级验证仍属于 `WECOM-08`。
 
 ### 14.1 公开 REST（`backend/app/api/v1/wecom.py`）
 
@@ -382,6 +382,7 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | POST | `/internal/wecom/connections/validate` | Main 传入单次内存 Cookie jar + `credential_slot` + `form_id`，验证并保存非敏感绑定 |
+| GET | `/internal/wecom/connections/credential-slot` | 按当前 JWT 返回本人不透明 `credential_slot` + `connection_status`（无绑定均为 `null`），供 Main 在应用重启后定位 `safeStorage` 密文并对账断开结果；不进入 preload/renderer |
 | POST | `/internal/wecom/sync-records/{record_id}/execute` | Main 解密凭证后执行已预留记录；业务失败（`schema_changed`/`duplicate_detected`/`uncertain` 等）以对应错误码的非 2xx 响应返回，记录本身仍已落库为终态 |
 | POST | `/internal/wecom/connections/disconnect` | 标记断开；凭证由 Main 删除；无绑定视为已满足的无操作 |
 

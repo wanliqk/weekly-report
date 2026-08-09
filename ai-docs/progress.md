@@ -1,6 +1,6 @@
 # 当前开发进度
 
-> 快照日期：2026-08-07
+> 快照日期：2026-08-09
 > 当前分支：`v1`
 > 原则：本文件只记录当前工作树可验证的实现事实；设计目标不等于完成。
 
@@ -8,7 +8,7 @@
 
 - 当前已完成阶段：阶段 1 工程基线、阶段 2 Desktop Bootstrap、阶段 3 数据基础与 API Foundation、阶段 4 认证与用户管理、阶段 5 模板、设置与日报闭环、阶段 6 查询导出与桌面保存、阶段 7 周报闭环、阶段 8 设置能力与受控备份、阶段 9 质量与发布。V1 规划的全部 9 个阶段均已交付。
 - 已完成提交：`3a9fdbc`（工程基线）、`7386cae`（Desktop Bootstrap）、`8480515`（数据基础与 API Foundation）、`b6b1b47`（补充编码规则）、`1a50e75`（认证与用户管理）、`00e647f`（关闭阶段 4 并启动阶段 5 的状态文档）、`1d965fe`（模板、设置与日报闭环）、`d6ab86e`（查询导出与桌面保存）、`fd4df17`（关闭阶段 6 并回填提交号）、`346b0ea`（周报闭环）、`2584133`（关闭阶段 7 并回填提交号）、`00caa33`（设置能力与受控备份）、`0148171`（质量与发布）、`a866872`（第二版增量需求）、`e767ebd`（第二版技术方案）、`e86b88c`（第二版迁移与认证基线 BE-10A）、`784f96c`（日报聚合、管理员撤销与用户安全删除 BE-10B）、`5e33348`（回填 BE-10B 提交号）、`c7ed342`（BE-10B 契约修正 fix，见 ISS-023）。
-- 当前所在阶段：CR-20260807-01 的 `REQ-10`、`DESIGN-10`、`BE-10A`、`BE-10B`、`BE-10C`、`FE-10`、`QA-10` 均已完成；第二版增量全部交付完毕。
+- 当前所在阶段：CR-20260807-01 第二版增量已全部交付；CR-20260808-02 企业微信增量已完成 `WECOM-00..07`，下一任务为 `WECOM-08` 全链路验收与发布。
 - 阶段 3 实现状态：`DB-01`、`DB-02`、`DB-03`、`API-01`、`QA-03` 均已实现、通过质量门禁并创建独立提交；独立 Reviewer 审查尚待补齐（非阻塞）。
 - 阶段 4 实现状态：六项任务均已完成实现、自测、质量门禁、独立审查与提交 `1a50e75`，统一为 `DONE`。
 - 阶段 5 实现状态：七项任务均已完成实现、自测、质量门禁、独立审查与提交 `1d965fe`，统一为 `DONE`。
@@ -16,8 +16,8 @@
 - 阶段 7 实现状态：四项任务（`WEEKLY-01`/`WEEKLY-02`/`FE-06`/`QA-07`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
 - 阶段 8 实现状态：三项任务（`BACKUP-01`/`FE-07`/`QA-08`）均已完成实现、自测、质量门禁、独立审查（含专项安全审查），统一为 `DONE`。
 - 阶段 9 实现状态：四项任务（`QA-09`/`PKG-01`/`PKG-02`/`REL-01`）均已完成实现、自测、质量门禁、独立审查，统一为 `DONE`。真实安装/升级/卸载验证在本机（无独立干净虚拟机）完成，该限制已在阶段开工前与用户确认。
-- 当前阻塞：无。ISS-018/019/020/021/022 已随 `QA-10` 完成端到端验收全部升级为 RESOLVED；ISS-023（BE-10B 契约偏差）已 RESOLVED；ISS-024（既有 Playwright spec 断言 V1 UI）已随 `QA-10` 重写全部 spec 关闭为 RESOLVED；新记录 ISS-025（P3，非缺陷）：生产环境下无法用环境变量隔离已打包二进制的数据目录（`SEC-010` 既定安全设计），仅供以后需要沙箱化已打包产物时参考。
-- 第二版需求与设计事实：增量需求和方案已确认；日期/审计表、V1 数据迁移、周报 JSON V2 化、双账号初始化、强制改密和自动归档移除（BE-10A），同日多条目、幂等创建、草稿删除、日期级归档、管理员最小权限撤销/审计、用户安全删除（BE-10B），周报/导出改读日期级正式快照与新增个人统计 API（BE-10C），以及全部 Electron/Vue 界面适配——强制改密路由、菜单改名、我的日报月历、我的周报多来源展示、统计页、管理员日报管理/用户删除、设置收口（FE-10）——均已完成并通过真实 Electron 冒烟验证。当前仅剩 `QA-10` 的迁移/并发/权限专项验收和 E2E 套件重建。
+- 当前阻塞：无。企业微信 `ISS-031..034` 已随 `WECOM-07` 解决并经独立复审确认无剩余 P0/P1/P2；`ISS-026` 在 `WECOM-08` 发布级验收前保持 `MITIGATED`，非官方协议风险 `ISS-027` 继续保持 `OPEN`。
+- 第二版与企业微信实现事实：CR-20260807-01 的后端、Electron/Vue 与 QA 已全部完成；CR-20260808-02 已完成数据、凭证桥、协议 Client、Mapper、同步编排/API 与 Electron/Vue 交互，`wecom_sync=true`。尚未完成的是 `WECOM-08` 的受控真实企业微信账号、生产打包/安装升级和发布级验收。
 - AI 上下文治理批次：12 份 `ai-docs/` 文档、启动路由和维护规则已完成交叉复核，随独立文档阶段提交交付；未混入后续阶段实现。
 - 2026-08-08：应用户直接指令完成日报 Excel 导出排版增强（`PROD-021`）：新增 `backend/app/services/export_style.py` 封装标题/表头/边框/列宽/行高/冻结表头样式，`export.py` 的 `build_export_workbook` 改为写入 headers/data 后调用 `style_report_sheet()`；未改动列合并、公式防注入、多来源渲染等业务逻辑。因新增标题行，`test_export_service.py`/`test_exports_api.py` 中依赖固定行号的断言已同步更新（表头从 `rows[0]` 移到 `rows[1]`，数据从 `rows[1..]` 移到 `rows[2..]`）。已执行 `uv run ruff check .`、`uv run mypy`、`uv run pytest`（124 源文件、全量测试两次运行均 100% 通过，含一次单测 `test_expired_and_tampered_tokens_map_to_40102` 的偶发无关 flake，隔离重跑与全量重跑均通过，与本次改动无关）；未创建提交，等待用户确认。
 - 2026-08-08：应用户直接指令新增模板字段类型 `PROJECT_LIST`（`PROD-022`），支持一篇日报登记多个项目各自的工作内容和完成状态，不修改数据库结构（`fields_json`/`content_json` 仍是既有 TEXT/JSON 列）。后端：`schemas/template.py` 的 `FieldType` 新增该字面量（模板发布沿用既有“非 select/multiselect 不得配置 options”规则，无需新增校验分支）；`schemas/daily_report.py` 新增 `ProjectListEntry`（`project`/`content`/`status` 三态固定枚举 `TODO`/`DOING`/`DONE`）并入 `DailyFieldValue` 联合（已用 `TypeAdapter` 实测 Pydantic smart-union 能按列表元素类型正确区分 `multiselect` 与本类型，无需判别字段）；`services/daily_report.py` 的 `_project_list_error()` 校验每个条目的 `project`/`content` 非空、`status` 合法、字段无缺失/多余，且同时兼容 `save()` 传入的原始 dict 与 `submit()` 经 `parse_daily_content()` 重新解析后的 `ProjectListEntry` 模型两种形态（实现时曾遗漏后一种形态导致 submit 阶段误报“字段不完整”，已修正并由 `test_project_list_field_submits_and_archives_with_multiple_entries` 覆盖该回归）；`services/export.py` 的 `_single_source_cell()` 按列表首元素类型分流到新增的 `_format_project_list()`，按项目分组渲染为 `项目:X\n- 内容`（用半角冒号而非全角冒号，因全角冒号会触发 Ruff `RUF001` 全角标点检测且仓库此前无任何 `noqa` 先例），不显示完成状态，且因固定前缀不以 `=` 开头而天然免疫公式注入（无需依赖 `_defuse_formula` 的转义，仍保留调用以防未来格式调整）。前端：`types/template.ts`/`types/daily-report.ts` 新增类型；`utils/template-fields.ts` 新增 `projectTaskStatusLabel`/`isProjectListArray`/`formatProjectListEntries` 共享辅助并被 `daily-form.ts`/`weekly-report.ts` 复用；`DynamicFieldInput.vue` 新增可动态增删的项目/内容/状态三列编辑区（沿用 `updateXxx(value: unknown)` 具名函数处理 `@update:model-value` 的既有风格，未使用模板内联类型化箭头函数，因仓库此前无该写法先例）；`TemplatesView.vue` 字段类型下拉新增“项目列表”。测试：后端新增 22 项（模板发布、内容校验的 6 种非法形态、必填空列表拒绝提交、保存/提交/归档往返、导出分组渲染/多来源编号/无需转义即免疫公式注入），前端新增 7 项（`emptyFieldValue`/`usesOptions`/`isProjectListArray`/`formatProjectListEntries`/`projectTaskStatusLabel`/`formatDailyFieldValue`/`formatWeeklyFieldValue`/`initializeDailyContent` 深拷贝）。实际门禁：后端 `uv run ruff check .`（通过）、`uv run ruff format --check .`（除本次改动外，`app/services/export_style.py` 存在一项与本次改动无关的既有格式漂移，未改动该文件）、`uv run mypy`（strict，124 源文件，通过）、`uv run pytest`（JUnit XML 确认 **302 项、0 失败、0 错误、0 跳过**，含阶段 10C/QA-10 遗留 280 项）均实际执行并通过；前端 `npm run lint`（0 error/0 warning，修复中途 `eslint --fix` 顺带格式化了未改动的 `electron/src/main/index.ts` 的一处预先存在的空行警告，已用 `git show HEAD:... | tr -d '\r'` 逐字节核对还原为改动前内容，`cmp` 确认与 HEAD 完全一致，不计入本次改动）、`npm run typecheck`、`npm test`（**22 文件 132 项全部通过**，较改动前 125 项净增 7 项）、`npm run build` 均实际执行并通过。已知非阻塞：`electron/src/main/index.ts` 第 51 行存在一处与本次改动无关的既有 prettier 空行警告（HEAD 提交已如此，`npm run lint` 的 `--max-warnings=0` 因此在改动前就会失败），本次未修复以保持提交范围聚焦。已随提交 `7ce6928` 交付。
@@ -520,3 +520,12 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 独立审查：派发了 `code-review`（high）与 `security-review`（专项安全）两个独立沙盒 Agent。`security-review` 已完成，复核所有权隔离、双密钥模型（`X-Main-Bridge-Secret` 恒定时间比较且路由级统一生效）、中间件路径豁免不误伤其他路由、响应不泄露凭证字段、无原始 SQL 注入面，未发现达到高置信度阈值的漏洞。`code-review`（high）提交时仍在后台运行，结果待补记（见 `task.md`"WECOM-06 验证记录"）。
 - 已知范围边界（非缺陷，记入 `issues.md` `ISS-031`）：Electron `register-wecom-bridge.ts::connect()` 当前调用 `bridgeClient.validateConnection(cookieJar, '')`（`form_id` 空字符串，`WECOM-03` 自述已知的 `WECOM-06/07` 范围边界）且从未把 `credentialStore.save()` 的 `slot` 传给后端，而 `WECOM-06` 按方案设计把 `credential_slot` 实现为必填字段——真实点击"连接"目前仍无法完整走通，属已知边界的自然延伸，未越权提前修改 `electron/**`；`WECOM-07` 实现真实连接 UI 时需一并补上表单发现和 `credential_slot` 透传。
 - 当前实现事实：企业微信后端（数据层、Electron 凭证桥、协议 Client、字段 Mapper、连接/同步编排 Service、公开与 Main-only API）已全部实现并通过独立审查，`wecom_sync` 能力开关仍为 `false`，renderer 无任何调用入口。下一步是 `WECOM-07`（Electron/Vue 交互），依赖 `WECOM-03`+`WECOM-06` 均已满足。
+
+## 12. 企业微信 Electron/Vue 交互（WECOM-07）
+
+- 2026-08-09：在工作树已有未提交半成品的基础上完成设置连接/重连/断开、账号与模板展示、动态字段映射、收件人/未映射策略、同步历史筛选分页，以及已归档日报的转换预览、未映射字段就地修正、同步状态和保守重试交互；当前模板保存映射时保留历史模板规则，避免破坏历史日报预览。
+- Electron Main/preload 已接通真实 `form_id` 与 `credential_slot`。发现半成品把当前槽位只存在 Main 内存，应用重启或本地账号切换后无法读取 `safeStorage` Cookie jar（`ISS-032`）；新增双鉴权且不进入 OpenAPI 的 `GET /api/v1/internal/wecom/connections/credential-slot`，连接、断开、执行均按当前 JWT 获取本人 opaque slot 与 binding status。跨用户查询为 `null/null`，槽位、Cookie 与 Main-only secret 均不进入 preload/renderer；`ISS-031`/`ISS-032` 已随本阶段解决。
+- `capabilities.wecom_sync` 已切换为 `true`，设置页和已归档日报详情均有真实入口。renderer 新增企业微信类型、公开 REST API、纯函数工具、两个 Vue 组件与 45 项工具单测；Electron 与后端补充真实请求形状、重启恢复、跨用户隔离、空表单 ID 和能力开关回归测试。
+- 独立审查发现并推动关闭两个部分失败 P2（`ISS-033`）：槽位删除失败改为先写 Main-only 空 marker、后续连接/断开前持久重试；断开响应异常改为读取 `connection_status` 对账，确认 `disconnected` 时保持本地删除，确认后端仍指向原槽时才恢复加密 Cookie。另关闭历史重试可恢复性 P2（`ISS-034`）：未连接禁用操作，`pending` 可继续执行，异常后重载真实状态。经过三轮窄复审，最终无剩余 P0/P1/P2。
+- 全量门禁：后端 `ruff check`、mypy strict（148 个源文件）、pytest（**460 项通过**）；`ruff format --check` 仅剩既有 `ISS-029`。前端 `npm run lint`、`npm run typecheck`、Vitest（**27 文件 254 项通过**）、`npm run build` 均通过；构建产物敏感字符串扫描通过。真实 Electron/sidecar 冒烟（临时扩展现有 spec，运行后还原）确认设置页企业微信表单入口可见、连接按钮可用、占位提示消失（**1 项通过**）；未使用真实企业微信账号、未发起外部登录。
+- 下一步是 `WECOM-08`：受控真实账号连接/提交/对账、生产 sidecar/electron-builder 打包、安装升级、完整 Playwright E2E、发布级凭证扫描与独立安全审查。WECOM-07 只代表开发态交互闭环，不代表已经发布验收。

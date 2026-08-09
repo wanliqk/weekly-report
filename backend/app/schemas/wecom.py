@@ -249,14 +249,28 @@ class WeComConnectionValidateRequest(BaseModel):
 
     `cookie_jar` reuses `WeComCookieIn` (`app/integrations/wecom/schemas.py`)
     rather than redefining an identical shape — its wire format already
-    matches Electron's `serializeCookieJar()` exactly. `form_id` may
-    legitimately be an empty string today: form discovery UI is `WECOM-07`
-    scope, not this task's.
+    matches Electron's `serializeCookieJar()` exactly. WECOM-07 supplies the
+    user-confirmed target form identifier, so an empty value is no longer a
+    valid bridge request.
     """
 
     cookie_jar: list[WeComCookieIn]
     credential_slot: str = Field(min_length=1, max_length=64)
-    form_id: str = Field(max_length=128)
+    form_id: str = Field(min_length=1, max_length=128)
+
+
+class WeComCredentialSlotData(BaseModel):
+    """Main-only lookup result for the current user's encrypted credential.
+
+    The opaque slot is intentionally absent from every public response and is
+    only used by Electron Main to locate the `safeStorage` ciphertext after an
+    application restart. Connection status is returned alongside it so Main
+    can reconcile an idempotent disconnect whose response was lost. A user
+    without a binding receives ``None`` for both fields.
+    """
+
+    credential_slot: str | None
+    connection_status: WeComBindingStatus | None
 
 
 class WeComSyncExecuteRequest(BaseModel):

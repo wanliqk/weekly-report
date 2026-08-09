@@ -20,6 +20,11 @@ export interface WeComDisconnectBridgeResult {
   status: 'disconnected'
 }
 
+export interface WeComCredentialSlotBridgeResult {
+  credentialSlot: string | null
+  connectionStatus: 'connected' | 'expired' | 'disconnected' | null
+}
+
 export type WeComFetch = typeof fetch
 
 export interface WeComBridgeClientDeps {
@@ -38,27 +43,57 @@ export interface WeComBridgeClientDeps {
 // defense in depth against `WeComBridgeClient` ever being pointed at a
 // non-loopback host (docs/方案设计.md §4.1: "校验回环地址").
 const LOOPBACK_BASE_URL_PATTERN = /^http:\/\/(?:127\.0\.0\.1|localhost):\d+$/
+const CREDENTIAL_SLOT_PATTERN = /^[0-9a-f]{32}$/
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
 
 /**
  * Thin Main-only bridge to the FastAPI `/api/v1/internal/wecom/**` endpoints
- * (docs/方案设计.md §9.2). Those endpoints don't exist until WECOM-06, so every
- * call made against a real sidecar today will 404 — that's expected for this
- * task. This class's only job is to shape each request correctly (loopback
- * base URL, `X-Main-Bridge-Secret` + `Authorization` headers, structured JSON
- * body — never a raw `Cookie` header or an arbitrary target URL, per §9.2/§9.3)
- * and turn any failure into a single clean `WeComBridgeClientError` instead of
- * letting a raw network exception or an unhandled 404 reach IPC callers.
+ * (docs/方案设计.md §9.2, implemented by `WECOM-06`). This class's only job is
+ * to shape each request correctly (loopback base URL, `X-Main-Bridge-Secret` +
+ * `Authorization` headers, structured JSON body — never a raw `Cookie` header
+ * or an arbitrary target URL, per §9.2/§9.3) and turn any failure into a
+ * single clean `WeComBridgeClientError` instead of letting a raw network
+ * exception or an unhandled non-2xx response reach IPC callers.
  */
 export class WeComBridgeClient {
   constructor(private readonly deps: WeComBridgeClientDeps) {}
 
+  async getCredentialSlot(): Promise<WeComCredentialSlotBridgeResult> {
+    const response = await this.request('/api/v1/internal/wecom/connections/credential-slot', 'GET')
+    if (!isRecord(response) || !isRecord(response.data)) {
+      throw new WeComBridgeClientError('企业微信内部服务返回了无法解析的响应')
+    }
+    const slot = response.data.credential_slot
+    const status = response.data.connection_status
+    if (slot !== null && (typeof slot !== 'string' || !CREDENTIAL_SLOT_PATTERN.test(slot))) {
+      throw new WeComBridgeClientError('企业微信登录状态无效，请重新连接')
+    }
+    if (
+      status !== null &&
+      status !== 'connected' &&
+      status !== 'expired' &&
+      status !== 'disconnected'
+    ) {
+      throw new WeComBridgeClientError('企业微信连接状态无效，请重新连接')
+    }
+    if ((slot === null) !== (status === null)) {
+      throw new WeComBridgeClientError('企业微信连接状态不完整，请重新连接')
+    }
+    return { credentialSlot: slot, connectionStatus: status }
+  }
+
   async validateConnection(
     cookieJar: WeComCookie[],
-    formId: string
+    formId: string,
+    credentialSlot: string
   ): Promise<WeComValidateConnectionResult> {
     await this.post('/api/v1/internal/wecom/connections/validate', {
       cookie_jar: serializeCookieJar(cookieJar),
-      form_id: formId
+      form_id: formId,
+      credential_slot: credentialSlot
     })
     return { status: 'connected' }
   }
@@ -79,6 +114,10 @@ export class WeComBridgeClient {
   }
 
   private async post(path: string, body: unknown): Promise<unknown> {
+    return this.request(path, 'POST', body)
+  }
+
+  private async request(path: string, method: 'GET' | 'POST', body?: unknown): Promise<unknown> {
     const baseUrl = this.deps.getBaseUrl()
     if (baseUrl === null || !LOOPBACK_BASE_URL_PATTERN.test(baseUrl)) {
       throw new WeComBridgeClientError('企业微信内部服务尚未就绪')
@@ -95,14 +134,17 @@ export class WeComBridgeClient {
     const fetchImpl = this.deps.fetchImpl ?? fetch
     let response: Response
     try {
+      const headers: Record<string, string> = {
+        [MAIN_BRIDGE_SECRET_HEADER]: mainBridgeSecret,
+        Authorization: `Bearer ${accessToken}`
+      }
+      if (method === 'POST') {
+        headers['Content-Type'] = 'application/json'
+      }
       response = await fetchImpl(`${baseUrl}${path}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          [MAIN_BRIDGE_SECRET_HEADER]: mainBridgeSecret,
-          Authorization: `Bearer ${accessToken}`
-        },
-        body: JSON.stringify(body)
+        method,
+        headers,
+        ...(method === 'POST' ? { body: JSON.stringify(body) } : {})
       })
     } catch {
       throw new WeComBridgeClientError('无法连接企业微信内部服务')

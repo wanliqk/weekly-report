@@ -20,11 +20,7 @@ import { IPC_CHANNELS } from '../../../shared/contracts'
 import type { WeComAuthWindowController } from '../../wecom/auth-window-controller'
 import type { WeComBridgeClient } from '../../wecom/bridge-client'
 import type { WeComCredentialStore } from '../../security/wecom-credential-store'
-import {
-  createInMemoryWeComBridgeState,
-  registerWeComBridge,
-  type WeComBridgeState
-} from '../register-wecom-bridge'
+import { registerWeComBridge } from '../register-wecom-bridge'
 
 const VALID_ULID = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
 
@@ -39,10 +35,17 @@ class FakeAuthWindowController {
 class FakeCredentialStore {
   save = vi.fn()
   load = vi.fn()
+  restore = vi.fn().mockResolvedValue(undefined)
   delete = vi.fn().mockResolvedValue(undefined)
+  deleteEventually = vi.fn().mockResolvedValue(undefined)
+  retryPendingDeletes = vi.fn().mockResolvedValue(undefined)
 }
 
 class FakeBridgeClient {
+  getCredentialSlot = vi.fn().mockResolvedValue({
+    credentialSlot: null,
+    connectionStatus: null
+  })
   validateConnection = vi.fn()
   disconnect = vi.fn().mockResolvedValue({ status: 'disconnected' })
   executeSync = vi.fn()
@@ -52,15 +55,13 @@ function register(
   window: BrowserWindow,
   authWindowController: FakeAuthWindowController,
   credentialStore: FakeCredentialStore,
-  bridgeClient: FakeBridgeClient,
-  state: WeComBridgeState = createInMemoryWeComBridgeState()
+  bridgeClient: FakeBridgeClient
 ): () => void {
   return registerWeComBridge(
     window,
     authWindowController as unknown as WeComAuthWindowController,
     credentialStore as unknown as WeComCredentialStore,
-    bridgeClient as unknown as WeComBridgeClient,
-    state
+    bridgeClient as unknown as WeComBridgeClient
   )
 }
 
@@ -119,15 +120,7 @@ describe('registerWeComBridge', () => {
         const mainFrame = {}
         const window = createWindow(mainFrame)
         const bridgeClient = new FakeBridgeClient()
-        const state = createInMemoryWeComBridgeState()
-        state.setActiveSlot('a'.repeat(32))
-        register(
-          window,
-          new FakeAuthWindowController(),
-          new FakeCredentialStore(),
-          bridgeClient,
-          state
-        )
+        register(window, new FakeAuthWindowController(), new FakeCredentialStore(), bridgeClient)
 
         const handler = handlers.get(IPC_CHANNELS.WECOM_EXECUTE_SYNC)
         await expect(
@@ -151,9 +144,11 @@ describe('registerWeComBridge', () => {
         const credentialStore = new FakeCredentialStore()
         const bridgeClient = new FakeBridgeClient()
         bridgeClient.executeSync.mockResolvedValue({ status: 'submitted' })
-        const state = createInMemoryWeComBridgeState()
         const slot = 'b'.repeat(32)
-        state.setActiveSlot(slot)
+        bridgeClient.getCredentialSlot.mockResolvedValue({
+          credentialSlot: slot,
+          connectionStatus: 'connected'
+        })
         credentialStore.load.mockResolvedValue([
           {
             name: 'wedoc_sid',
@@ -166,7 +161,7 @@ describe('registerWeComBridge', () => {
             expirationDate: null
           }
         ])
-        register(window, new FakeAuthWindowController(), credentialStore, bridgeClient, state)
+        register(window, new FakeAuthWindowController(), credentialStore, bridgeClient)
 
         const handler = handlers.get(IPC_CHANNELS.WECOM_EXECUTE_SYNC)
         const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, recordId)
@@ -191,6 +186,26 @@ describe('registerWeComBridge', () => {
     expect(bridgeClient.executeSync).not.toHaveBeenCalled()
   })
 
+  describe('connect record id validation', () => {
+    const invalidFormIds = ['', '   ', 42, null, undefined, 'x'.repeat(129)]
+
+    it.each(invalidFormIds)(
+      'rejects invalid form id payload %j without starting the login flow',
+      async (formId) => {
+        const mainFrame = {}
+        const window = createWindow(mainFrame)
+        const authWindowController = new FakeAuthWindowController()
+        register(window, authWindowController, new FakeCredentialStore(), new FakeBridgeClient())
+
+        const handler = handlers.get(IPC_CHANNELS.WECOM_CONNECT)
+        await expect(
+          handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, formId)
+        ).rejects.toThrow()
+        expect(authWindowController.connect).not.toHaveBeenCalled()
+      }
+    )
+  })
+
   it('connect() cleans up the newly created credential slot when bridge validation fails', async () => {
     const mainFrame = {}
     const window = createWindow(mainFrame)
@@ -205,15 +220,43 @@ describe('registerWeComBridge', () => {
     bridgeClient.validateConnection.mockRejectedValue(
       new Error('backend endpoint not implemented yet')
     )
-    const state = createInMemoryWeComBridgeState()
-    register(window, authWindowController, credentialStore, bridgeClient, state)
+    register(window, authWindowController, credentialStore, bridgeClient)
 
     const handler = handlers.get(IPC_CHANNELS.WECOM_CONNECT)
-    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent)
+    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, 'form-123')
 
     expect(result).toEqual({ status: 'failed', reason: expect.any(String) })
-    expect(credentialStore.delete).toHaveBeenCalledWith('c'.repeat(32))
-    expect(state.getActiveSlot()).toBeNull()
+    expect(bridgeClient.validateConnection).toHaveBeenCalledWith(
+      expect.any(Array),
+      'form-123',
+      'c'.repeat(32)
+    )
+    expect(credentialStore.deleteEventually).toHaveBeenCalledWith('c'.repeat(32))
+  })
+
+  it('connect() reports when a failed validation credential cannot be cleaned up', async () => {
+    const mainFrame = {}
+    const authWindowController = new FakeAuthWindowController()
+    authWindowController.connect.mockResolvedValue({
+      status: 'success',
+      cookieJar: [{ name: 'wedoc_sid', value: 'v' }]
+    })
+    const credentialStore = new FakeCredentialStore()
+    credentialStore.save.mockResolvedValue('c'.repeat(32))
+    credentialStore.deleteEventually.mockRejectedValue(new Error('disk locked'))
+    const bridgeClient = new FakeBridgeClient()
+    bridgeClient.validateConnection.mockRejectedValue(new Error('validation failed'))
+    register(createWindow(mainFrame), authWindowController, credentialStore, bridgeClient)
+
+    const result = await handlers.get(IPC_CHANNELS.WECOM_CONNECT)?.(
+      { senderFrame: mainFrame } as IpcMainInvokeEvent,
+      'form-123'
+    )
+
+    expect(result).toEqual({
+      status: 'failed',
+      reason: expect.stringContaining('无法清理本次登录状态')
+    })
   })
 
   it('connect() keeps the credential slot active and returns connected on full success', async () => {
@@ -228,15 +271,68 @@ describe('registerWeComBridge', () => {
     credentialStore.save.mockResolvedValue('d'.repeat(32))
     const bridgeClient = new FakeBridgeClient()
     bridgeClient.validateConnection.mockResolvedValue({ status: 'connected' })
-    const state = createInMemoryWeComBridgeState()
-    register(window, authWindowController, credentialStore, bridgeClient, state)
+    register(window, authWindowController, credentialStore, bridgeClient)
 
     const handler = handlers.get(IPC_CHANNELS.WECOM_CONNECT)
-    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent)
+    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, '  form-123  ')
 
     expect(result).toEqual({ status: 'connected', reason: null })
-    expect(credentialStore.delete).not.toHaveBeenCalled()
-    expect(state.getActiveSlot()).toBe('d'.repeat(32))
+    expect(credentialStore.deleteEventually).not.toHaveBeenCalled()
+    expect(bridgeClient.getCredentialSlot).toHaveBeenCalledTimes(1)
+  })
+
+  it('connect() deletes the previous slot as an orphan when a reconnect creates a new one', async () => {
+    const mainFrame = {}
+    const window = createWindow(mainFrame)
+    const authWindowController = new FakeAuthWindowController()
+    authWindowController.connect.mockResolvedValue({
+      status: 'success',
+      cookieJar: [{ name: 'wedoc_sid', value: 'v' }]
+    })
+    const credentialStore = new FakeCredentialStore()
+    credentialStore.save.mockResolvedValue('f'.repeat(32))
+    const bridgeClient = new FakeBridgeClient()
+    bridgeClient.validateConnection.mockResolvedValue({ status: 'connected' })
+    bridgeClient.getCredentialSlot.mockResolvedValue({
+      credentialSlot: 'e'.repeat(32),
+      connectionStatus: 'connected'
+    })
+    register(window, authWindowController, credentialStore, bridgeClient)
+
+    const handler = handlers.get(IPC_CHANNELS.WECOM_CONNECT)
+    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, 'form-123')
+
+    expect(result).toEqual({ status: 'connected', reason: null })
+    expect(credentialStore.deleteEventually).toHaveBeenCalledWith('e'.repeat(32))
+  })
+
+  it('connect() reports a warning without hiding successful reconnect when old-slot cleanup fails', async () => {
+    const mainFrame = {}
+    const authWindowController = new FakeAuthWindowController()
+    authWindowController.connect.mockResolvedValue({
+      status: 'success',
+      cookieJar: [{ name: 'wedoc_sid', value: 'v' }]
+    })
+    const credentialStore = new FakeCredentialStore()
+    credentialStore.save.mockResolvedValue('f'.repeat(32))
+    credentialStore.deleteEventually.mockRejectedValue(new Error('disk locked'))
+    const bridgeClient = new FakeBridgeClient()
+    bridgeClient.validateConnection.mockResolvedValue({ status: 'connected' })
+    bridgeClient.getCredentialSlot.mockResolvedValue({
+      credentialSlot: 'e'.repeat(32),
+      connectionStatus: 'connected'
+    })
+    register(createWindow(mainFrame), authWindowController, credentialStore, bridgeClient)
+
+    const result = await handlers.get(IPC_CHANNELS.WECOM_CONNECT)?.(
+      { senderFrame: mainFrame } as IpcMainInvokeEvent,
+      'form-123'
+    )
+
+    expect(result).toEqual({
+      status: 'connected',
+      reason: expect.stringContaining('无法清理旧登录状态')
+    })
   })
 
   it('connect() reports canceled without touching the credential store', async () => {
@@ -248,10 +344,26 @@ describe('registerWeComBridge', () => {
     register(window, authWindowController, credentialStore, new FakeBridgeClient())
 
     const handler = handlers.get(IPC_CHANNELS.WECOM_CONNECT)
-    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent)
+    const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent, 'form-123')
 
     expect(result).toEqual({ status: 'canceled', reason: null })
     expect(credentialStore.save).not.toHaveBeenCalled()
+  })
+
+  it('connect() retries pending credential cleanup before opening the login window', async () => {
+    const mainFrame = {}
+    const authWindowController = new FakeAuthWindowController()
+    const credentialStore = new FakeCredentialStore()
+    credentialStore.retryPendingDeletes.mockRejectedValue(new Error('cleanup still locked'))
+    register(createWindow(mainFrame), authWindowController, credentialStore, new FakeBridgeClient())
+
+    const result = await handlers.get(IPC_CHANNELS.WECOM_CONNECT)?.(
+      { senderFrame: mainFrame } as IpcMainInvokeEvent,
+      'form-123'
+    )
+
+    expect(result).toEqual({ status: 'failed', reason: 'cleanup still locked' })
+    expect(authWindowController.connect).not.toHaveBeenCalled()
   })
 
   it('disconnect() deletes the credential file before notifying the backend', async () => {
@@ -267,16 +379,62 @@ describe('registerWeComBridge', () => {
       callOrder.push('notify-backend')
       return { status: 'disconnected' }
     })
-    const state = createInMemoryWeComBridgeState()
-    state.setActiveSlot('e'.repeat(32))
-    register(window, new FakeAuthWindowController(), credentialStore, bridgeClient, state)
+    bridgeClient.getCredentialSlot.mockResolvedValue({
+      credentialSlot: 'e'.repeat(32),
+      connectionStatus: 'connected'
+    })
+    credentialStore.load.mockResolvedValue([{ name: 'wedoc_sid', value: 'v' }])
+    register(window, new FakeAuthWindowController(), credentialStore, bridgeClient)
 
     const handler = handlers.get(IPC_CHANNELS.WECOM_DISCONNECT)
     const result = await handler?.({ senderFrame: mainFrame } as IpcMainInvokeEvent)
 
     expect(callOrder).toEqual(['delete-credential', 'notify-backend'])
     expect(result).toEqual({ status: 'disconnected', reason: null })
-    expect(state.getActiveSlot()).toBeNull()
+  })
+
+  it('disconnect() restores the credential when the backend notification fails', async () => {
+    const mainFrame = {}
+    const credentialStore = new FakeCredentialStore()
+    const cookieJar = [{ name: 'wedoc_sid', value: 'v' }]
+    credentialStore.load.mockResolvedValue(cookieJar)
+    const bridgeClient = new FakeBridgeClient()
+    const slot = 'e'.repeat(32)
+    bridgeClient.getCredentialSlot.mockResolvedValue({
+      credentialSlot: slot,
+      connectionStatus: 'connected'
+    })
+    bridgeClient.disconnect.mockRejectedValue(new Error('sidecar unavailable'))
+    register(createWindow(mainFrame), new FakeAuthWindowController(), credentialStore, bridgeClient)
+
+    const result = await handlers.get(IPC_CHANNELS.WECOM_DISCONNECT)?.({
+      senderFrame: mainFrame
+    } as IpcMainInvokeEvent)
+
+    expect(credentialStore.delete).toHaveBeenCalledWith(slot)
+    expect(credentialStore.restore).toHaveBeenCalledWith(slot, cookieJar)
+    expect(result).toEqual({ status: 'failed', reason: 'sidecar unavailable' })
+  })
+
+  it('disconnect() keeps the credential deleted when the backend committed but its response was lost', async () => {
+    const mainFrame = {}
+    const credentialStore = new FakeCredentialStore()
+    credentialStore.load.mockResolvedValue([{ name: 'wedoc_sid', value: 'v' }])
+    const bridgeClient = new FakeBridgeClient()
+    const slot = 'e'.repeat(32)
+    bridgeClient.getCredentialSlot
+      .mockResolvedValueOnce({ credentialSlot: slot, connectionStatus: 'connected' })
+      .mockResolvedValueOnce({ credentialSlot: slot, connectionStatus: 'disconnected' })
+    bridgeClient.disconnect.mockRejectedValue(new Error('response lost'))
+    register(createWindow(mainFrame), new FakeAuthWindowController(), credentialStore, bridgeClient)
+
+    const result = await handlers.get(IPC_CHANNELS.WECOM_DISCONNECT)?.({
+      senderFrame: mainFrame
+    } as IpcMainInvokeEvent)
+
+    expect(credentialStore.delete).toHaveBeenCalledWith(slot)
+    expect(credentialStore.restore).not.toHaveBeenCalled()
+    expect(result).toEqual({ status: 'disconnected', reason: null })
   })
 
   it('disconnect() still notifies the backend when there was no active slot to delete', async () => {

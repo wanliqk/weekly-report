@@ -261,7 +261,7 @@ Repository -> Model/SQLite
 
 ## 14. 企业微信同步目标架构（CR-20260808-02）
 
-> 实现状态：数据层、Electron 凭证桥、协议 Client、字段 Mapper、连接/同步编排 Service 与公开/Main-only API（`WECOM-02..06`）均已实现并通过独立审查；Renderer（`WECOM-07`）仍是目标设计。当前 `wecom_sync=false` 和占位 UI 不变，具体事实以 `progress.md`/`task.md` 为准。
+> 实现状态：数据层、Electron 凭证桥、协议 Client、字段 Mapper、连接/同步编排 Service、公开/Main-only API 与 Renderer 交互（`WECOM-02..07`）均已实现，`wecom_sync=true`。受控企业微信测试账号、生产打包和发布级全链路验收仍属于 `WECOM-08`，具体事实以 `progress.md`/`task.md` 为准。
 
 ```text
 Renderer --公开 REST--> WeCom API/Service --> Repository/SQLite

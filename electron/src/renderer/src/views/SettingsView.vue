@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router'
 import { userMessage } from '@renderer/api/client'
 import { getCapabilities, getMySettings } from '@renderer/api/settings'
 import { createManualBackup, downloadManualBackupFile } from '@renderer/api/system'
+import WeComSettingsCard from '@renderer/components/wecom/WeComSettingsCard.vue'
 import { useAuthStore } from '@renderer/stores/auth'
 import type { CapabilitiesData, SettingsData } from '@renderer/types/settings'
 
@@ -45,10 +46,6 @@ async function submitPasswordChange(): Promise<void> {
   } finally {
     changingPassword.value = false
   }
-}
-
-function showWecomPlaceholder(): void {
-  ElMessage.info('企业微信同步功能暂未开放')
 }
 
 async function createAndSaveBackup(): Promise<void> {
@@ -141,19 +138,7 @@ async function createAndSaveBackup(): Promise<void> {
         <p class="field-hint">当前时区固定为 {{ settings?.timezone ?? 'Asia/Shanghai' }}。</p>
       </div>
 
-      <div class="editor-card">
-        <div class="section-heading">
-          <div>
-            <span>WECOM</span>
-            <h2>企业微信同步</h2>
-          </div>
-          <el-tag type="info" effect="plain">功能暂未开放</el-tag>
-        </div>
-        <p class="field-hint">
-          企业微信同步入口仅作占位展示，当前版本不会连接企业微信或发起任何相关网络请求。
-        </p>
-        <el-button :disabled="!capabilities" @click="showWecomPlaceholder">连接企业微信</el-button>
-      </div>
+      <WeComSettingsCard :enabled="capabilities?.wecom_sync ?? false" />
 
       <div v-if="authStore.isAdmin" class="editor-card">
         <div class="section-heading">

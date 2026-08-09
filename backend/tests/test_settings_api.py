@@ -18,7 +18,7 @@ def test_settings_are_read_only_and_capabilities_remain_available(
 
     assert initial.json()["data"] == {"timezone": "Asia/Shanghai"}
     assert removed_update.status_code == 405
-    assert capabilities.json()["data"] == {"wecom_sync": False}
+    assert capabilities.json()["data"] == {"wecom_sync": True}
 
 
 def test_settings_require_authentication(

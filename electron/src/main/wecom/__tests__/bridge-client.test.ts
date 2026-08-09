@@ -42,13 +42,68 @@ function baseDeps(fetchImpl: WeComFetch): {
 }
 
 describe('WeComBridgeClient', () => {
+  it('gets the current user credential slot without exposing it to renderer', async () => {
+    const slot = 'a'.repeat(32)
+    const fetchImpl = vi.fn<WeComFetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          code: 0,
+          msg: 'ok',
+          data: { credential_slot: slot, connection_status: 'connected' }
+        },
+        { ok: true, status: 200 }
+      )
+    )
+    const client = new WeComBridgeClient(baseDeps(fetchImpl))
+
+    await expect(client.getCredentialSlot()).resolves.toEqual({
+      credentialSlot: slot,
+      connectionStatus: 'connected'
+    })
+
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('http://127.0.0.1:54321/api/v1/internal/wecom/connections/credential-slot')
+    expect(init.method).toBe('GET')
+    expect(init.body).toBeUndefined()
+  })
+
+  it('rejects a malformed credential slot returned by the sidecar', async () => {
+    const fetchImpl = vi.fn<WeComFetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          code: 0,
+          msg: 'ok',
+          data: { credential_slot: '../not-a-slot', connection_status: 'connected' }
+        },
+        { ok: true, status: 200 }
+      )
+    )
+    const client = new WeComBridgeClient(baseDeps(fetchImpl))
+
+    await expect(client.getCredentialSlot()).rejects.toBeInstanceOf(WeComBridgeClientError)
+  })
+
+  it('rejects a credential lookup whose slot and connection status disagree', async () => {
+    const fetchImpl = vi
+      .fn<WeComFetch>()
+      .mockResolvedValue(
+        jsonResponse(
+          { code: 0, msg: 'ok', data: { credential_slot: null, connection_status: 'connected' } },
+          { ok: true, status: 200 }
+        )
+      )
+    const client = new WeComBridgeClient(baseDeps(fetchImpl))
+
+    await expect(client.getCredentialSlot()).rejects.toBeInstanceOf(WeComBridgeClientError)
+  })
+
   it('validateConnection posts the expected URL, headers, and body', async () => {
     const fetchImpl = vi
       .fn<WeComFetch>()
       .mockResolvedValue(jsonResponse({}, { ok: true, status: 200 }))
     const client = new WeComBridgeClient(baseDeps(fetchImpl))
 
-    await client.validateConnection(sampleCookieJar(), 'form-123')
+    await client.validateConnection(sampleCookieJar(), 'form-123', 'c'.repeat(32))
 
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
@@ -57,8 +112,13 @@ describe('WeComBridgeClient', () => {
     const headers = init.headers as Record<string, string>
     expect(headers[MAIN_BRIDGE_SECRET_HEADER]).toBe('the-bridge-secret')
     expect(headers.Authorization).toBe('Bearer the-jwt')
-    const body = JSON.parse(init.body as string) as { form_id: string; cookie_jar: unknown[] }
+    const body = JSON.parse(init.body as string) as {
+      form_id: string
+      credential_slot: string
+      cookie_jar: unknown[]
+    }
     expect(body.form_id).toBe('form-123')
+    expect(body.credential_slot).toBe('c'.repeat(32))
     expect(body.cookie_jar).toEqual([
       {
         name: 'wedoc_sid',
@@ -106,9 +166,9 @@ describe('WeComBridgeClient', () => {
     )
     const client = new WeComBridgeClient(baseDeps(fetchImpl))
 
-    await expect(client.validateConnection(sampleCookieJar(), 'form-123')).rejects.toBeInstanceOf(
-      WeComBridgeClientError
-    )
+    await expect(
+      client.validateConnection(sampleCookieJar(), 'form-123', 'c'.repeat(32))
+    ).rejects.toBeInstanceOf(WeComBridgeClientError)
   })
 
   it('turns a network-level fetch failure into a clean typed error', async () => {

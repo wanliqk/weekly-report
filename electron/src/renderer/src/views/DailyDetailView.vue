@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, userMessage } from '@renderer/api/client'
+import { getCapabilities } from '@renderer/api/settings'
 import { archiveDay } from '@renderer/api/daily-report-days'
 import {
   createDailyReport,
@@ -14,6 +15,7 @@ import {
 } from '@renderer/api/daily-reports'
 import { createDailyReportExport, downloadDailyReportExportFile } from '@renderer/api/exports'
 import DynamicFieldInput from '@renderer/components/DynamicFieldInput.vue'
+import WeComSyncDialog from '@renderer/components/wecom/WeComSyncDialog.vue'
 import type { DailyContent, DailyFieldValue, DailyReportData } from '@renderer/types/daily-report'
 import {
   dailyFieldErrors,
@@ -31,6 +33,8 @@ const loading = ref(true)
 const saving = ref(false)
 const actionRunning = ref(false)
 const exporting = ref(false)
+const wecomEnabled = ref(false)
+const wecomDialogVisible = ref(false)
 const report = ref<DailyReportData | null>(null)
 const content = ref<DailyContent>({})
 const fieldErrors = ref<Record<string, string>>({})
@@ -47,7 +51,18 @@ const visibleFields = computed(() =>
     .sort((left, right) => left.sort_order - right.sort_order)
 )
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadCapabilities()
+})
+
+async function loadCapabilities(): Promise<void> {
+  try {
+    wecomEnabled.value = (await getCapabilities()).wecom_sync
+  } catch {
+    wecomEnabled.value = false
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -266,6 +281,13 @@ function handleOperationError(error: unknown): void {
         <el-button v-if="report.status === 'archived'" :loading="exporting" @click="exportReport">
           导出日报
         </el-button>
+        <el-button
+          v-if="report.status === 'archived' && wecomEnabled"
+          type="primary"
+          @click="wecomDialogVisible = true"
+        >
+          同步到企业微信
+        </el-button>
         <el-button @click="backToCalendar">返回我的日报</el-button>
       </div>
     </header>
@@ -334,5 +356,12 @@ function handleOperationError(error: unknown): void {
         </footer>
       </template>
     </section>
+
+    <WeComSyncDialog
+      v-if="report && report.status === 'archived' && wecomEnabled"
+      v-model="wecomDialogVisible"
+      :daily-report-day-id="report.day_id"
+      :work-date="report.work_date"
+    />
   </main>
 </template>
