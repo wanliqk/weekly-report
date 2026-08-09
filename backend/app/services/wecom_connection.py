@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import Clock, utc_now
+from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.ulid import generate_ulid
 from app.core.wecom_logging import log_wecom_event
@@ -230,11 +231,18 @@ class WeComConnectionService:
         client: WeComClientLike | None = None,
         client_factory: Callable[[], WeComClientLike] | None = None,
         clock: Clock = utc_now,
+        settings: Settings | None = None,
     ) -> None:
         self._session = session
         self._injected_client = client
         self._client_factory = client_factory
         self._clock = clock
+        # Threaded in via `Depends(get_app_settings)` at the API layer (same
+        # pattern as `ExportService`) rather than read from the global
+        # `get_settings()` singleton here — a low-level Service reaching for
+        # process-global settings on its own bypasses whatever `Settings`
+        # instance a test (or a future second app instance) actually wired up.
+        self._settings = settings
         self._bindings = WeComUserBindingRepository(session)
         self._profiles = WeComSyncProfileRepository(session)
 
@@ -243,7 +251,10 @@ class WeComConnectionService:
             return self._client_factory()
         from app.integrations.wecom.client import WeComInternalClient
 
-        return WeComInternalClient()
+        debug_raw_body = (
+            self._settings.wecom_debug_raw_body if self._settings is not None else False
+        )
+        return WeComInternalClient(debug_raw_body=debug_raw_body)
 
     async def validate_connection(
         self,

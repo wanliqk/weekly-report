@@ -46,6 +46,6 @@ API 基础路径为 `/api/v1`，统一返回 `{code,msg,data}`；时间使用带
 
 ## 安全与代理执行约束
 
-FastAPI 只监听 `127.0.0.1` 动态端口，禁止绑定 `0.0.0.0` 或启动多 worker。Electron 必须启用 `contextIsolation` 和 sandbox、禁用 `nodeIntegration`；JWT 由 `safeStorage` 保存，不得写入 `localStorage`。日志不得包含密码、JWT、运行时密钥或报告正文；不得提交 `.env`、本地数据库、日志和构建产物。
+FastAPI 只监听 `127.0.0.1` 动态端口，禁止绑定 `0.0.0.0` 或启动多 worker。Electron 必须启用 `contextIsolation` 和 sandbox、禁用 `nodeIntegration`；JWT 由 `safeStorage` 保存，不得写入 `localStorage`。日志不得包含密码、JWT、运行时密钥或报告正文；不得提交 `.env`、本地数据库、日志和构建产物。唯一明确例外：`WEEKLY_REPORT_WECOM_DEBUG_RAW_BODY` 开关（默认 `false`，需用户显式授权开启）允许把企业微信三个接口的原始请求/响应 JSON **正文**写入独立、gitignored 的 `wecom-raw-debug.log`（与常规 `wecom.log` 完全分离），仅用于人工排障；Cookie、其他 header 与运行时密钥在该开关开启与否时均不写入任何日志，这一边界不可通过任何开关关闭。排障结束后必须关闭该开关并删除 `wecom-raw-debug.log`。
 
 自动化操作使用 PowerShell 7 语法，文件检索优先使用 `rg`，不得混用 Bash heredoc 或转义规则。修改前只检查当前 `v1` 工作树；未经明确授权，不得通过其他分支或历史提交补全信息。

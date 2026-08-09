@@ -550,3 +550,18 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - `WeComBusinessRejected` 新增 `biz_message`（`head.msg`/`errmsg`，截断 200 字符），随 `business_code` 一起加入 `wecom_logging.py` 诊断白名单，仅在 `WEEKLY_REPORT_WECOM_LOG_REDACT=false` 时输出；`last_error_message`/API 契约不变。
 - 用真实 `wecom_daily_sync_records` 数据定位到 2026-08-09 14:26:30 与 14:36:59 两次真实失败均止步于 `list_journals` 的业务拒绝，但当时的具体 `errcode`/`errmsg` 已随日志缺口丢失，无法回溯；修复后需用户重新触发一次同步才能拿到真实业务码。
 - 新增/扩展测试覆盖 `biz_message` 提取、长度截断，以及两个专门针对本缺口的回归测试（`caplog` 直接断言业务拒绝产出且仅产出一条 `outcome=business_rejected` 记录）。后端 `ruff check`/`mypy` strict/`pytest` 全量执行通过（唯一失败项经 `git stash` 验证是本机 `.env` 遗留的既有失败，与本次改动无关）。已创建独立提交 `11ff7ab`（未推送远端）。
+
+## 16. 未解析业务码诊断补强（`ISS-038`）
+
+- 用户按 §15 的修复重启并重试后，`wecom.log` 显示 `list_journals` 的 `business_code=-1` 且没有 `schema_paths`——`error.detail`（即 `_schema_paths` 的输出）此前从未接入 `client.py::_log()` 的 diagnostics，只有 `WeComConnectionService` 自己重复实现的日志分支带这个字段。已把 `error.detail` 接入 `_log()`，并给三处 `WeComBusinessRejected` 补上 `detail=_schema_paths(payload)`。
+- 用户重试后新日志显示 `schema_paths="entrys,errcode"`：响应顶层确实只有这两个键（排除了模板接口那种 `head` 信封漂移的可能），`entrys` 为空，`errcode` 本身值类型异常导致 `_coerce_biz_code` 回退为 `-1`。新增 `_describe_unparseable_code`/`_business_message_for_unparseable_code`：当 `errmsg`/`head.msg` 缺失且业务码无法解析为整数时，把原始值的类型/字面量（如 `""`/`None`，均属状态码字段本身而非日报正文或凭证）写入 `business_message`。
+- 新增 5 项测试（含真实观测到的"非数字 `errcode`"、新增的"空字符串 `errcode`"两个场景）。全量 `ruff check`/`mypy` strict/`pytest` 通过。
+
+## 17. 用户授权的原始正文调试开关（`ISS-039`）
+
+- 用户在对话中明确要求"要企业微信接口返回的原始请求体和响应体"，并在被告知 Cookie/报告正文风险后明确授权、要求"加一个开关，只有我开启的时候才能打印"。判断依据：Cookie/header 的保护不因授权让步（等价账号会话凭证，`WeComInternalClient` 结构上也从未把 header 传给任何日志函数，与这个开关开/关无关）；但请求/响应**正文**本身（`list_journals` 尤其不含 Cookie）在用户对自己数据的明确、具体授权下可以做成默认关闭的显式开关，而不是一概拒绝。
+- 新增 `Settings.wecom_debug_raw_body`（`WEEKLY_REPORT_WECOM_DEBUG_RAW_BODY`，默认 `false`）；新增与常规 `wecom.log` 物理隔离的独立文件 `wecom-raw-debug.log`（`.local-data/` 下已 gitignore，2 MiB×2 备份）；`log_wecom_raw_body()` 的函数签名没有 header/Cookie 形参；`configure_wecom_raw_debug_logging()` 在关闭时把目标 logger 设为 `disabled=True` 且不挂任何 handler（双重保险：调用点判断 + logger 本身失效）；即使正文里意外出现凭证形状的子串，仍会走统一的凭证正则 scrub 兜底；开关开启时会在正常 `wecom.log` 写一条醒目 WARNING 横幅，且提醒排障后需关闭并删除该文件。
+- 已同步在 `AGENTS.md` 安全条款中记录这条被审视过、范围明确的例外及其边界，避免今后的 Agent 误判这是未授权的规则违反。
+- 实现过程中发现并当场修正一个真实回归：最初把 `debug_raw_body` 实现为 `_new_client()` 内部直接调用全局 `get_settings()`（`@lru_cache` 单例），导致全量 `pytest` 从 1 项既有失败暴涨到 10 项——`test_wecom_internal_api.py`/`test_wecom_api.py` 靠 `create_app(settings=...)` 注入独立 `Settings` 实例，从不真正调用 `get_settings()`；只要请求路径真正走到 `_new_client()`（`validate_connection`/`execute_sync`），就会绕开测试注入的 Settings，直接命中本机 `.env` 的空 `runtime_secret` 报 `ValidationError`。已改用 `ExportService` 已经验证过的既定模式：`Settings` 经 `Depends(get_app_settings)` 在 `internal_wecom.py` 两个真正触达 Client 的路由（`validate_connection`/`execute_sync`）显式注入并传给 Service 构造函数；`WeComConnectionService`/`WeComSyncService` 新增可选 `settings` 参数，不引入任何模块级全局单例读取。
+- 新增 9 项测试：默认关闭不落盘、开启后请求/响应正文均落盘且不含 Cookie、`submit_daily` 真实正文场景（验证开关确实生效而非静默空转）、凭证正则兜底、非法 `direction`/`path` 静默丢弃、`configure_wecom_logging`/`configure_wecom_raw_debug_logging` 双开关组合。DI 修复后重跑曾失败的全部 10 项均转为通过；全量 `ruff check`/`ruff format`/`mypy` strict/`pytest` 通过。
+- 用户需要在自己的 `.env` 里设置该开关并重启应用才能生效；这是继续排查这次真实 `list_journals` 失败的下一步。

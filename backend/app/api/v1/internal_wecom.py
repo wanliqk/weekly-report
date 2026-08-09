@@ -15,7 +15,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user, require_main_bridge_secret
+from app.api.dependencies import get_app_settings, get_current_user, require_main_bridge_secret
+from app.core.config import Settings
 from app.db.session import get_db_session
 from app.models import User
 from app.schemas.common import ApiResponse
@@ -41,8 +42,9 @@ async def validate_connection(
     payload: WeComConnectionValidateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> ApiResponse[WeComInternalAckData]:
-    await WeComConnectionService(session).validate_connection(
+    await WeComConnectionService(session, settings=settings).validate_connection(
         current_user.id,
         cookie_jar=payload.cookie_jar,
         credential_slot=payload.credential_slot,
@@ -87,8 +89,9 @@ async def execute_sync(
     payload: WeComSyncExecuteRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> ApiResponse[WeComInternalAckData]:
-    record = await WeComSyncService(session).execute(
+    record = await WeComSyncService(session, settings=settings).execute(
         current_user.id, record_id, cookie_jar=payload.cookie_jar
     )
     return ApiResponse(data=WeComInternalAckData(status=record.status))

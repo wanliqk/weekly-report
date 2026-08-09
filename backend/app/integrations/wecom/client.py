@@ -37,7 +37,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.core.clock import Clock, utc_now
-from app.core.wecom_logging import log_wecom_event
+from app.core.wecom_logging import WECOM_RAW_LOGGER_NAME, log_wecom_event, log_wecom_raw_body
 from app.integrations.wecom.schemas import (
     WeComCookieIn,
     WeComJournalEntry,
@@ -50,6 +50,7 @@ from app.integrations.wecom.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+_raw_logger = logging.getLogger(WECOM_RAW_LOGGER_NAME)
 
 _ALLOWED_HOST: Final = "doc.weixin.qq.com"
 _BASE_URL: Final = f"https://{_ALLOWED_HOST}"
@@ -182,6 +183,27 @@ def _coerce_biz_message(value: object) -> str | None:
     if not isinstance(value, str) or not value:
         return None
     return value[:_MAX_BUSINESS_MESSAGE_LENGTH]
+
+
+def _describe_unparseable_code(value: object) -> str:
+    """Best-effort, still-safe description of a `head.ret`/`errcode` value
+    that didn't coerce to an int. This is the same trust class as
+    `business_code` itself (a status/classification field, not report
+    content) — a dict/list shape is defensively described by type name only,
+    never rendered, since a code field should never structurally be one."""
+    if isinstance(value, dict | list):
+        return f"<{type(value).__name__}>"
+    return repr(value)[:64]
+
+
+def _business_message_for_unparseable_code(
+    *, coerced_code: int, explicit_message: str | None, raw_code: object
+) -> str | None:
+    if explicit_message is not None:
+        return explicit_message
+    if coerced_code != -1:
+        return None
+    return f"错误码无法解析为整数,原始类型/值:{_describe_unparseable_code(raw_code)}"
 
 
 def _assert_allowed_target(url: str) -> None:
@@ -385,6 +407,7 @@ class WeComInternalClient:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Clock = utc_now,
+        debug_raw_body: bool = False,
     ) -> None:
         self._client = httpx.AsyncClient(
             base_url=_BASE_URL,
@@ -393,6 +416,12 @@ class WeComInternalClient:
             transport=transport,
         )
         self._clock = clock
+        # `Settings.wecom_debug_raw_body` — an explicit, user-authorized,
+        # off-by-default troubleshooting exception. This Client stays a
+        # "pure protocol client" (no `Settings` import) per its own module
+        # docstring; callers (`WeComSyncService`/`WeComConnectionService`'s
+        # `_new_client()`) resolve the flag and pass it in.
+        self._debug_raw_body = debug_raw_body
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -522,6 +551,7 @@ class WeComInternalClient:
         on_send: bool,
         parse: Callable[[dict[str, Any]], T],
     ) -> T:
+        self._dump_raw_request(path, json.dumps(json_body, ensure_ascii=False))
         started = time.monotonic()
         try:
             response = await self._client.post(
@@ -539,6 +569,7 @@ class WeComInternalClient:
             http_error = WeComTransportFailed("网络请求失败")
             self._log(path, started, error=http_error)
             raise http_error from exc
+        self._dump_raw_response(path, response)
 
         # The parse step (`parse`, e.g. `_parse_template_info`) is folded into
         # this same try/except so a business/schema/protocol rejection found
@@ -571,6 +602,7 @@ class WeComInternalClient:
         files: list[tuple[str, tuple[None, str]]] = [
             (name, (None, value)) for name, value in fields
         ]
+        self._dump_raw_request(path, json.dumps(dict(fields), ensure_ascii=False))
         started = time.monotonic()
         try:
             response = await self._client.post(
@@ -588,6 +620,7 @@ class WeComInternalClient:
             http_error = WeComTransportFailed("网络请求失败")
             self._log(path, started, error=http_error)
             raise http_error from exc
+        self._dump_raw_response(path, response)
 
         # See `_send_json`'s matching comment: folding `parse` in here makes
         # `submit_daily`'s post-200 business rejection (`WeComBusinessRejected`
@@ -601,6 +634,19 @@ class WeComInternalClient:
             raise
         self._log(path, started, http_status=response.status_code)
         return result
+
+    def _dump_raw_request(self, path: str, body: str) -> None:
+        # `body` here is a JSON/form-field serialization built by this
+        # Client's own callers — it never includes `cookie_header` or any
+        # other header, regardless of `self._debug_raw_body`.
+        if self._debug_raw_body:
+            log_wecom_raw_body(_raw_logger, direction="request", path_template=path, body=body)
+
+    def _dump_raw_response(self, path: str, response: httpx.Response) -> None:
+        if self._debug_raw_body:
+            log_wecom_raw_body(
+                _raw_logger, direction="response", path_template=path, body=response.text
+            )
 
     def _log(
         self,
@@ -616,6 +662,8 @@ class WeComInternalClient:
         if error is not None:
             diagnostics["error_type"] = type(error).__name__
             diagnostics["error_message"] = error.message
+            if error.detail is not None:
+                diagnostics["schema_paths"] = error.detail
             if isinstance(error, WeComBusinessRejected):
                 diagnostics["business_code"] = error.biz_code
                 if error.biz_message is not None:
@@ -637,10 +685,16 @@ class WeComInternalClient:
             raise WeComProtocolChanged("响应缺少 head.ret 节点")
         ret = head["ret"]
         if ret != 0:
+            coerced_code = _coerce_biz_code(ret)
             raise WeComBusinessRejected(
                 "获取模板信息被拒绝",
-                biz_code=_coerce_biz_code(ret),
-                biz_message=_coerce_biz_message(head.get("msg")),
+                biz_code=coerced_code,
+                biz_message=_business_message_for_unparseable_code(
+                    coerced_code=coerced_code,
+                    explicit_message=_coerce_biz_message(head.get("msg")),
+                    raw_code=ret,
+                ),
+                detail=_schema_paths(payload),
             )
 
         body = payload.get("body")
@@ -701,10 +755,16 @@ class WeComInternalClient:
             raise WeComProtocolChanged("响应缺少 errcode 节点")
         errcode = payload["errcode"]
         if errcode != 0:
+            coerced_code = _coerce_biz_code(errcode)
             raise WeComBusinessRejected(
                 "获取日报列表被拒绝",
-                biz_code=_coerce_biz_code(errcode),
-                biz_message=_coerce_biz_message(payload.get("errmsg")),
+                biz_code=coerced_code,
+                biz_message=_business_message_for_unparseable_code(
+                    coerced_code=coerced_code,
+                    explicit_message=_coerce_biz_message(payload.get("errmsg")),
+                    raw_code=errcode,
+                ),
+                detail=_schema_paths(payload),
             )
 
         entrys = payload.get("entrys")
@@ -726,10 +786,16 @@ class WeComInternalClient:
             raise WeComOutcomeUncertain("响应缺少 head.ret 节点,无法确认是否受理")
         ret = head["ret"]
         if ret != 0:
+            coerced_code = _coerce_biz_code(ret)
             raise WeComBusinessRejected(
                 "提交日报被拒绝",
-                biz_code=_coerce_biz_code(ret),
-                biz_message=_coerce_biz_message(head.get("msg")),
+                biz_code=coerced_code,
+                biz_message=_business_message_for_unparseable_code(
+                    coerced_code=coerced_code,
+                    explicit_message=_coerce_biz_message(head.get("msg")),
+                    raw_code=ret,
+                ),
+                detail=_schema_paths(payload),
             )
 
         body = payload.get("body")

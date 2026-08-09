@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     # rotating `wecom.log`; credentials, headers and bodies remain forbidden
     # and are protected independently of this switch.
     wecom_log_redact: bool = True
+    # `True` is an explicit, user-authorized troubleshooting exception (not
+    # the default posture described by `AGENTS.md`'s general "no report body
+    # in logs" rule): it writes raw request/response JSON *bodies* for the
+    # three WeCom endpoints to a separate `wecom-raw-debug.log`, gitignored
+    # under `.local-data/`. Cookie/header values are never written by this
+    # switch, on or off — that boundary is independent of this flag (see
+    # `wecom_logging.py`). Must be turned back off once debugging is done;
+    # a body can legitimately contain real report text.
+    wecom_debug_raw_body: bool = False
     runtime_secret: str | None = None
     # SEC-014 (`docs/方案设计.md` §3.1/§9.2): a second, independent secret from
     # `runtime_secret` — the latter reaches the renderer via preload and can

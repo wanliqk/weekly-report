@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import Clock, utc_now
+from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.timezone import to_shanghai
 from app.core.ulid import generate_ulid
@@ -317,11 +318,16 @@ class WeComSyncService:
         client: WeComClientLike | None = None,
         client_factory: Callable[[], WeComClientLike] | None = None,
         clock: Clock = utc_now,
+        settings: Settings | None = None,
     ) -> None:
         self._session = session
         self._injected_client = client
         self._client_factory = client_factory
         self._clock = clock
+        # See `WeComConnectionService`'s matching comment: threaded in via
+        # `Depends(get_app_settings)`, never read from the global
+        # `get_settings()` singleton inside this Service.
+        self._settings = settings
         self._records = WeComDailySyncRecordRepository(session)
         self._profiles = WeComSyncProfileRepository(session)
         self._bindings = WeComUserBindingRepository(session)
@@ -332,7 +338,10 @@ class WeComSyncService:
             return self._client_factory()
         from app.integrations.wecom.client import WeComInternalClient
 
-        return WeComInternalClient()
+        debug_raw_body = (
+            self._settings.wecom_debug_raw_body if self._settings is not None else False
+        )
+        return WeComInternalClient(debug_raw_body=debug_raw_body)
 
     async def _require_connected_binding(self, owner_id: str) -> WeComUserBinding:
         binding = await self._bindings.get_for_owner(owner_id)

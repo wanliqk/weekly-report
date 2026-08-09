@@ -19,6 +19,7 @@ from typing import Any, Literal
 import httpx
 import pytest
 
+from app.core.wecom_logging import WECOM_RAW_LOGGER_NAME
 from app.integrations.wecom.client import (
     _MAX_JOURNAL_ENTRIES,
     WeComAuthExpired,
@@ -449,6 +450,9 @@ async def test_get_template_info_business_code_rejected() -> None:
         await client.aclose()
     assert excinfo.value.biz_code == 12345
     assert excinfo.value.biz_message == "denied"
+    assert excinfo.value.detail is not None
+    assert "head.ret" in excinfo.value.detail
+    assert "12345" not in excinfo.value.detail
 
 
 async def test_list_journals_business_code_rejected() -> None:
@@ -465,6 +469,8 @@ async def test_list_journals_business_code_rejected() -> None:
         await client.aclose()
     assert excinfo.value.biz_code == 100
     assert excinfo.value.biz_message == "denied"
+    assert excinfo.value.detail is not None
+    assert "errcode" in excinfo.value.detail
 
 
 async def test_submit_daily_business_code_rejected() -> None:
@@ -481,6 +487,8 @@ async def test_submit_daily_business_code_rejected() -> None:
         await client.aclose()
     assert excinfo.value.biz_code == 1
     assert excinfo.value.biz_message == "denied"
+    assert excinfo.value.detail is not None
+    assert "head.ret" in excinfo.value.detail
 
 
 async def test_business_message_is_bounded_length() -> None:
@@ -543,6 +551,7 @@ async def test_list_journals_business_rejection_is_logged(
     diagnostics = record.wecom_diagnostics  # type: ignore[attr-defined]
     assert diagnostics["business_code"] == 100
     assert diagnostics["business_message"] == "no permission"
+    assert "errcode" in diagnostics["schema_paths"]
 
 
 async def test_submit_daily_business_rejection_is_logged(
@@ -572,6 +581,69 @@ async def test_submit_daily_business_rejection_is_logged(
     diagnostics = record.wecom_diagnostics  # type: ignore[attr-defined]
     assert diagnostics["business_code"] == 1
     assert diagnostics["business_message"] == "duplicate submission"
+    assert "head.ret" in diagnostics["schema_paths"]
+
+
+async def test_list_journals_non_numeric_errcode_still_yields_key_diagnostics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Regression for a real production observation: a live response whose
+    `errcode` doesn't coerce to a normal integer (e.g. the endpoint has moved
+    to a different success-signalling shape, mirroring the `head`-envelope
+    drift already seen on the other two endpoints) previously surfaced only
+    as an opaque `business_code=-1` with no way to tell *what* the response
+    actually looked like. `schema_paths` now always accompanies it."""
+    payload: dict[str, Any] = {"errcode": None, "head": {"ret": 0}, "body": {"entrys": []}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, payload)
+
+    target_logger = _enable_client_logger()
+    was_disabled = target_logger.disabled
+    try:
+        client = WeComInternalClient(transport=httpx.MockTransport(handler))
+        try:
+            with caplog.at_level(logging.DEBUG, logger="app.integrations.wecom.client"):
+                with pytest.raises(WeComBusinessRejected) as excinfo:
+                    await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+        finally:
+            await client.aclose()
+    finally:
+        target_logger.disabled = was_disabled
+
+    assert excinfo.value.biz_code == -1
+    assert excinfo.value.biz_message is not None
+    assert "None" in excinfo.value.biz_message
+    assert excinfo.value.detail is not None
+    assert "head.ret" in excinfo.value.detail
+    assert "body.entrys" in excinfo.value.detail
+
+    diagnostics = caplog.records[0].wecom_diagnostics  # type: ignore[attr-defined]
+    assert "head.ret" in diagnostics["schema_paths"]
+    assert diagnostics["business_message"] == excinfo.value.biz_message
+
+
+async def test_list_journals_empty_string_errcode_is_described_not_silent() -> None:
+    """A real production observation: `errcode` came back as an empty string
+    (no `errmsg` key at all) rather than the documented `0`/non-zero int.
+    Whether that's WeCom's own quirky "success" shape or a genuine rejection
+    is exactly what the previous silent `business_code=-1` couldn't answer —
+    this asserts the description says *what* was wrong, not just `-1`."""
+    payload = {"errcode": "", "entrys": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, payload)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(WeComBusinessRejected) as excinfo:
+            await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+    finally:
+        await client.aclose()
+
+    assert excinfo.value.biz_code == -1
+    assert excinfo.value.biz_message is not None
+    assert "''" in excinfo.value.biz_message
 
 
 # -- HTML login-page responses --------------------------------------------
@@ -748,6 +820,117 @@ async def test_submit_daily_missing_answer_replys_is_outcome_uncertain() -> None
             await client.submit_daily(_valid_cookie_jar(), _submit_payload())
     finally:
         await client.aclose()
+
+
+# -- explicit, off-by-default raw request/response body debug switch --------
+#
+# `Settings.wecom_debug_raw_body` (plumbed to the Client as the constructor
+# keyword below) is a deliberate, user-authorized troubleshooting exception
+# to the "no body in logs" rule — but the Cookie/header boundary must hold
+# regardless of it, since this Client never has a way to pass a header into
+# the raw-body logger to begin with.
+
+
+def _enable_raw_logger() -> logging.Logger:
+    target_logger = logging.getLogger(WECOM_RAW_LOGGER_NAME)
+    target_logger.disabled = False
+    return target_logger
+
+
+async def test_raw_debug_disabled_by_default_emits_no_raw_records(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    raw_logger = _enable_raw_logger()
+    was_disabled = raw_logger.disabled
+    try:
+        client = WeComInternalClient(transport=httpx.MockTransport(handler))
+        try:
+            with caplog.at_level(logging.DEBUG, logger=WECOM_RAW_LOGGER_NAME):
+                await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+        finally:
+            await client.aclose()
+    finally:
+        raw_logger.disabled = was_disabled
+
+    assert caplog.records == []
+
+
+async def test_raw_debug_enabled_logs_request_and_response_bodies_without_cookie(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    secret_cookie_value = "SYNTHETIC_TOK_00000000000000"
+    jar = _valid_cookie_jar(sid="SYNTHETIC_WEDOC_SID_RAW_TEST")
+
+    raw_logger = _enable_raw_logger()
+    was_disabled = raw_logger.disabled
+    try:
+        client = WeComInternalClient(transport=httpx.MockTransport(handler), debug_raw_body=True)
+        try:
+            with caplog.at_level(logging.DEBUG, logger=WECOM_RAW_LOGGER_NAME):
+                await client.get_template_info(jar, "SYNTHETIC-FORM-RAW-TEST")
+        finally:
+            await client.aclose()
+    finally:
+        raw_logger.disabled = was_disabled
+
+    assert len(caplog.records) == 2
+    request_message = caplog.records[0].getMessage()
+    response_message = caplog.records[1].getMessage()
+
+    assert "direction=request" in request_message
+    assert "SYNTHETIC-FORM-RAW-TEST" in request_message
+    assert "direction=response" in response_message
+    assert "SYNTHETIC-TEMPLATE-0000000000000001" in response_message
+
+    for message in (request_message, response_message):
+        assert secret_cookie_value not in message
+        assert "SYNTHETIC_WEDOC_SID_RAW_TEST" not in message
+        assert "Cookie" not in message
+
+
+async def test_raw_debug_covers_submit_daily_multipart_request_too(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    response_fixture = _load_json_fixture("answer_page_response.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, response_fixture)
+
+    secret_cookie_value = "SYNTHETIC_TOK_00000000000000"
+    jar = _valid_cookie_jar()
+    payload = _submit_payload(
+        items=[WeComAnswerItem(question_id="1000000002", text_reply="真实日报内容示例")]
+    )
+
+    raw_logger = _enable_raw_logger()
+    was_disabled = raw_logger.disabled
+    try:
+        client = WeComInternalClient(transport=httpx.MockTransport(handler), debug_raw_body=True)
+        try:
+            with caplog.at_level(logging.DEBUG, logger=WECOM_RAW_LOGGER_NAME):
+                await client.submit_daily(jar, payload)
+        finally:
+            await client.aclose()
+    finally:
+        raw_logger.disabled = was_disabled
+
+    assert len(caplog.records) == 2
+    request_message = caplog.records[0].getMessage()
+    assert "direction=request" in request_message
+    # This is the one call where the raw body genuinely is real report text —
+    # confirms the switch does what it says, not that it's silently no-op'd.
+    assert "真实日报内容示例" in request_message
+    assert secret_cookie_value not in request_message
 
 
 # -- timeout classification -------------------------------------------------

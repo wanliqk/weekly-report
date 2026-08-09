@@ -15,6 +15,20 @@ WECOM_LOG_FILE_NAME: Final = "wecom.log"
 WECOM_LOG_MAX_BYTES: Final = 2 * 1024 * 1024
 WECOM_LOG_BACKUP_COUNT: Final = 5
 
+# A deliberately separate logger/file from `WECOM_LOGGER_NAME`/`wecom.log`:
+# `Settings.wecom_debug_raw_body` is an explicit, user-authorized,
+# off-by-default troubleshooting exception (see `config.py`'s comment) that
+# writes raw request/response *bodies* here — never headers, never Cookie
+# values, that boundary holds regardless of this switch. Kept in its own
+# file so `wecom.log`'s "safe to share" guarantee never depends on whether
+# this switch happened to be on at some point.
+WECOM_RAW_LOGGER_NAME: Final = "app.integrations.wecom.raw"
+WECOM_RAW_LOG_FILE_NAME: Final = "wecom-raw-debug.log"
+WECOM_RAW_LOG_MAX_BYTES: Final = 2 * 1024 * 1024
+WECOM_RAW_LOG_BACKUP_COUNT: Final = 2
+_MAX_RAW_BODY_LENGTH: Final = 20_000
+_ALLOWED_RAW_DIRECTIONS: Final = frozenset({"request", "response"})
+
 _DIAGNOSTICS_ATTRIBUTE: Final = "wecom_diagnostics"
 _ALLOWED_PATH_TEMPLATES: Final = frozenset(
     {
@@ -54,6 +68,10 @@ _JWT_PATTERN: Final = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A
 
 
 class _WeComRotatingFileHandler(RotatingFileHandler):
+    pass
+
+
+class _WeComRawDebugFileHandler(RotatingFileHandler):
     pass
 
 
@@ -115,6 +133,24 @@ class _WeComLogFormatter(logging.Formatter):
         return _scrub_protected_text(rendered)
 
 
+class _WeComRawDebugFormatter(logging.Formatter):
+    """Formats raw-body debug records. Unlike `_WeComLogFormatter`, the
+    message itself carries the (potentially large, potentially real report
+    content) body rather than an allowlisted-key diagnostics dict — but the
+    same unconditional credential-pattern scrub still runs, as a defense-in-
+    depth backstop in case a body ever happened to contain a Cookie/token-
+    shaped substring."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+        )
+
+    def format(self, record: logging.LogRecord) -> str:
+        return _scrub_protected_text(super().format(record))
+
+
 def configure_wecom_logging(
     settings: Settings,
     *,
@@ -168,6 +204,91 @@ def shutdown_wecom_logging() -> None:
             handler.close()
     target_logger.setLevel(logging.NOTSET)
     target_logger.propagate = True
+
+
+def configure_wecom_raw_debug_logging(
+    settings: Settings,
+    *,
+    max_bytes: int = WECOM_RAW_LOG_MAX_BYTES,
+    backup_count: int = WECOM_RAW_LOG_BACKUP_COUNT,
+) -> Path | None:
+    """Attach the raw-body debug file handler only when explicitly enabled.
+
+    When `settings.wecom_debug_raw_body` is `False` (the default), this
+    guarantees the raw logger has no handler and is disabled — a stray
+    `log_wecom_raw_body` call from anywhere goes nowhere, on top of call
+    sites already gating on the same flag. Returns the log path when
+    enabled, `None` otherwise.
+    """
+
+    target_logger = logging.getLogger(WECOM_RAW_LOGGER_NAME)
+    for handler in list(target_logger.handlers):
+        if isinstance(handler, _WeComRawDebugFileHandler):
+            target_logger.removeHandler(handler)
+            handler.close()
+
+    if not settings.wecom_debug_raw_body:
+        target_logger.setLevel(logging.NOTSET)
+        target_logger.disabled = True
+        target_logger.propagate = False
+        return None
+
+    log_path = settings.log_dir / WECOM_RAW_LOG_FILE_NAME
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = _WeComRawDebugFileHandler(
+        log_path,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(_WeComRawDebugFormatter())
+    target_logger.addHandler(handler)
+    target_logger.setLevel(logging.DEBUG)
+    target_logger.disabled = False
+    target_logger.propagate = False
+
+    logging.getLogger(WECOM_LOGGER_NAME).warning(
+        "event=raw_debug_enabled outcome=warning "
+        "detail=wecom-raw-debug.log 正在记录未脱敏的请求/响应正文(可能含真实日报内容);"
+        "调试结束后请立即关闭 WEEKLY_REPORT_WECOM_DEBUG_RAW_BODY 并删除该文件"
+    )
+    return log_path
+
+
+def shutdown_wecom_raw_debug_logging() -> None:
+    """Close only handlers installed by :func:`configure_wecom_raw_debug_logging`."""
+
+    target_logger = logging.getLogger(WECOM_RAW_LOGGER_NAME)
+    for handler in list(target_logger.handlers):
+        if isinstance(handler, _WeComRawDebugFileHandler):
+            target_logger.removeHandler(handler)
+            handler.close()
+    target_logger.setLevel(logging.NOTSET)
+    target_logger.propagate = True
+
+
+def log_wecom_raw_body(
+    logger: logging.Logger,
+    *,
+    direction: str,
+    path_template: str,
+    body: str,
+) -> None:
+    """Write one raw request/response *body* to `wecom-raw-debug.log`.
+
+    No header/Cookie parameter exists on this function, by design — callers
+    (`WeComInternalClient`) never have a way to pass one in, independent of
+    whether the caller checked `settings.wecom_debug_raw_body` first. `body`
+    is still passed through the same credential-pattern scrub as every other
+    WeCom log line, and truncated defensively.
+    """
+
+    if direction not in _ALLOWED_RAW_DIRECTIONS or path_template not in _ALLOWED_PATH_TEMPLATES:
+        return
+    if len(body) > _MAX_RAW_BODY_LENGTH:
+        body = f"{body[:_MAX_RAW_BODY_LENGTH]}...[TRUNCATED]"
+    logger.debug("direction=%s path=%s body=%s", direction, path_template, body)
 
 
 def log_wecom_event(
