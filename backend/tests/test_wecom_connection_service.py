@@ -23,6 +23,7 @@ from app.services.wecom_connection import (
     WeComNotConnectedError,
     WeComProfileVersionConflictError,
     WeComTemplateStructureUnresolvedError,
+    build_question_spec,
 )
 
 
@@ -50,6 +51,23 @@ async def _bootstrap_user(session_factory: object, *, username: str = "owner") -
         return await BootstrapService(session).bootstrap(
             username=username, password=STAGE5_PASSWORD, display_name="Owner"
         )
+
+
+def test_build_question_spec_supports_live_text_reply_type() -> None:
+    item = WeComQuestionItem(
+        question_id="SYNTHETIC-LIVE-TEXT-QUESTION",
+        title="今日工作",
+        reply_type=24,
+        must_reply=True,
+        pos=2,
+    )
+
+    spec = build_question_spec(item, submit_order=2)
+
+    assert spec is not None
+    assert spec.question_id == "SYNTHETIC-LIVE-TEXT-QUESTION"
+    assert spec.reply_type == "text"
+    assert spec.submit_order == 2
 
 
 async def test_validate_connection_creates_binding_and_active_profile(
@@ -142,6 +160,9 @@ async def test_validate_connection_rejects_incomplete_template_and_persists_noth
     assert diagnostics["date_candidate_count"] == 0
     assert diagnostics["today_candidate_count"] == 1
     assert diagnostics["tomorrow_candidate_count"] == 0
+    assert diagnostics["date_reply_type"] is None
+    assert diagnostics["today_reply_type"] == 1
+    assert diagnostics["tomorrow_reply_type"] is None
 
     async with session_factory() as session:
         assert await WeComConnectionService(session).get_binding(user.id) is None

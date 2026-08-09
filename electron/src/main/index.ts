@@ -125,6 +125,7 @@ function createWindow(): void {
         loadURL: (url) => authWindow.loadURL(url),
         isDestroyed: () => authWindow.isDestroyed(),
         close: () => authWindow.close(),
+        destroy: () => authWindow.destroy(),
         on: (event, listener) => {
           authWindow.on(event, listener)
         }

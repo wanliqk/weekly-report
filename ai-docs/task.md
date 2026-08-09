@@ -196,7 +196,8 @@ uv sync --directory backend --frozen
 | WECOM-06 | 主 Agent | 同步编排与 API | WECOM-04、WECOM-05 | DONE | 连接/同步 Service、幂等/重复/uncertain 状态机、公开与 Main-only API、并发/权限测试 |
 | WECOM-07 | 主 Agent | Electron/Vue 交互 | WECOM-03、WECOM-06 | DONE | 设置连接/映射、日报预览/同步、历史/重试 UI、重启安全的 Main 凭证槽恢复及前后端测试 |
 | WECOM-07A | 主 Agent | 企业微信轮转诊断日志 | WECOM-04、WECOM-06 | DONE | 独立 `wecom.log`、2 MiB × 5 轮转、默认脱敏/详细诊断开关、凭证强制保护和日志测试 |
-| WECOM-08 | 主 Agent | 全链路验收与发布 | WECOM-02..07 | TODO | 全量门禁、E2E、受控企业微信测试账号冒烟、生产打包升级、凭证扫描和独立安全审查 |
+| WECOM-07B | 主 Agent | 真实连接兼容与扫码闪退修复 | WECOM-07、WECOM-07A | DONE | 登录窗口安全销毁顺序、`ERR_ABORTED` 跳转容错、live 协议双形状兼容、有界 key/枚举诊断和真实连接成功验证 |
+| WECOM-08 | 主 Agent | 全链路验收与发布 | WECOM-07B | TODO | 全量门禁、E2E、受控企业微信测试账号冒烟、生产打包升级、凭证扫描和独立安全审查 |
 
 ### WECOM-00 验证记录
 
@@ -288,6 +289,15 @@ uv sync --directory backend --frozen
 - Client 的成功、认证失效、业务拒绝、协议变化、transport failure 和 uncertain 均写分类事件；连接 Service 对三题自动识别失败单独写 `template_unresolved` 与纯计数诊断，因此下一次 502 可直接从日志判断是业务码/协议响应还是模板识别问题。
 - 新增 5 项测试（配置开关 1、日志模块 4），并扩充 Client/连接 Service 既有日志断言。定向 54 项通过；完整后端 `ruff check`、mypy strict（150 个源文件）和 pytest（465 项）通过；`ruff format --check .` 仍只报告既有 `ISS-029` 的 `app/services/export_style.py`，本任务全部涉及文件已格式化。`git diff --check` 通过（仅 Windows LF→CRLF 提示）。未修改 Electron/renderer，未启动真实企业微信登录或记录任何真实凭证/正文。
 - `WECOM-08` 状态不变：轮转诊断日志是发布验收前的可观测性补强，不替代受控真实账号连接/提交/对账、生产打包安装和独立安全审查。
+
+### WECOM-07B 验证记录
+
+- 用户真实扫码后 Electron 以 Windows `0xC0000005`（npm 十进制 `3221225477`）退出。真实复现确认扫码前稳定、扫码后企业微信 HTTP 请求已返回而 Electron 原生进程消失；根因集中在登录收尾同时调用 `BrowserWindow.close()` 与 `Session.clearStorageData()`。清理改为 `destroy()` 强制关闭并等待终态 `closed` 后再清理 Session，真实扫码后 Electron 保持运行；单测严格断言 `destroy -> closed -> clear-storage` 顺序。
+- 企业微信扫码/SSO 页面替换初始文档时，Electron `loadURL()` 会以 `ERR_ABORTED (-3)` 拒绝 Promise。控制器原先将其误判为打开失败；现在只在窗口仍存活且错误明确包含 `ERR_ABORTED` 时继续权威 `wedoc_sid` Cookie 轮询，窗口已关闭仍返回 canceled，其它 DNS/证书/`ERR_FAILED` 错误仍失败。
+- 详细模式的有界 key 路径诊断确认 live 只读响应发生三处协议漂移：`body.form/form_id` 迁移到 `body.form_info/form_info.form_id`；模板条目从 `reply_id/form_id/reply_name` 迁移到 `createvid/doc_info.form_id` 且不再提供显示名；文本题 `reply_type` 从旧值 `1` 变为 `24`（日期仍为 `11`）。Client 明确支持新旧两种已观察形状，缺失显示名保持空字符串，不拿模板名称冒充用户姓名；未知题型仍拒绝。
+- `schema_paths` 只遍历符合 ASCII 协议标识符规则的 JSON key，广度优先且限制深度 6、最多 64 条、日志值最长 4096 字符；不读取或记录任何 value。候选题型只记录三个纯数字枚举。日志模块仍以诊断键白名单和不可关闭的凭证/JWT/密钥二次清洗保护。
+- 真实账号最终验证：企业微信模板请求返回 HTTP 200，`wecom.log` 记录 `connection_validation outcome=ok`；界面完成连接，Electron 保持 4 个常驻进程，无 `ERR_ABORTED`、无闪退。该验证只覆盖连接与模板发现，未执行日报提交、重复对账、生产安装或升级，不能替代 `WECOM-08`。
+- 门禁：后端 Ruff lint、mypy strict（150 个源文件）通过，本次 6 个后端文件 Ruff format check 通过；协议/连接定向 50 项通过。清洁环境全量 471 项中，排除既有 `ISS-013` 的末字符 JWT 篡改测试后其余 **470 项全部通过**；该用例本轮再次复现已登记的 base64url 冗余位测试构造问题，与本次文件无交集。前端/Electron `npm run lint`、`npm run typecheck`、Vitest（27 文件 **255 项通过**）和 `npm run build` 均通过。主 Agent 逐文件复核未发现新的 P0/P1；本任务未派发独立 Agent 审查。
 
 阶段 3（`DB-01`/`DB-02`/`DB-03`/`API-01`/`QA-03`）已实现、通过质量门禁并创建独立提交 `8480515`；独立 Reviewer 审查仍待补齐（非阻塞）。
 

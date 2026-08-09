@@ -76,6 +76,33 @@ def test_detailed_log_includes_only_whitelisted_diagnostics(tmp_path: Path) -> N
     assert "business_code=41001" in text
 
 
+def test_detailed_log_accepts_only_bounded_protocol_schema_paths(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, redact=False)
+    configure_wecom_logging(settings)
+    logger = logging.getLogger("app.integrations.wecom.client")
+    log_wecom_event(
+        logger,
+        event="connection_validation",
+        path_template="/journal/get_template_combine_info",
+        outcome="client_error",
+        duration_ms=1,
+        diagnostics={"schema_paths": "body,body.combine_info,body.combine_info.form"},
+    )
+    log_wecom_event(
+        logger,
+        event="connection_validation",
+        path_template="/journal/get_template_combine_info",
+        outcome="client_error",
+        duration_ms=1,
+        diagnostics={"schema_paths": "body.form,Cookie=SECRET"},
+    )
+    shutdown_wecom_logging()
+
+    text = (settings.log_dir / WECOM_LOG_FILE_NAME).read_text(encoding="utf-8")
+    assert 'schema_paths="body,body.combine_info,body.combine_info.form"' in text
+    assert "Cookie=SECRET" not in text
+
+
 def test_detailed_mode_still_scrubs_credentials_and_ignores_unknown_fields(
     tmp_path: Path,
 ) -> None:

@@ -94,7 +94,7 @@
 | SEC-015 | `uncertain` 不自动重试，只能先远端对账 | Accepted for V1 | `WECOM-06` 实现（`docs/方案设计.md` §10.3/§11） | 网络超时或崩溃可能已受理，自动重试会制造重复日报；`WeComSyncService.retry()` 对 `uncertain` 状态显式拒绝（`WeComUncertainRetryBlockedError`），启动崩溃恢复只把超租约 `syncing` 转为 `uncertain`、绝不转 `failed` |
 | SEC-016 | Electron Main 不以内存变量作为当前企业微信凭证槽位的事实来源，而是按当前用户 JWT 从双鉴权 Main-only API 查询 | Accepted for V1 | `WECOM-07` 实现（`ISS-032`） | 支持应用重启和本地账号切换；后端只返回当前 JWT 用户的 opaque slot + binding status（无绑定为 `null/null`），Main 只在 `connected` 时执行同步，并用状态对账断开响应；任何槽位值都不暴露给 preload/renderer |
 | SEC-017 | 企业微信凭证删除采用 Main-only 持久待清理 marker，跨 Main/后端断开失败采用读回状态对账 | Accepted for V1 | `WECOM-07` 独立审查修复（`ISS-033`） | marker 是空文件且文件名只含随机 opaque slot，不含 Cookie/用户/表单信息；后续连接/断开前重试。断开响应异常时，只有读回仍指向原 slot 且状态非 `disconnected` 才恢复本地加密 Cookie；若已 `disconnected` 则保持删除 |
-| SEC-018 | 企业微信诊断使用独立轮转 `wecom.log`，脱敏开关只控制白名单诊断元数据 | Accepted for V1 | 用户直接指令（2026-08-09）、`WECOM-07A` | 默认 `WEEKLY_REPORT_WECOM_LOG_REDACT=true`；`false` 时可增加 HTTP 状态、固定异常类型/文案、业务码与纯结构计数，但 Cookie/JWT/运行时密钥/header/body、远端标识和日报正文始终禁止落盘，并由参数面、键白名单和 Formatter 二次清洗共同保护；2 MiB × 5 轮转 |
+| SEC-018 | 企业微信诊断使用独立轮转 `wecom.log`，脱敏开关只控制白名单诊断元数据 | Accepted for V1 | 用户直接指令（2026-08-09）、`WECOM-07A`/`WECOM-07B` | 默认 `WEEKLY_REPORT_WECOM_LOG_REDACT=true`；`false` 时可增加 HTTP 状态、固定异常类型/文案、业务码、纯结构计数、有界协议 key 路径和纯数字题型枚举；key 路径必须经过标识符正则、深度/数量/长度上限且不得读取 value。Cookie/JWT/运行时密钥/header/body、远端标识和日报正文始终禁止落盘，并由参数面、键白名单和 Formatter 二次清洗共同保护；2 MiB × 5 轮转 |
 
 ## 4. 决策变更流程
 

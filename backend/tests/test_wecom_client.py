@@ -158,6 +158,57 @@ async def test_get_template_info_success() -> None:
     assert result.questions[0].reply_type == 11
 
 
+async def test_get_template_info_supports_live_form_info_shape() -> None:
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+    form = fixture["body"].pop("form")
+    fixture["body"].pop("form_id")
+    fixture["body"]["form_info"] = form
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+    assert result.form_id == "SYNTHETIC-FORM-0000000000000000000fork"
+    assert result.template_id == "SYNTHETIC-TEMPLATE-0000000000000001"
+    assert len(result.entries) == 1
+    assert len(result.questions) == 5
+
+
+async def test_get_template_info_supports_live_template_entry_shape() -> None:
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+    fixture["body"]["entrys"] = [
+        {
+            "journalid": "SYNTHETIC-LIVE-JOURNAL-1",
+            "createtime": 1_800_000_000,
+            "createvid": "SYNTHETIC-LIVE-CREATOR-1",
+            "doc_info": {"form_id": "SYNTHETIC-LIVE-FORM-1"},
+            "content": "SYNTHETIC-IGNORED-CONTENT",
+            "template_name": "SYNTHETIC-IGNORED-TEMPLATE-NAME",
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+    entry = result.entries[0]
+    assert entry.journalid == "SYNTHETIC-LIVE-JOURNAL-1"
+    assert entry.createtime == 1_800_000_000
+    assert entry.reply_id == "SYNTHETIC-LIVE-CREATOR-1"
+    assert entry.reply_name == ""
+    assert entry.form_id == "SYNTHETIC-LIVE-FORM-1"
+
+
 async def test_list_journals_success() -> None:
     fixture = _load_json_fixture("get_journal_list_response.json")
 
@@ -536,6 +587,59 @@ async def test_get_template_info_malformed_question_item_is_schema_changed() -> 
             await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
     finally:
         await client.aclose()
+
+
+async def test_get_template_info_protocol_diagnostic_contains_only_bounded_key_paths() -> None:
+    payload = {
+        "head": {"ret": 0},
+        "body": {
+            "combine_info": {
+                "template_id": "SECRET-TEMPLATE-VALUE",
+                "form": {"question": {"items": [{"title": "SECRET-QUESTION-TITLE"}]}},
+            }
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, payload)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(WeComProtocolChanged) as caught:
+            await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+    detail = caught.value.detail
+    assert detail is not None
+    assert "body.combine_info.template_id" in detail
+    assert "body.combine_info.form.question.items[]" in detail
+    assert "SECRET-TEMPLATE-VALUE" not in detail
+    assert "SECRET-QUESTION-TITLE" not in detail
+
+
+async def test_get_template_info_entry_diagnostic_contains_keys_not_values() -> None:
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+    fixture["body"]["entrys"] = [
+        {"reply_id": "SECRET-REMOTE-ID", "reply_name": "SECRET-DISPLAY-NAME"}
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(WeComProtocolChanged) as caught:
+            await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+    detail = caught.value.detail
+    assert detail is not None
+    assert "entrys[].reply_id" in detail
+    assert "entrys[].reply_name" in detail
+    assert "SECRET-REMOTE-ID" not in detail
+    assert "SECRET-DISPLAY-NAME" not in detail
 
 
 async def test_submit_daily_missing_answer_replys_is_outcome_uncertain() -> None:

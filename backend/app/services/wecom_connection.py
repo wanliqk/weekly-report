@@ -111,14 +111,12 @@ def _map_connection_client_error(exc: WeComClientError) -> AppError:
     return AppError(code=50201, http_status=502, message="企业微信返回内容不符合已知协议")
 
 
-# Only the two `reply_type` codes actually observed for date/text questions
-# in the real template shape (`tests/fixtures/wecom/get_template_combine_info_response.json`,
-# WECOM-00's fixture confidence table: "中" — inferred from `wx-ribao.py`'s
-# code paths, not a full real capture of this specific endpoint) are mapped.
+# Only the `reply_type` codes actually observed for date/text questions are
+# mapped: legacy fixture text=1/date=11, live 2026-08 response text=24/date=11.
 # A question whose `reply_type` isn't one of these is never a valid
 # date/today/tomorrow candidate for this integration; encountering one just
 # means "this isn't the question we're looking for", not a crash.
-_REPLY_TYPE_MAP: dict[int, WeComReplyType] = {1: "text", 11: "date"}
+_REPLY_TYPE_MAP: dict[int, WeComReplyType] = {1: "text", 11: "date", 24: "text"}
 
 
 def build_question_spec(item: WeComQuestionItem, *, submit_order: int) -> WeComQuestionSpec | None:
@@ -189,6 +187,10 @@ def _select_target_question_specs(
 def _template_resolution_diagnostics(
     questions: list[WeComQuestionItem],
 ) -> dict[str, str | int | bool | None]:
+    def single_candidate_reply_type(hints: tuple[str, ...]) -> int | None:
+        candidates = [item for item in questions if any(hint in item.title for hint in hints)]
+        return candidates[0].reply_type if len(candidates) == 1 else None
+
     return {
         "question_count": len(questions),
         "recognized_question_count": sum(item.reply_type in _REPLY_TYPE_MAP for item in questions),
@@ -201,6 +203,9 @@ def _template_resolution_diagnostics(
         "tomorrow_candidate_count": sum(
             any(hint in item.title for hint in _TOMORROW_HINTS) for item in questions
         ),
+        "date_reply_type": single_candidate_reply_type(_DATE_HINTS),
+        "today_reply_type": single_candidate_reply_type(_TODAY_HINTS),
+        "tomorrow_reply_type": single_candidate_reply_type(_TOMORROW_HINTS),
         "unique_submit_order_count": len({item.pos for item in questions if item.pos is not None}),
     }
 
@@ -269,6 +274,7 @@ class WeComConnectionService:
                     diagnostics={
                         "error_type": type(exc).__name__,
                         "error_message": exc.message,
+                        **({"schema_paths": exc.detail} if exc.detail is not None else {}),
                         **(
                             {"business_code": exc.biz_code}
                             if isinstance(exc, WeComBusinessRejected)

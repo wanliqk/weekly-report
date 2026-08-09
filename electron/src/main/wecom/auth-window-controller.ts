@@ -32,6 +32,7 @@ export interface WeComAuthWindow {
   loadURL: (url: string) => Promise<void>
   isDestroyed: () => boolean
   close: () => void
+  destroy: () => void
   on: (event: 'closed', listener: () => void) => void
 }
 
@@ -63,6 +64,10 @@ function defaultPartitionSuffix(): string {
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isNavigationAborted(error: unknown): boolean {
+  return error instanceof Error && /\bERR_ABORTED\b(?:\s*\(-3\))?/.test(error.message)
 }
 
 /**
@@ -197,10 +202,20 @@ export class WeComAuthWindowController {
     try {
       await window.loadURL(WECOM_LOGIN_ENTRY_URL)
     } catch (error) {
-      await this.cleanup(session, window)
-      return {
-        status: 'failed',
-        reason: error instanceof Error ? error.message : '无法打开企业微信登录页面'
+      if (this.canceled || windowClosed) {
+        await this.cleanup(session, window)
+        return { status: 'canceled' }
+      }
+      // WeCom replaces the initial document during its SSO/QR redirect flow.
+      // Electron reports that interrupted initial navigation as ERR_ABORTED
+      // even though the replacement page remains usable. Continue with the
+      // authoritative marker-Cookie poll in that one narrow case.
+      if (!isNavigationAborted(error)) {
+        await this.cleanup(session, window)
+        return {
+          status: 'failed',
+          reason: error instanceof Error ? error.message : '无法打开企业微信登录页面'
+        }
       }
     }
 
@@ -219,7 +234,15 @@ export class WeComAuthWindowController {
   private async cleanup(session: WeComAuthSessionHandle, window: WeComAuthWindow): Promise<void> {
     this.activeWindow = null
     if (!window.isDestroyed()) {
-      window.close()
+      // `BrowserWindow.close()` only starts an asynchronous close and may be
+      // canceled by page lifecycle handlers. Clearing Chromium storage while
+      // that renderer is still tearing down can crash the Electron browser
+      // process on Windows. Force the isolated login window down and wait for
+      // Electron's terminal `closed` event before touching its Session.
+      await new Promise<void>((resolve) => {
+        window.on('closed', resolve)
+        window.destroy()
+      })
     }
     try {
       await session.clearStorageData()

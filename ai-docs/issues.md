@@ -44,6 +44,8 @@
 | ISS-032 | P1 | RESOLVED | WECOM-07 半成品只在 Electron Main 进程内存保存当前 `credential_slot`，应用重启或本地账号切换后无法从后端绑定恢复槽位 | 新增双鉴权且不进入 OpenAPI 的 Main-only 查询，按当前 JWT 返回本人 `credential_slot + connection_status`；连接、断开、执行均即时查询，跨用户为 `null/null`，槽位不进入 preload/renderer。旧槽删除失败会持久登记只含 opaque slot 的清理 marker，并在后续连接/断开前重试 | 随 `WECOM-07` 阶段提交交付；重启/跨用户/持久清理/状态对账测试通过，独立复审无剩余 P0/P1/P2 |
 | ISS-033 | P2 | RESOLVED | 凭证清理与断开连接存在部分失败：校验失败/重连后删除槽位失败曾被静默吞掉；本地凭证删除后若后端断开响应异常，可能出现前后端状态不一致 | `deleteEventually()` 在删除前持久写入空 marker（文件名只含随机 slot），失败后不丢失清理目标；下次连接/断开先 `retryPendingDeletes()`。断开异常时重新查询同一用户的 `credential_slot + connection_status`：`disconnected` 证明后端已提交，不恢复 Cookie；仍指向原槽才补偿恢复；无法对账则保留本地删除并提示重试 | Main IPC、Credential Store、Bridge Client 与真实后端 API 契约测试覆盖；独立两轮复审最终确认无剩余 P0/P1/P2 |
 | ISS-034 | P2 | RESOLVED | 历史页原先允许未连接时把 `failed` 先迁移为 `pending`，但不为 `pending` 提供继续执行入口，Main/sidecar 失败后记录会滞留且无法在历史页恢复 | 未连接时历史动作禁用并提示先重连；`pending` 显示“同步”入口，只执行 Main IPC 而不重复调用 retry；异常后重新加载服务端真实状态。`failed` 仍需显式确认后才 retry → execute | `weComSyncActionLabel` 与全量前端测试通过；独立复审确认该 P2 已关闭 |
+| ISS-035 | P1 | RESOLVED | 企业微信扫码成功后 Electron 以 `0xC0000005` 原生访问冲突退出；SSO 页面替换初始导航时还会把 `ERR_ABORTED (-3)` 误报为打开失败 | 登录收尾原先对仍在关闭的 BrowserWindow 同时执行全 Session 清理；现改为 `destroy()` 并等待 `closed` 后再清理。窗口仍存活时只对白名单 `ERR_ABORTED` 继续 Cookie 轮询，关闭则 canceled，其它加载失败不放行 | `auth-window-controller` 19 项测试覆盖销毁顺序/错误分流；多轮真实扫码确认主应用保持 4 个常驻进程且不再出现 ERR_ABORTED |
+| ISS-036 | P1 | RESOLVED | 企业微信 live 模板响应与中置信度合成 fixture 发生协议漂移，导致连接依次报 502/模板无法识别 | 用不含 value 的有界 key 路径和纯数字题型诊断确认新形状，明确兼容 `form_info/form_info.form_id`、`createvid/doc_info.form_id`、文本题型 `24`，同时保留旧形状；显示名缺失保持空字符串，未知结构/题型继续拒绝 | Client/连接/日志定向 50 项通过；真实模板请求最终 `connection_validation outcome=ok`。长期非官方协议风险仍由 `ISS-027` 跟踪 |
 
 ## 2. 非阻塞产品/发布风险
 

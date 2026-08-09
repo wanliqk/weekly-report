@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+from collections import deque
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -63,6 +65,9 @@ _SID_COOKIE_NAME: Final = "wedoc_sid"
 # rather than parsed (docs/方案设计.md §8 point 3: "JSON 深度/大小合理性").
 _MAX_RESPONSE_BYTES: Final = 5_000_000
 _MAX_JSON_DEPTH: Final = 32
+_MAX_SCHEMA_DIAGNOSTIC_DEPTH: Final = 6
+_MAX_SCHEMA_DIAGNOSTIC_PATHS: Final = 64
+_SCHEMA_KEY_PATTERN: Final = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 
 # "远端列表接口的分页必须有最大页数和总项数限制,避免异常响应导致无限扫描"
 # (docs/方案设计.md §10.2). This Client only makes one call per invocation (no
@@ -238,6 +243,64 @@ def _json_depth(value: Any, *, current: int = 0) -> int:
             return current + 1
         return max(_json_depth(v, current=current + 1) for v in value)
     return current
+
+
+def _schema_paths(value: Any) -> str:
+    """Return a bounded breadth-first list of JSON key paths, never values.
+
+    This is diagnostic-only metadata for an explicitly unredacted ``wecom.log``.
+    Remote keys must look like protocol identifiers; arbitrary/user-controlled
+    strings are skipped. Lists inspect only their first item because every value
+    is deliberately forbidden from this diagnostic surface.
+    """
+
+    paths: list[str] = []
+    queue: deque[tuple[Any, str, int]] = deque([(value, "", 0)])
+    while queue and len(paths) < _MAX_SCHEMA_DIAGNOSTIC_PATHS:
+        current, prefix, depth = queue.popleft()
+        if depth >= _MAX_SCHEMA_DIAGNOSTIC_DEPTH:
+            continue
+        if isinstance(current, dict):
+            for key in sorted(current):
+                if len(paths) >= _MAX_SCHEMA_DIAGNOSTIC_PATHS:
+                    break
+                if not isinstance(key, str) or _SCHEMA_KEY_PATTERN.fullmatch(key) is None:
+                    continue
+                path = f"{prefix}.{key}" if prefix else key
+                paths.append(path)
+                child = current[key]
+                if isinstance(child, dict | list):
+                    queue.append((child, path, depth + 1))
+        elif isinstance(current, list) and current:
+            list_path = f"{prefix}[]"
+            paths.append(list_path)
+            first = current[0]
+            if isinstance(first, dict | list):
+                queue.append((first, list_path, depth + 1))
+    return ",".join(paths)
+
+
+def _normalize_template_entry(entry: Any) -> Any:
+    """Normalize the two observed read-only template-entry shapes.
+
+    The current live response uses ``createvid`` and ``doc_info.form_id``;
+    the legacy synthetic contract used ``reply_id`` and a top-level
+    ``form_id``. The live shape no longer carries a display name, so keep it
+    empty instead of guessing from unrelated template/content fields.
+    """
+
+    if not isinstance(entry, dict):
+        return entry
+    normalized = dict(entry)
+    if "reply_id" not in normalized:
+        normalized["reply_id"] = entry.get("createvid")
+    if "reply_name" not in normalized:
+        normalized["reply_name"] = ""
+    if "form_id" not in normalized:
+        doc_info = entry.get("doc_info")
+        if isinstance(doc_info, dict):
+            normalized["form_id"] = doc_info.get("form_id")
+    return normalized
 
 
 def _parse_json_response(response: httpx.Response, *, on_send: bool) -> dict[str, Any]:
@@ -544,21 +607,37 @@ class WeComInternalClient:
             raise WeComProtocolChanged("响应缺少 body 节点")
 
         template_id = body.get("template_id")
-        form_id = body.get("form_id")
         entrys = body.get("entrys")
         form = body.get("form")
+        if not isinstance(form, dict):
+            # The live 2026-08 WeCom response moved the same form object from
+            # `body.form` to `body.form_info`. Keep the synthetic legacy shape
+            # supported because both shapes are read-only and unambiguous.
+            form = body.get("form_info")
+        form_id = body.get("form_id")
+        if not isinstance(form_id, str | int) and isinstance(form, dict):
+            form_id = form.get("form_id")
         if (
             not isinstance(template_id, str | int)
             or not isinstance(form_id, str | int)
             or not isinstance(entrys, list)
             or not isinstance(form, dict)
         ):
-            raise WeComProtocolChanged("响应 body 缺少 template_id/form_id/entrys/form 节点")
+            raise WeComProtocolChanged(
+                "响应 body 缺少 template_id/form_id/entrys/form/form_info 节点",
+                detail=_schema_paths(payload),
+            )
 
         try:
-            entries = [WeComTemplateEntry.model_validate(entry) for entry in entrys]
+            entries = [
+                WeComTemplateEntry.model_validate(_normalize_template_entry(entry))
+                for entry in entrys
+            ]
         except ValidationError as exc:
-            raise WeComProtocolChanged("body.entrys 元素结构与预期不符") from exc
+            raise WeComProtocolChanged(
+                "body.entrys 元素结构与预期不符",
+                detail=_schema_paths({"entrys": entrys}),
+            ) from exc
 
         question = form.get("question")
         items = question.get("items") if isinstance(question, dict) else None

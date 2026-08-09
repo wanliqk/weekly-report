@@ -27,17 +27,22 @@ _ALLOWED_DIAGNOSTIC_KEYS: Final = frozenset(
     {
         "business_code",
         "date_candidate_count",
+        "date_reply_type",
         "error_message",
         "error_type",
         "http_status",
         "question_count",
         "recognized_question_count",
+        "schema_paths",
         "today_candidate_count",
+        "today_reply_type",
         "tomorrow_candidate_count",
+        "tomorrow_reply_type",
         "unique_submit_order_count",
     }
 )
 _SAFE_LABEL_PATTERN: Final = re.compile(r"^[a-z0-9_.-]{1,64}$")
+_SAFE_SCHEMA_PATHS_PATTERN: Final = re.compile(r"^[A-Za-z0-9_.\[\],]{1,4096}$")
 _AUTHORIZATION_PATTERN: Final = re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+")
 _COOKIE_PATTERN: Final = re.compile(r"(?i)((?:set-cookie|cookie)\s*[:=]\s*)[^\r\n]+")
 _SECRET_ASSIGNMENT_PATTERN: Final = re.compile(
@@ -67,12 +72,18 @@ def _safe_diagnostics(
 ) -> dict[str, str | int | bool | None]:
     if diagnostics is None:
         return {}
-    return {
-        key: value
-        for key, value in diagnostics.items()
-        if key in _ALLOWED_DIAGNOSTIC_KEYS
-        and (value is None or isinstance(value, str | int | bool))
-    }
+    safe: dict[str, str | int | bool | None] = {}
+    for key, value in diagnostics.items():
+        if key not in _ALLOWED_DIAGNOSTIC_KEYS or not (
+            value is None or isinstance(value, str | int | bool)
+        ):
+            continue
+        if key == "schema_paths" and (
+            not isinstance(value, str) or _SAFE_SCHEMA_PATHS_PATTERN.fullmatch(value) is None
+        ):
+            continue
+        safe[key] = value
+    return safe
 
 
 def _format_diagnostic_value(value: str | int | bool | None) -> str:

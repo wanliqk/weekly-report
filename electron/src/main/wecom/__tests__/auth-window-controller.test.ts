@@ -198,33 +198,54 @@ interface FakeWindowHandle {
   window: WeComAuthWindow
   loadURL: ReturnType<typeof vi.fn>
   close: ReturnType<typeof vi.fn>
+  destroy: ReturnType<typeof vi.fn>
   triggerClosed: () => void
 }
 
-function fakeWindow(loadURLImpl?: () => Promise<void>): FakeWindowHandle {
+function fakeWindow(
+  loadURLImpl?: () => Promise<void>,
+  lifecycleEvents?: string[]
+): FakeWindowHandle {
   let destroyed = false
-  let closedListener: (() => void) | null = null
-  const close = vi.fn(() => {
+  const closedListeners: Array<() => void> = []
+  const emitClosed = (): void => {
     destroyed = true
-    closedListener?.()
+    lifecycleEvents?.push('closed')
+    for (const listener of closedListeners) {
+      listener()
+    }
+  }
+  const close = vi.fn(() => {
+    lifecycleEvents?.push('close')
+    emitClosed()
+  })
+  const destroy = vi.fn(() => {
+    lifecycleEvents?.push('destroy')
+    emitClosed()
   })
   const loadURL = vi.fn(loadURLImpl ?? (async () => {}))
   const window: WeComAuthWindow = {
     loadURL,
     isDestroyed: () => destroyed,
     close,
+    destroy,
     on: (_event, listener) => {
-      closedListener = listener
+      closedListeners.push(listener)
     }
   }
-  return { window, loadURL, close, triggerClosed: () => closedListener?.() }
+  return { window, loadURL, close, destroy, triggerClosed: emitClosed }
 }
 
-function fakeSessionHandle(cookieJar: WeComCookie[] = []): {
+function fakeSessionHandle(
+  cookieJar: WeComCookie[] = [],
+  lifecycleEvents?: string[]
+): {
   handle: WeComAuthSessionHandle
   clearStorageData: ReturnType<typeof vi.fn>
 } {
-  const clearStorageData = vi.fn(async () => {})
+  const clearStorageData = vi.fn(async () => {
+    lifecycleEvents?.push('clear-storage')
+  })
   const handle: WeComAuthSessionHandle = {
     cookies: { get: vi.fn(async () => cookieJar) },
     clearStorageData
@@ -235,8 +256,9 @@ function fakeSessionHandle(cookieJar: WeComCookie[] = []): {
 describe('WeComAuthWindowController', () => {
   it('returns success with the cookie jar and tears down the window/session', async () => {
     const jar = [cookie()]
-    const { handle, clearStorageData } = fakeSessionHandle(jar)
-    const { window, close } = fakeWindow()
+    const lifecycleEvents: string[] = []
+    const { handle, clearStorageData } = fakeSessionHandle(jar, lifecycleEvents)
+    const { window, destroy } = fakeWindow(undefined, lifecycleEvents)
 
     const controller = new WeComAuthWindowController({
       createSession: () => handle,
@@ -249,8 +271,9 @@ describe('WeComAuthWindowController', () => {
     const outcome = await controller.connect()
 
     expect(outcome).toEqual({ status: 'success', cookieJar: jar })
-    expect(close).toHaveBeenCalledTimes(1)
+    expect(destroy).toHaveBeenCalledTimes(1)
     expect(clearStorageData).toHaveBeenCalledTimes(1)
+    expect(lifecycleEvents).toEqual(['destroy', 'closed', 'clear-storage'])
   })
 
   it('uses a distinct, non-persist partition name on each call', async () => {
@@ -278,7 +301,7 @@ describe('WeComAuthWindowController', () => {
 
   it('reports a clean failure (and still tears down) when the window fails to load', async () => {
     const { handle, clearStorageData } = fakeSessionHandle()
-    const { window, close } = fakeWindow(async () => {
+    const { window, destroy } = fakeWindow(async () => {
       throw new Error('net::ERR_FAILED')
     })
 
@@ -290,7 +313,29 @@ describe('WeComAuthWindowController', () => {
     const outcome = await controller.connect()
 
     expect(outcome).toEqual({ status: 'failed', reason: 'net::ERR_FAILED' })
-    expect(close).toHaveBeenCalledTimes(1)
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(clearStorageData).toHaveBeenCalledTimes(1)
+  })
+
+  it('continues login polling when WeCom replaces the initial ERR_ABORTED navigation', async () => {
+    const jar = [cookie()]
+    const { handle, clearStorageData } = fakeSessionHandle(jar)
+    const { window, destroy } = fakeWindow(async () => {
+      throw new Error("ERR_ABORTED (-3) loading 'https://doc.weixin.qq.com/'")
+    })
+
+    const controller = new WeComAuthWindowController({
+      createSession: () => handle,
+      createWindow: () => window,
+      timeoutMs: 1_000,
+      pollIntervalMs: 5,
+      sleep: async () => {}
+    })
+
+    const outcome = await controller.connect()
+
+    expect(outcome).toEqual({ status: 'success', cookieJar: jar })
+    expect(destroy).toHaveBeenCalledTimes(1)
     expect(clearStorageData).toHaveBeenCalledTimes(1)
   })
 
