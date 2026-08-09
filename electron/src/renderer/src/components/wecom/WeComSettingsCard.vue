@@ -4,6 +4,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ApiError, userMessage } from '@renderer/api/client'
+import { getDayDetail } from '@renderer/api/daily-report-days'
 import { getCurrentTemplate } from '@renderer/api/templates'
 import {
   getWeComConnection,
@@ -58,6 +59,7 @@ const fieldTargets = reactive<Record<string, WeComFieldMappingTarget | 'unmapped
 const savingMapping = ref(false)
 
 const retryingRecordId = ref<string | null>(null)
+const openingRecordId = ref<string | null>(null)
 
 const hasEverConnected = computed(
   () => connection.value !== null && connection.value.status !== null
@@ -249,8 +251,30 @@ function changeSyncStatus(): void {
   void loadSyncRecords()
 }
 
-function openDailyRecord(record: WeComSyncRecordData): void {
-  void router.push({ path: '/daily', query: { date: record.work_date } })
+/** Resolves the sync record's date to a concrete daily-report entry and
+ * opens it in `DailyDetailView.vue` (`/daily/:id`) — mirrors
+ * `DailyListView.vue::selectDate()`'s target-entry selection (prefer a
+ * draft, else the last entry) so both entry points behave identically. A
+ * WeCom sync record only ever exists for an archived day, so `entries` is
+ * never empty in practice; the empty case is still handled defensively
+ * rather than assumed away. */
+async function openDailyRecord(record: WeComSyncRecordData): Promise<void> {
+  openingRecordId.value = record.id
+  try {
+    const dayDetail = await getDayDetail(record.work_date)
+    if (dayDetail.entries.length === 0) {
+      ElMessage.warning('这一天没有可查看的日报')
+      return
+    }
+    const target =
+      dayDetail.entries.find((entry) => entry.status === 'draft') ??
+      dayDetail.entries[dayDetail.entries.length - 1]
+    await router.push(`/daily/${target.id}`)
+  } catch (error) {
+    ElMessage.error(userMessage(error))
+  } finally {
+    openingRecordId.value = null
+  }
 }
 
 async function retry(record: WeComSyncRecordData): Promise<void> {
@@ -464,7 +488,12 @@ function runHistoryAction(record: WeComSyncRecordData): void {
         </el-table-column>
         <el-table-column align="right" width="170">
           <template #default="scope">
-            <el-button link @click="openDailyRecord(scope.row)">查看日报</el-button>
+            <el-button
+              link
+              :loading="openingRecordId === scope.row.id"
+              @click="openDailyRecord(scope.row)"
+              >查看日报</el-button
+            >
             <el-tooltip
               v-if="weComSyncActionLabel(scope.row.status)"
               :disabled="isConnected"

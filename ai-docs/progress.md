@@ -592,3 +592,16 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 直接查库确认：该用户 `wecom_user_bindings.wecom_vid`（连接时已经算出并保存的"猜测归属"值）与其真实成功抓包里的 `reporter` vid 完全一致。这说明"留空"从来不是保守选项，而是必然失败的选项——本人 vid 本来就已经在数据库里，只是没有被用上。
 - 已改为连接时默认 `reporter_vids=[wecom_vid]`（`wecom_vid` 为空时仍保持空列表，避免 `WeComRecipientConfig` 的非空校验因 `[""]` 报错）；设置页仍保留手动覆盖/新增收件人的能力。更新 1 个既有测试的默认值断言，新增 1 个"无最佳猜测 entry 时不产出空字符串 vid"的边界测试。`docs/方案设计.md` §6.3 已同步修订。`ruff check`/`mypy` strict/定向 `pytest`/全量 `pytest` 均通过。
 - 已知未处理的邻近问题（未在本次范围内）：`_upsert_profile()` 对已存在 profile 的重连会无条件用刚计算出的新 `recipient_config`/`field_mapping` 覆盖，这是本次改动之前就存在的既有行为——重新连接会连带覆盖用户此前在设置页手动配置的收件人/字段映射。是否应改为"仅在从未手动配置过时才套用默认值"是一个产品决策，留作后续观察项。
+
+## 21. 表单链接解析支持第二种真实链接格式（`ISS-043`）
+
+- 用户要求 `parseWeComFormId` 支持企业微信"获取表单 id"分享链接 `https://doc.weixin.qq.com/journal/create?docid=c2_<form_id>`，此前只识别 `/forms/j/<id>` 一种。
+- 新增 `docid=` 标记提取，按真实抓包确认的 `c2_` 前缀规律剥离前缀；原有 `/forms/j/` 优先提取、纯 id 直通、长度/空值校验行为不变。
+- 新增 4 项 Vitest 用例；前端 `lint`（`eslint --fix` 修复一处 prettier 格式问题）/`typecheck`/`test`（27 文件 258 项）均通过。
+
+## 22. "查看日报"按钮改为打开对应日报详情页（`ISS-044`）
+
+- 用户指出 `WeComSettingsCard.vue` 同步历史表格的"查看日报"按钮实际打开的是 `/daily?date=...`（"我的日报"日历页按日期筛选），不是 `DailyDetailView.vue`（`/daily/:id`）本身。
+- `WeComSyncRecordData` 只带 `daily_report_day_id`（日期容器 id），不是具体 `DailyReport` 条目 id，无法直接拼路由。改为复用 `DailyListView.vue::selectDate()` 已有的"按日期解析目标条目"逻辑：调 `getDayDetail(record.work_date)`，优先取 `status==='draft'` 的条目，否则取最后一条，再 `router.push('/daily/${target.id}')`，两个入口行为保持一致。
+- 改为异步调用后补充 `openingRecordId` 逐行 loading 态防止重复点击；`entries` 为空的防御分支（理论上同步记录只会出现在已归档日期，不应发生）改为提示而非崩溃。
+- 前端 `lint`/`typecheck`/`test`（27 文件 258 项）/`build` 均通过。该组件此前无 Vitest 单测（覆盖属于 Playwright E2E 范畴），本次未新增组件级单测，与既有测试边界保持一致。

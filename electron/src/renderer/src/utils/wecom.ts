@@ -12,12 +12,33 @@ const MAX_FORM_ID_LENGTH = 128
 // `url.split('/forms/j/')[1].split('?')[0]` from a link shaped like
 // `https://doc.weixin.qq.com/forms/j/<id>?page=...#/journal-answer/...`.
 const FORM_URL_MARKER = '/forms/j/'
+// A second real link shape (`ISS-042` follow-up): the "获取表单 id" share
+// link copied from WeCom's own UI, e.g.
+// `https://doc.weixin.qq.com/journal/create?docid=c2_<id>`. Real captures
+// (`backend/wx-ribao/ribao.txt`'s `share_url`/`doc_info.doc_id` fields) show
+// this `docid`/`doc_id` value is always the form id prefixed with `c2_`.
+const DOC_ID_MARKER = 'docid='
+const DOC_ID_PREFIX = 'c2_'
+
+function extractFormIdCandidate(trimmed: string): string {
+  const formsMarkerIndex = trimmed.indexOf(FORM_URL_MARKER)
+  if (formsMarkerIndex !== -1) {
+    return trimmed.slice(formsMarkerIndex + FORM_URL_MARKER.length).split(/[?#/]/)[0]
+  }
+  const docIdMarkerIndex = trimmed.indexOf(DOC_ID_MARKER)
+  if (docIdMarkerIndex !== -1) {
+    const rawDocId = trimmed.slice(docIdMarkerIndex + DOC_ID_MARKER.length).split(/[&#]/)[0]
+    return rawDocId.startsWith(DOC_ID_PREFIX) ? rawDocId.slice(DOC_ID_PREFIX.length) : rawDocId
+  }
+  return trimmed
+}
 
 /**
  * Accepts either a raw WeCom form id or a full "日报表单" link copied from the
- * WeCom Docs app/browser address bar, and extracts a clean form id from
- * either. Returns `null` for blank input or an id longer than the backend's
- * `WeComConnectionValidateRequest.form_id` bound (`max_length=128`,
+ * WeCom Docs app/browser address bar (either the `/forms/j/<id>` share link
+ * or the `journal/create?docid=c2_<id>` link), and extracts a clean form id
+ * from any of these. Returns `null` for blank input or an id longer than the
+ * backend's `WeComConnectionValidateRequest.form_id` bound (`max_length=128`,
  * `backend/app/schemas/wecom.py`) — never throws, so the caller can drive a
  * form validation message from the `null` result alone.
  */
@@ -26,11 +47,7 @@ export function parseWeComFormId(input: string): string | null {
   if (!trimmed) {
     return null
   }
-  const markerIndex = trimmed.indexOf(FORM_URL_MARKER)
-  const candidate =
-    markerIndex === -1
-      ? trimmed
-      : trimmed.slice(markerIndex + FORM_URL_MARKER.length).split(/[?#/]/)[0]
+  const candidate = extractFormIdCandidate(trimmed)
   if (!candidate || candidate.length > MAX_FORM_ID_LENGTH) {
     return null
   }

@@ -56,6 +56,28 @@ describe('parseWeComFormId', () => {
     )
   })
 
+  it('extracts and un-prefixes the id from a journal/create?docid= link', () => {
+    expect(
+      parseWeComFormId(
+        'https://doc.weixin.qq.com/journal/create?docid=c2_AC0AMQclAA0AZcAhwZWABACN3SBdrLiMj_fork'
+      )
+    ).toBe('AC0AMQclAA0AZcAhwZWABACN3SBdrLiMj_fork')
+  })
+
+  it('extracts the docid value even with a trailing query param', () => {
+    expect(
+      parseWeComFormId(
+        'https://doc.weixin.qq.com/journal/create?docid=c2_AAAA-bbbb_1234&from=share'
+      )
+    ).toBe('AAAA-bbbb_1234')
+  })
+
+  it('keeps a docid value as-is when it has no c2_ prefix', () => {
+    expect(parseWeComFormId('https://doc.weixin.qq.com/journal/create?docid=AAAA-bbbb_1234')).toBe(
+      'AAAA-bbbb_1234'
+    )
+  })
+
   it('returns null for blank input', () => {
     expect(parseWeComFormId('   ')).toBeNull()
     expect(parseWeComFormId('')).toBeNull()
@@ -63,6 +85,7 @@ describe('parseWeComFormId', () => {
 
   it('returns null when the extracted id would be empty', () => {
     expect(parseWeComFormId('https://doc.weixin.qq.com/forms/j/?page=5')).toBeNull()
+    expect(parseWeComFormId('https://doc.weixin.qq.com/journal/create?docid=')).toBeNull()
   })
 
   it('returns null for an id longer than 128 characters', () => {
