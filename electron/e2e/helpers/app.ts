@@ -126,6 +126,9 @@ export const FIRST_USER: BootstrapUser = {
 /** Second-version bootstrap always creates the default admin under this fixed, reserved username (`BootstrapService.DEFAULT_ADMIN_USERNAME`) — it is never chosen by the setup form. */
 export const FIXED_ADMIN_USERNAME = 'admin'
 
+/** Fixed initial password the bootstrap admin account is created with (`BootstrapService.DEFAULT_ADMIN_PASSWORD`) — independent of whatever password the first ordinary user chooses. */
+export const FIXED_ADMIN_INITIAL_PASSWORD = 'admin123'
+
 /** Password the default admin sets during its mandatory first-login `/change-password` flow. */
 export const ADMIN_NEW_PASSWORD = 'AdminPass456!'
 
@@ -136,17 +139,17 @@ export function formField(page: Page, label: string): ReturnType<Page['locator']
 
 export async function waitForSetupOrLogin(page: Page): Promise<void> {
   await page
-    .locator('h2:has-text("创建管理员"), h2:has-text("登录工作手记")')
+    .locator('h2:has-text("创建用户"), h2:has-text("登录工作手记")')
     .first()
     .waitFor({ state: 'visible' })
 }
 
-/** Submits `/setup`'s single form. The server atomically creates this account (`role=user`) plus the fixed `admin` account sharing the same initial password (`docs/方案设计.md` §7.1) — this helper only drives the one form, it does not touch the admin account it implicitly creates. */
+/** Submits `/setup`'s single form. The server atomically creates this account (`role=user`) plus the fixed `admin` account under its own fixed initial password (`FIXED_ADMIN_INITIAL_PASSWORD`, independent of this form's password) — this helper only drives the one form, it does not touch the admin account it implicitly creates. */
 export async function bootstrapFirstUser(
   page: Page,
   user: BootstrapUser = FIRST_USER
 ): Promise<void> {
-  await page.locator('h2:has-text("创建管理员")').waitFor({ state: 'visible' })
+  await page.locator('h2:has-text("创建用户")').waitFor({ state: 'visible' })
   await formField(page, '用户名').fill(user.username)
   await formField(page, '显示名称').fill(user.displayName)
   await formField(page, '密码').fill(user.password)
@@ -187,8 +190,8 @@ export async function bootstrapAndSignInAsAdmin(
   const user = options.user ?? FIRST_USER
   const newAdminPassword = options.newAdminPassword ?? ADMIN_NEW_PASSWORD
   await bootstrapFirstUser(page, user)
-  await login(page, FIXED_ADMIN_USERNAME, user.password)
-  await completeForcedPasswordChange(page, user.password, newAdminPassword)
+  await login(page, FIXED_ADMIN_USERNAME, FIXED_ADMIN_INITIAL_PASSWORD)
+  await completeForcedPasswordChange(page, FIXED_ADMIN_INITIAL_PASSWORD, newAdminPassword)
   await login(page, FIXED_ADMIN_USERNAME, newAdminPassword)
   await page.locator('h1:has-text("我的日报")').waitFor({ state: 'visible' })
 }

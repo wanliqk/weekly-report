@@ -26,6 +26,7 @@ from app.integrations.wecom.schemas import (
     WeComTemplateInfo,
 )
 from app.main import create_app
+from app.services.bootstrap import DEFAULT_ADMIN_PASSWORD
 
 RUNTIME_SECRET = "r" * 32
 MAIN_BRIDGE_SECRET = "m" * 32
@@ -193,11 +194,11 @@ def _login(client: TestClient, username: str, password: str) -> dict[str, str]:
 
 
 def _create_second_user(client: TestClient, username: str) -> dict[str, str]:
-    admin_headers = _login(client, "admin", PASSWORD)
+    admin_headers = _login(client, "admin", DEFAULT_ADMIN_PASSWORD)
     changed = client.put(
         "/api/v1/auth/password",
         headers=admin_headers,
-        json={"current_password": PASSWORD, "new_password": "new admin password"},
+        json={"current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "new admin password"},
     )
     assert changed.status_code == 200, changed.text
     admin_headers = _login(client, "admin", "new admin password")

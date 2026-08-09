@@ -9,6 +9,7 @@ from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
 from app.db.migrate import run_startup_migrations
 from app.main import create_app
+from app.services.bootstrap import DEFAULT_ADMIN_PASSWORD
 
 STAGE5_RUNTIME_SECRET = "r" * 32
 STAGE5_JWT_SECRET = "j" * 64
@@ -41,7 +42,7 @@ def stage5_context(tmp_path: Path) -> Iterator[tuple[TestClient, dict[str, str],
         login = client.post(
             "/api/v1/auth/login",
             headers=STAGE5_RUNTIME_HEADERS,
-            json={"username": "admin", "password": STAGE5_PASSWORD},
+            json={"username": "admin", "password": DEFAULT_ADMIN_PASSWORD},
         )
         assert login.status_code == 200
         initial_token = cast(str, login.json()["data"]["access_token"])
@@ -52,7 +53,7 @@ def stage5_context(tmp_path: Path) -> Iterator[tuple[TestClient, dict[str, str],
                 "Authorization": f"Bearer {initial_token}",
             },
             json={
-                "current_password": STAGE5_PASSWORD,
+                "current_password": DEFAULT_ADMIN_PASSWORD,
                 "new_password": STAGE5_ADMIN_PASSWORD,
             },
         )

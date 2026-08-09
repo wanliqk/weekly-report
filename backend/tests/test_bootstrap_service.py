@@ -17,6 +17,7 @@ from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
 from app.models import ReportTemplate, TemplateVersion, User, UserSettings
 from app.services.bootstrap import (
+    DEFAULT_ADMIN_PASSWORD,
     AlreadyInitializedError,
     BootstrapService,
     ReservedBootstrapUsernameError,
@@ -89,7 +90,7 @@ async def test_bootstrap_atomically_creates_user_admin_and_both_default_resource
     assert first_user.is_active is True
     assert admin.is_active is True
     assert verify_password(password=PASSWORD, password_hash=first_user.password_hash)
-    assert verify_password(password=PASSWORD, password_hash=admin.password_hash)
+    assert verify_password(password=DEFAULT_ADMIN_PASSWORD, password_hash=admin.password_hash)
     assert first_user.password_hash != admin.password_hash
 
     assert await _count(session_factory, UserSettings) == 2

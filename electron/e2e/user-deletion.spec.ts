@@ -8,6 +8,7 @@ import {
   DAILY_DETAIL_URL_PATTERN,
   expectMessage,
   FIRST_USER,
+  FIXED_ADMIN_INITIAL_PASSWORD,
   FIXED_ADMIN_USERNAME,
   formField,
   launchApp,
@@ -49,8 +50,8 @@ test('users with business records or protected roles cannot be deleted; a clean 
   await logout(page)
 
   // ---- sign in as admin (forced password change first) ----
-  await login(page, FIXED_ADMIN_USERNAME, FIRST_USER.password)
-  await completeForcedPasswordChange(page, FIRST_USER.password, ADMIN_NEW_PASSWORD)
+  await login(page, FIXED_ADMIN_USERNAME, FIXED_ADMIN_INITIAL_PASSWORD)
+  await completeForcedPasswordChange(page, FIXED_ADMIN_INITIAL_PASSWORD, ADMIN_NEW_PASSWORD)
   await login(page, FIXED_ADMIN_USERNAME, ADMIN_NEW_PASSWORD)
   await page.locator('h1:has-text("我的日报")').waitFor({ state: 'visible' })
 

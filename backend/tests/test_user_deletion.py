@@ -17,6 +17,7 @@ from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
 from app.main import create_app
 from app.models import User
+from app.services.bootstrap import DEFAULT_ADMIN_PASSWORD
 from app.services.user import (
     CannotDeleteSelfError,
     LastActiveAdminError,
@@ -74,11 +75,11 @@ def _auth_headers(token: str) -> dict[str, str]:
 
 
 def _admin_headers(client: TestClient) -> dict[str, str]:
-    initial_headers = _auth_headers(_login(client, "admin", ADMIN_PASSWORD))
+    initial_headers = _auth_headers(_login(client, "admin", DEFAULT_ADMIN_PASSWORD))
     changed = client.put(
         "/api/v1/auth/password",
         headers=initial_headers,
-        json={"current_password": ADMIN_PASSWORD, "new_password": CHANGED_ADMIN_PASSWORD},
+        json={"current_password": DEFAULT_ADMIN_PASSWORD, "new_password": CHANGED_ADMIN_PASSWORD},
     )
     assert changed.status_code == 200
     return _auth_headers(_login(client, "admin", CHANGED_ADMIN_PASSWORD))

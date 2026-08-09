@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
 from app.db.migrate import run_startup_migrations
 from app.main import create_app
+from app.services.bootstrap import DEFAULT_ADMIN_PASSWORD
 
 RUNTIME_SECRET = "r" * 32
 JWT_SECRET = "j" * 64
@@ -173,7 +174,7 @@ def test_initial_admin_must_change_password_before_business_requests(
     client: TestClient,
 ) -> None:
     _bootstrap(client)
-    token = _login(client, username="admin")
+    token = _login(client, username="admin", password=DEFAULT_ADMIN_PASSWORD)
     headers = _auth_headers(token)
 
     me = client.get("/api/v1/auth/me", headers=headers)
@@ -190,7 +191,7 @@ def test_initial_admin_must_change_password_before_business_requests(
         "/api/v1/auth/password",
         headers=headers,
         json={
-            "current_password": INITIAL_PASSWORD,
+            "current_password": DEFAULT_ADMIN_PASSWORD,
             "new_password": "new admin password",
         },
     )

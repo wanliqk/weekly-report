@@ -13,6 +13,7 @@ import {
   ensureDir,
   expectMessage,
   FIRST_USER,
+  FIXED_ADMIN_INITIAL_PASSWORD,
   FIXED_ADMIN_USERNAME,
   formField,
   launchApp,
@@ -47,7 +48,7 @@ test('dual bootstrap -> forced admin password change -> same-day multi-entry -> 
   await expect(page.locator('.el-alert__title', { hasText: '账号创建成功' })).toBeVisible()
 
   // ---- 2. Default admin must change its temporary password before reaching any business page ----
-  await login(page, FIXED_ADMIN_USERNAME, FIRST_USER.password)
+  await login(page, FIXED_ADMIN_USERNAME, FIXED_ADMIN_INITIAL_PASSWORD)
   await page.locator('h2:has-text("设置新密码")').waitFor({ state: 'visible' })
   await expect(page.locator('.app-nav')).toHaveCount(0)
 
@@ -58,7 +59,7 @@ test('dual bootstrap -> forced admin password change -> same-day multi-entry -> 
   await page.locator('h2:has-text("设置新密码")').waitFor({ state: 'visible' })
   expect(page.url()).toContain('#/change-password')
 
-  await completeForcedPasswordChange(page, FIRST_USER.password, ADMIN_NEW_PASSWORD)
+  await completeForcedPasswordChange(page, FIXED_ADMIN_INITIAL_PASSWORD, ADMIN_NEW_PASSWORD)
   await expect(page.locator('.el-alert__title', { hasText: '密码已修改' })).toBeVisible()
 
   // ---- 3. Regular user creates two independent entries for today and submits both ----

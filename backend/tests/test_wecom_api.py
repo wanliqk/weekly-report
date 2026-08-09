@@ -13,6 +13,7 @@ from app.db.migrate import run_startup_migrations
 from app.integrations.wecom.client import WeComInternalClient
 from app.integrations.wecom.schemas import WeComTemplateInfo
 from app.main import create_app
+from app.services.bootstrap import DEFAULT_ADMIN_PASSWORD
 
 RUNTIME_SECRET = "r" * 32
 MAIN_BRIDGE_SECRET = "m" * 32
@@ -59,10 +60,14 @@ def _bootstrap(client: TestClient, *, username: str = "alice") -> None:
 
 
 def _login(client: TestClient, *, username: str) -> dict[str, str]:
+    # The fixed `admin` account always bootstraps with its own default
+    # password (`BootstrapService.DEFAULT_ADMIN_PASSWORD`), never the
+    # requested user's password.
+    password = DEFAULT_ADMIN_PASSWORD if username == "admin" else PASSWORD
     response = client.post(
         "/api/v1/auth/login",
         headers=RUNTIME_HEADERS,
-        json={"username": username, "password": PASSWORD},
+        json={"username": username, "password": password},
     )
     assert response.status_code == 200, response.text
     token = cast(str, response.json()["data"]["access_token"])
@@ -88,7 +93,7 @@ def _admin_headers_after_forced_password_change(client: TestClient) -> dict[str,
     change = client.put(
         "/api/v1/auth/password",
         headers=initial_headers,
-        json={"current_password": PASSWORD, "new_password": new_password},
+        json={"current_password": DEFAULT_ADMIN_PASSWORD, "new_password": new_password},
     )
     assert change.status_code == 200, change.text
     relogin = client.post(

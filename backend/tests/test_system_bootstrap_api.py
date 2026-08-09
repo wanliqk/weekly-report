@@ -8,6 +8,7 @@ from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
 from app.db.migrate import run_startup_migrations
 from app.main import create_app
+from app.services.bootstrap import DEFAULT_ADMIN_PASSWORD
 
 RUNTIME_SECRET = "a" * 32
 HEADERS = {"X-Runtime-Secret": RUNTIME_SECRET}
@@ -79,7 +80,7 @@ def test_bootstrap_creates_the_first_user_and_fixed_admin(client: TestClient) ->
     admin_login = client.post(
         "/api/v1/auth/login",
         headers=HEADERS,
-        json={"username": "admin", "password": PASSWORD},
+        json={"username": "admin", "password": DEFAULT_ADMIN_PASSWORD},
     )
     assert user_login.status_code == 200
     assert admin_login.status_code == 200

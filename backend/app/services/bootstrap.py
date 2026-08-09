@@ -11,6 +11,7 @@ from app.services.user import create_default_user_resources, normalize_username
 ALREADY_INITIALIZED_CODE = 40001
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_DISPLAY_NAME = "系统管理员"
+DEFAULT_ADMIN_PASSWORD = "admin123"
 
 
 class AlreadyInitializedError(AppError):
@@ -76,7 +77,7 @@ class BootstrapService:
             username=DEFAULT_ADMIN_USERNAME,
             username_normalized=DEFAULT_ADMIN_USERNAME,
             display_name=DEFAULT_ADMIN_DISPLAY_NAME,
-            password_hash=hash_password('admin123'),
+            password_hash=hash_password(DEFAULT_ADMIN_PASSWORD),
             role="admin",
             must_change_password=True,
             password_changed_at=now,

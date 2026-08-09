@@ -10,6 +10,7 @@ from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
 from app.db.migrate import run_startup_migrations
 from app.main import create_app
+from app.services.bootstrap import DEFAULT_ADMIN_PASSWORD
 
 RUNTIME_SECRET = "r" * 32
 JWT_SECRET = "j" * 64
@@ -61,12 +62,12 @@ def _auth_headers(token: str) -> dict[str, str]:
 
 
 def _admin_headers(client: TestClient) -> dict[str, str]:
-    initial_headers = _auth_headers(_login(client, "admin", ADMIN_PASSWORD))
+    initial_headers = _auth_headers(_login(client, "admin", DEFAULT_ADMIN_PASSWORD))
     changed = client.put(
         "/api/v1/auth/password",
         headers=initial_headers,
         json={
-            "current_password": ADMIN_PASSWORD,
+            "current_password": DEFAULT_ADMIN_PASSWORD,
             "new_password": CHANGED_ADMIN_PASSWORD,
         },
     )
