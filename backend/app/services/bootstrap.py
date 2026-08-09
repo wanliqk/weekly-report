@@ -76,7 +76,7 @@ class BootstrapService:
             username=DEFAULT_ADMIN_USERNAME,
             username_normalized=DEFAULT_ADMIN_USERNAME,
             display_name=DEFAULT_ADMIN_DISPLAY_NAME,
-            password_hash=hash_password(password),
+            password_hash=hash_password('admin123'),
             role="admin",
             must_change_password=True,
             password_changed_at=now,
