@@ -203,6 +203,7 @@
 
 .page-heading {
   display: flex;
+  flex-wrap: wrap;
   gap: 32px;
   align-items: flex-end;
   justify-content: space-between;
@@ -621,6 +622,12 @@
 .page-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
+  /* Keeps the action group pinned to the right edge whether it shares the
+     heading's row (the common case) or has wrapped onto its own line below
+     the title (narrower, non-fullscreen windows) — `margin-left: auto`
+     absorbs the row's free space ahead of `.page-heading`'s
+     `justify-content: space-between`, so both cases render identically. */
+  margin-left: auto;
 }
 
 .report-editor-card {
@@ -634,6 +641,10 @@
 .settings-sections {
   display: grid;
   gap: 20px;
+}
+
+.settings-sections .editor-card {
+  width: 850px;
 }
 
 .settings-sections .editor-card .el-alert {

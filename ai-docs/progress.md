@@ -605,3 +605,11 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - `WeComSyncRecordData` 只带 `daily_report_day_id`（日期容器 id），不是具体 `DailyReport` 条目 id，无法直接拼路由。改为复用 `DailyListView.vue::selectDate()` 已有的"按日期解析目标条目"逻辑：调 `getDayDetail(record.work_date)`，优先取 `status==='draft'` 的条目，否则取最后一条，再 `router.push('/daily/${target.id}')`，两个入口行为保持一致。
 - 改为异步调用后补充 `openingRecordId` 逐行 loading 态防止重复点击；`entries` 为空的防御分支（理论上同步记录只会出现在已归档日期，不应发生）改为提示而非崩溃。
 - 前端 `lint`/`typecheck`/`test`（27 文件 258 项）/`build` 均通过。该组件此前无 Vitest 单测（覆盖属于 Playwright E2E 范畴），本次未新增组件级单测，与既有测试边界保持一致。
+
+## 23. page-heading/page-actions 非全屏下布局错乱（`ISS-045`）
+
+- 用户报告 `DailyDetailView.vue` 的状态标签 + 三个按钮只有软件全屏时正常显示，非全屏（正常窗口宽度）下位置错乱。
+- 根因在共享全局样式：`main.css` 的 `.page-heading` 是 `display: flex` 但缺 `flex-wrap`，标题区宽度不够时整体不换行，`.page-actions` 被挤压进标题右侧的剩余空间，标签和三个按钮各自的文字被迫在极窄列宽内内部折行，而不是整组换到新行。`.page-heading`/`.page-actions` 同时被 `DailyDetailView.vue` 和 `WeeklyDetailView.vue` 复用，判定为共享类问题，在 `main.css` 里统一修，不做单视图样式覆盖。
+- 修复：`.page-heading` 增加 `flex-wrap: wrap`；`.page-actions` 增加 `flex-wrap: wrap` 与 `margin-left: auto`——后者让操作组在换到标题下方新行时仍贴右对齐，与两者共享一行时 `.page-heading` 的 `justify-content: space-between` 效果保持一致，避免换行前后左右对齐方式不统一。
+- 纯 CSS 改动，无对应 Vitest；前端 `lint`/`typecheck`/`build` 均通过。验证时发现浏览器自动化工具的 `resize_window` 在本机环境下不改变实际渲染视口（`window.innerWidth` 固定），改为本地同源 HTTP 服务器 + 仓库真实 `main.css`/`base.css`/对应 DOM 结构的静态复现页，用固定宽度容器模拟 760px/480px 视口：先临时还原修复前的 CSS，截图复现出用户描述的错乱现象（操作组被挤压、按钮文字内部折行），再恢复修复后的 CSS，确认同一窄宽度下标签+三个按钮整组换行、贴右对齐，480px 更窄时按钮组自身也能整齐二次换行，均无重叠。
+- 未在真实鉴权 Electron 应用内做最终截图确认，验证基于抽取自仓库的真实样式表与 DOM 结构的静态复现页；`WeComSettingsCard.vue` 存在用户自己进行中的无关手动改动（保存按钮 `margin-top` 内联样式、表格列宽 170→120），本次未触碰。
