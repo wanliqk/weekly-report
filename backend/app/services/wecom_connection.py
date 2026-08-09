@@ -276,7 +276,14 @@ class WeComConnectionService:
                         "error_message": exc.message,
                         **({"schema_paths": exc.detail} if exc.detail is not None else {}),
                         **(
-                            {"business_code": exc.biz_code}
+                            {
+                                "business_code": exc.biz_code,
+                                **(
+                                    {"business_message": exc.biz_message}
+                                    if exc.biz_message is not None
+                                    else {}
+                                ),
+                            }
                             if isinstance(exc, WeComBusinessRejected)
                             else {}
                         ),

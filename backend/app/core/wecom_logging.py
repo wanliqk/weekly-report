@@ -26,6 +26,7 @@ _ALLOWED_PATH_TEMPLATES: Final = frozenset(
 _ALLOWED_DIAGNOSTIC_KEYS: Final = frozenset(
     {
         "business_code",
+        "business_message",
         "date_candidate_count",
         "date_reply_type",
         "error_message",

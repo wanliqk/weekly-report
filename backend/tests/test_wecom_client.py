@@ -448,6 +448,7 @@ async def test_get_template_info_business_code_rejected() -> None:
     finally:
         await client.aclose()
     assert excinfo.value.biz_code == 12345
+    assert excinfo.value.biz_message == "denied"
 
 
 async def test_list_journals_business_code_rejected() -> None:
@@ -463,6 +464,7 @@ async def test_list_journals_business_code_rejected() -> None:
     finally:
         await client.aclose()
     assert excinfo.value.biz_code == 100
+    assert excinfo.value.biz_message == "denied"
 
 
 async def test_submit_daily_business_code_rejected() -> None:
@@ -478,6 +480,98 @@ async def test_submit_daily_business_code_rejected() -> None:
     finally:
         await client.aclose()
     assert excinfo.value.biz_code == 1
+    assert excinfo.value.biz_message == "denied"
+
+
+async def test_business_message_is_bounded_length() -> None:
+    payload = {"errcode": 7, "errmsg": "x" * 500, "entrys": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, payload)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(WeComBusinessRejected) as excinfo:
+            await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+    finally:
+        await client.aclose()
+    assert excinfo.value.biz_message is not None
+    assert len(excinfo.value.biz_message) == 200
+
+
+# -- post-200 business rejections must still be logged -----------------------
+#
+# Regression coverage: `_parse_template_info`/`_parse_journal_page`/
+# `_parse_submission_result` raise *after* the HTTP layer already saw a plain
+# 200, so a rejection they raise has to be captured by the same `_log()` call
+# the transport layer uses — otherwise a real sync attempt's business
+# rejection (WeComSyncService.execute()'s call path, unlike
+# WeComConnectionService.validate_connection()'s own extra wrapping) leaves no
+# trace at all in wecom.log.
+
+
+def _enable_client_logger() -> logging.Logger:
+    target_logger = logging.getLogger("app.integrations.wecom.client")
+    target_logger.disabled = False
+    return target_logger
+
+
+async def test_list_journals_business_rejection_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    payload = {"errcode": 100, "errmsg": "no permission", "entrys": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, payload)
+
+    target_logger = _enable_client_logger()
+    was_disabled = target_logger.disabled
+    try:
+        client = WeComInternalClient(transport=httpx.MockTransport(handler))
+        try:
+            with caplog.at_level(logging.DEBUG, logger="app.integrations.wecom.client"):
+                with pytest.raises(WeComBusinessRejected):
+                    await client.list_journals(_valid_cookie_jar(), "SYNTHETIC-TEMPLATE-1", None)
+        finally:
+            await client.aclose()
+    finally:
+        target_logger.disabled = was_disabled
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert "outcome=business_rejected" in record.getMessage()
+    diagnostics = record.wecom_diagnostics  # type: ignore[attr-defined]
+    assert diagnostics["business_code"] == 100
+    assert diagnostics["business_message"] == "no permission"
+
+
+async def test_submit_daily_business_rejection_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    payload = {"head": {"ret": 1, "msg": "duplicate submission"}, "body": {}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, payload)
+
+    target_logger = _enable_client_logger()
+    was_disabled = target_logger.disabled
+    try:
+        client = WeComInternalClient(transport=httpx.MockTransport(handler))
+        try:
+            with caplog.at_level(logging.DEBUG, logger="app.integrations.wecom.client"):
+                with pytest.raises(WeComBusinessRejected):
+                    await client.submit_daily(_valid_cookie_jar(), _submit_payload())
+        finally:
+            await client.aclose()
+    finally:
+        target_logger.disabled = was_disabled
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert "outcome=business_rejected" in record.getMessage()
+    diagnostics = record.wecom_diagnostics  # type: ignore[attr-defined]
+    assert diagnostics["business_code"] == 1
+    assert diagnostics["business_message"] == "duplicate submission"
 
 
 # -- HTML login-page responses --------------------------------------------

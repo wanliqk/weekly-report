@@ -543,3 +543,10 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 通过不含任何 value 的有界 key 路径和纯数字题型诊断，确认并兼容当前 live 响应：`form_info/form_info.form_id`、`createvid/doc_info.form_id`、文本题型 `reply_type=24`；保留旧 fixture 的 `form/form_id`、`reply_id`、文本题型 `1`，未知结构继续阻断。
 - 真实连接最终记录为 `connection_validation outcome=ok`，Electron 保持 4 个常驻进程。后端定向 50 项、排除既有 `ISS-013` 后全量 470 项通过；Ruff lint、mypy、涉及文件 format check 通过。Electron lint、typecheck、Vitest 255 项和生产构建通过。
 - `WECOM-08` 仍为下一任务：尚未验证真实日报提交、重复对账、生产 sidecar/electron-builder 打包安装升级、完整 E2E、发布级凭证扫描和独立安全审查。
+
+## 15. 同步执行链路业务拒绝日志缺口修复（`ISS-037`，补充 WECOM-07A）
+
+- 真实同步排障发现：`WeComSyncService.execute()`（而非 `validate_connection()`）触发的 HTTP-200-后业务/协议/结构拒绝完全没有写入 `wecom.log`，因为 `_send_json`/`_send_multipart` 的 `_log()` 只包住传输层解析，公开方法自己再调用的 `_parse_template_info`/`_parse_journal_page`/`_parse_submission_result` 逃逸在日志作用域外。已把 `parse` 折入同一 `_log()` 作用域，任何调用方（含 `validate_connection()`）现在都保证"一次调用一条准确结果的日志行"。
+- `WeComBusinessRejected` 新增 `biz_message`（`head.msg`/`errmsg`，截断 200 字符），随 `business_code` 一起加入 `wecom_logging.py` 诊断白名单，仅在 `WEEKLY_REPORT_WECOM_LOG_REDACT=false` 时输出；`last_error_message`/API 契约不变。
+- 用真实 `wecom_daily_sync_records` 数据定位到 2026-08-09 14:26:30 与 14:36:59 两次真实失败均止步于 `list_journals` 的业务拒绝，但当时的具体 `errcode`/`errmsg` 已随日志缺口丢失，无法回溯；修复后需用户重新触发一次同步才能拿到真实业务码。
+- 新增/扩展测试覆盖 `biz_message` 提取、长度截断，以及两个专门针对本缺口的回归测试（`caplog` 直接断言业务拒绝产出且仅产出一条 `outcome=business_rejected` 记录）。后端 `ruff check`/`mypy` strict/`pytest` 全量执行通过（唯一失败项经 `git stash` 验证是本机 `.env` 遗留的既有失败，与本次改动无关）。尚未创建独立提交，是否提交由用户决定。

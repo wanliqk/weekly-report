@@ -28,9 +28,9 @@ import logging
 import re
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any, Final, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
@@ -78,6 +78,14 @@ _DEFAULT_JOURNAL_LIMIT: Final = 50
 
 _DEFAULT_TIMEOUT: Final = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
 
+# WeCom's own business-rejection message text (`head.msg`/`errmsg`) is
+# protocol metadata (an error *reason*, not report content or a credential),
+# so it is safe to surface in the unredacted diagnostic log alongside
+# `business_code` — bounded defensively since it's remote-supplied text.
+_MAX_BUSINESS_MESSAGE_LENGTH: Final = 200
+
+T = TypeVar("T")
+
 
 class WeComClientError(Exception):
     """Base class for every classified failure this Client raises.
@@ -113,9 +121,17 @@ class WeComBusinessRejected(WeComClientError):
     """A definite non-zero business code (`head.ret` / `errcode`) — the
     remote explicitly processed the request and declined it."""
 
-    def __init__(self, message: str, *, biz_code: int, detail: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        biz_code: int,
+        biz_message: str | None = None,
+        detail: str | None = None,
+    ) -> None:
         super().__init__(message, detail=detail)
         self.biz_code = biz_code
+        self.biz_message = biz_message
 
 
 class WeComProtocolChanged(WeComClientError):
@@ -160,6 +176,12 @@ def _coerce_biz_code(value: object) -> int:
         return int(str(value))
     except (TypeError, ValueError):
         return -1
+
+
+def _coerce_biz_message(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return value[:_MAX_BUSINESS_MESSAGE_LENGTH]
 
 
 def _assert_allowed_target(url: str) -> None:
@@ -387,7 +409,7 @@ class WeComInternalClient:
         self, cookie_jar: Sequence[WeComCookieIn], form_id: str
     ) -> WeComTemplateInfo:
         cookie_header, _sid = self._select_or_raise(cookie_jar, _GET_TEMPLATE_INFO_PATH)
-        payload = await self._send_json(
+        return await self._send_json(
             _GET_TEMPLATE_INFO_PATH,
             params={"_prefetch": "1"},
             json_body={
@@ -401,8 +423,8 @@ class WeComInternalClient:
             },
             cookie_header=cookie_header,
             on_send=False,
+            parse=self._parse_template_info,
         )
-        return self._parse_template_info(payload)
 
     async def list_journals(
         self,
@@ -413,7 +435,7 @@ class WeComInternalClient:
         limit: int = _DEFAULT_JOURNAL_LIMIT,
     ) -> WeComJournalPage:
         cookie_header, sid = self._select_or_raise(cookie_jar, _LIST_JOURNALS_PATH)
-        payload = await self._send_json(
+        return await self._send_json(
             _LIST_JOURNALS_PATH,
             params={"sid": sid, "wedoc_xsrf": "1"},
             json_body={
@@ -430,8 +452,8 @@ class WeComInternalClient:
             },
             cookie_header=cookie_header,
             on_send=False,
+            parse=self._parse_journal_page,
         )
-        return self._parse_journal_page(payload)
 
     async def submit_daily(
         self,
@@ -472,13 +494,13 @@ class WeComInternalClient:
             ("f", "json"),
         ]
 
-        response_payload = await self._send_multipart(
+        return await self._send_multipart(
             _SUBMIT_DAILY_PATH,
             params={"sid": sid, "wedoc_xsrf": "1"},
             fields=fields,
             cookie_header=cookie_header,
+            parse=self._parse_submission_result,
         )
-        return self._parse_submission_result(response_payload)
 
     # -- request plumbing ---------------------------------------------------------
 
@@ -498,7 +520,8 @@ class WeComInternalClient:
         json_body: dict[str, Any],
         cookie_header: str,
         on_send: bool,
-    ) -> dict[str, Any]:
+        parse: Callable[[dict[str, Any]], T],
+    ) -> T:
         started = time.monotonic()
         try:
             response = await self._client.post(
@@ -517,8 +540,14 @@ class WeComInternalClient:
             self._log(path, started, error=http_error)
             raise http_error from exc
 
+        # The parse step (`parse`, e.g. `_parse_template_info`) is folded into
+        # this same try/except so a business/schema/protocol rejection found
+        # *inside* an HTTP-200 JSON body is logged exactly like a transport
+        # failure — logging only the HTTP-layer outcome here previously left
+        # every post-200 business rejection silently unlogged.
         try:
-            result = _parse_json_response(response, on_send=on_send)
+            payload = _parse_json_response(response, on_send=on_send)
+            result = parse(payload)
         except WeComClientError as exc:
             self._log(path, started, http_status=response.status_code, error=exc)
             raise
@@ -532,7 +561,8 @@ class WeComInternalClient:
         params: dict[str, str],
         fields: list[tuple[str, str]],
         cookie_header: str,
-    ) -> dict[str, Any]:
+        parse: Callable[[dict[str, Any]], T],
+    ) -> T:
         # `files=[(name, (None, value)), ...]` forces httpx's own
         # `MultipartStream` encoding (random per-request boundary, never a
         # fixed/hardcoded string) while rendering byte-identical to a plain
@@ -559,8 +589,13 @@ class WeComInternalClient:
             self._log(path, started, error=http_error)
             raise http_error from exc
 
+        # See `_send_json`'s matching comment: folding `parse` in here makes
+        # `submit_daily`'s post-200 business rejection (`WeComBusinessRejected`
+        # from `_parse_submission_result`) logged the same way a transport
+        # failure is, instead of escaping unlogged.
         try:
-            result = _parse_json_response(response, on_send=True)
+            payload = _parse_json_response(response, on_send=True)
+            result = parse(payload)
         except WeComClientError as exc:
             self._log(path, started, http_status=response.status_code, error=exc)
             raise
@@ -583,6 +618,8 @@ class WeComInternalClient:
             diagnostics["error_message"] = error.message
             if isinstance(error, WeComBusinessRejected):
                 diagnostics["business_code"] = error.biz_code
+                if error.biz_message is not None:
+                    diagnostics["business_message"] = error.biz_message
         log_wecom_event(
             logger,
             event="request",
@@ -600,7 +637,11 @@ class WeComInternalClient:
             raise WeComProtocolChanged("响应缺少 head.ret 节点")
         ret = head["ret"]
         if ret != 0:
-            raise WeComBusinessRejected("获取模板信息被拒绝", biz_code=_coerce_biz_code(ret))
+            raise WeComBusinessRejected(
+                "获取模板信息被拒绝",
+                biz_code=_coerce_biz_code(ret),
+                biz_message=_coerce_biz_message(head.get("msg")),
+            )
 
         body = payload.get("body")
         if not isinstance(body, dict):
@@ -660,7 +701,11 @@ class WeComInternalClient:
             raise WeComProtocolChanged("响应缺少 errcode 节点")
         errcode = payload["errcode"]
         if errcode != 0:
-            raise WeComBusinessRejected("获取日报列表被拒绝", biz_code=_coerce_biz_code(errcode))
+            raise WeComBusinessRejected(
+                "获取日报列表被拒绝",
+                biz_code=_coerce_biz_code(errcode),
+                biz_message=_coerce_biz_message(payload.get("errmsg")),
+            )
 
         entrys = payload.get("entrys")
         if not isinstance(entrys, list):
@@ -681,7 +726,11 @@ class WeComInternalClient:
             raise WeComOutcomeUncertain("响应缺少 head.ret 节点,无法确认是否受理")
         ret = head["ret"]
         if ret != 0:
-            raise WeComBusinessRejected("提交日报被拒绝", biz_code=_coerce_biz_code(ret))
+            raise WeComBusinessRejected(
+                "提交日报被拒绝",
+                biz_code=_coerce_biz_code(ret),
+                biz_message=_coerce_biz_message(head.get("msg")),
+            )
 
         body = payload.get("body")
         if not isinstance(body, dict):

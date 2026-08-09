@@ -40,6 +40,7 @@ def _emit_diagnostic_event() -> None:
             "error_type": "WeComBusinessRejected",
             "error_message": "获取模板信息被拒绝",
             "business_code": 41001,
+            "business_message": "no permission",
         },
     )
 
@@ -60,6 +61,7 @@ def test_redacted_log_contains_only_minimum_request_metadata(tmp_path: Path) -> 
     assert "http_status" not in text
     assert "WeComBusinessRejected" not in text
     assert "41001" not in text
+    assert "no permission" not in text
 
 
 def test_detailed_log_includes_only_whitelisted_diagnostics(tmp_path: Path) -> None:
@@ -74,6 +76,7 @@ def test_detailed_log_includes_only_whitelisted_diagnostics(tmp_path: Path) -> N
     assert 'error_type="WeComBusinessRejected"' in text
     assert 'error_message="获取模板信息被拒绝"' in text
     assert "business_code=41001" in text
+    assert 'business_message="no permission"' in text
 
 
 def test_detailed_log_accepts_only_bounded_protocol_schema_paths(tmp_path: Path) -> None:
