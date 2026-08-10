@@ -10,13 +10,14 @@ from wecom_service_support import StubWeComClient, build_target_questions, build
 
 from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
+from app.core.ulid import generate_ulid
 from app.db.engine import create_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
 from app.integrations.wecom.client import WeComAuthExpired
 from app.integrations.wecom.schemas import WeComQuestionItem
 from app.models import User
-from app.schemas.wecom import WeComFieldMappingConfig, WeComRecipientConfig
+from app.schemas.wecom import WeComFieldMappingConfig, WeComFieldMappingRule, WeComRecipientConfig
 from app.services.bootstrap import BootstrapService
 from app.services.wecom_connection import (
     WeComConnectionService,
@@ -224,6 +225,61 @@ async def test_reconnect_updates_existing_binding_and_profile_in_place(
         profile = await WeComConnectionService(session).get_profile(user.id)
         assert profile.form_id == "another-form"
         assert profile.version == 2
+
+
+async def test_reconnect_preserves_manually_configured_field_mapping_and_recipient_config(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """Reconnecting (e.g. to a different `form_id`) must not silently wipe a
+    user's already-working `field_mapping`/`recipient_config` back to the
+    first-connect defaults, even though the *remote* form's date/today/
+    tomorrow question structure is re-discovered fresh every time —
+    `field_mapping` is keyed by this app's own template `field_key` and has
+    no relationship to which WeCom form is connected (`PROD-030`)."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    async with session_factory() as session:
+        await WeComConnectionService(session, client=StubWeComClient()).validate_connection(
+            user.id, cookie_jar=[], credential_slot="slot-1", form_id="form-1"
+        )
+
+    custom_field_key = generate_ulid()
+    custom_recipient_config = WeComRecipientConfig(
+        schema_version=1,
+        mngreporter_vids=["9000000000000042"],
+        reporter_vids=["9000000000000043"],
+        remote_version=0,
+    )
+    custom_field_mapping = WeComFieldMappingConfig(
+        schema_version=1,
+        rules=[WeComFieldMappingRule(field_key=custom_field_key, target="today_work")],
+        unmapped_policy="ignore",
+    )
+    async with session_factory() as session:
+        await WeComConnectionService(session).update_profile(
+            user.id,
+            expected_version=1,
+            recipient_config=custom_recipient_config,
+            field_mapping=custom_field_mapping,
+        )
+
+    reconnect_questions = build_target_questions()
+    stub = StubWeComClient(
+        template_info=build_template_info(form_id="another-form", questions=reconnect_questions)
+    )
+    async with session_factory() as session:
+        await WeComConnectionService(session, client=stub).validate_connection(
+            user.id, cookie_jar=[], credential_slot="slot-2", form_id="another-form"
+        )
+
+    async with session_factory() as session:
+        profile = await WeComConnectionService(session).get_profile(user.id)
+        assert profile.form_id == "another-form"
+        assert profile.version == 3
+        recipient_config = WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
+        assert recipient_config == custom_recipient_config
+        field_mapping = WeComFieldMappingConfig.model_validate_json(profile.field_mapping_json)
+        assert field_mapping == custom_field_mapping
 
 
 async def test_concurrent_validate_connection_only_creates_one_binding_and_profile(

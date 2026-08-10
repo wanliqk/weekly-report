@@ -591,7 +591,7 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 用 `WEEKLY_REPORT_WECOM_DEBUG_RAW_BODY` 的原始请求日志逐字段比对用户真实成功抓包，定位到唯一结构性差异：真实成功提交的 `wwjournal_data.entry.reporter` 是 `[{"vid": "本人 vid"}]`，失败请求的 `reporter`/`mngreporter` 全是空数组。原设计（`WeComConnectionService.validate_connection()`）在连接时把 `recipient_config.reporter_vids` 无条件初始化为空列表，理由是"没有可靠来源发现收件人"，把配置完全推给用户在设置页手填一个他们通常不知道的数字 vid。
 - 直接查库确认：该用户 `wecom_user_bindings.wecom_vid`（连接时已经算出并保存的"猜测归属"值）与其真实成功抓包里的 `reporter` vid 完全一致。这说明"留空"从来不是保守选项，而是必然失败的选项——本人 vid 本来就已经在数据库里，只是没有被用上。
 - 已改为连接时默认 `reporter_vids=[wecom_vid]`（`wecom_vid` 为空时仍保持空列表，避免 `WeComRecipientConfig` 的非空校验因 `[""]` 报错）；设置页仍保留手动覆盖/新增收件人的能力。更新 1 个既有测试的默认值断言，新增 1 个"无最佳猜测 entry 时不产出空字符串 vid"的边界测试。`docs/方案设计.md` §6.3 已同步修订。`ruff check`/`mypy` strict/定向 `pytest`/全量 `pytest` 均通过。
-- 已知未处理的邻近问题（未在本次范围内）：`_upsert_profile()` 对已存在 profile 的重连会无条件用刚计算出的新 `recipient_config`/`field_mapping` 覆盖，这是本次改动之前就存在的既有行为——重新连接会连带覆盖用户此前在设置页手动配置的收件人/字段映射。是否应改为"仅在从未手动配置过时才套用默认值"是一个产品决策，留作后续观察项。
+- 已知未处理的邻近问题（未在本次范围内）：`_upsert_profile()` 对已存在 profile 的重连会无条件用刚计算出的新 `recipient_config`/`field_mapping` 覆盖，这是本次改动之前就存在的既有行为——重新连接会连带覆盖用户此前在设置页手动配置的收件人/字段映射。是否应改为"仅在从未手动配置过时才套用默认值"是一个产品决策，留作后续观察项。**2026-08-10 更新：该观察项已由用户明确要求处理并解决，见第 25 节 `ISS-048`。**
 
 ## 21. 表单链接解析支持第二种真实链接格式（`ISS-043`）
 
@@ -621,3 +621,10 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 同一假设也写死在 Playwright E2E 助手里：`electron/e2e/helpers/app.ts` 的 `bootstrapAndSignInAsAdmin` 用首位用户密码登录 admin，且 `waitForSetupOrLogin`/`bootstrapFirstUser` 还在等待"创建管理员"标题文案——后者是本次会话更早前 `SetupView.vue` 改动（把标题改成"创建用户"）造成的连带失效。新增 `FIXED_ADMIN_INITIAL_PASSWORD` 常量，修复该助手及直接绕过助手登录 admin 的 `primary-path.spec.ts`/`user-deletion.spec.ts`。
 - 修完上述问题后跑 `npm run test:e2e`（6 个 spec）验证，发现 4 个 spec（`daily-validation`/`primary-path`/`stale-version-conflict`/`user-deletion`）在登录成功后立刻卡在 `button:has-text("新建日报")` 超时——与本次改动无关：日历式日报创建重构（`DailyListView.vue`，最后改动于 `499cac6`）比 E2E 套件上一次真正重写（`QA-10`/`622154e`）更新，"新建日报"独立按钮已被移除，改为点击日历某天弹出确认对话框；这几个 spec 从未跟着更新。核对本会话及更早的一连串 `daily`/`wecom` 修复提交，发现它们的质量门禁记录里从未包含 `test:e2e`（只有 `lint`/`typecheck`/`test`/`build`），这个断裂因此一直没被发现。
 - 判定为 `ISS-047`（P2，OPEN，不在本次范围内处理）：重写 4 个 spec 需要先吃透新的日历交互流程，工作量和风险都不适合在打包发布任务中顺手做掉，尤其 `primary-path.spec.ts` 是唯一的全链路验收覆盖，贸然按猜测改写风险较高。已如实告知用户当前只有 `admin-guard`/`auth-failures` 两个不涉及日报创建的 spec 能通过，请用户决定是否在本次发布前投入专项修复。
+
+## 25. 重连覆盖用户已配置的字段映射/收件人（`ISS-048`）
+
+- 用户报告：换一个企业微信表单 ID 重新连接后同步失败，且新旧表单字段名相同。排查确认根因正是 `ISS-042` 尾注记录的那个"留作后续观察项"：`WeComConnectionService._upsert_profile()` 对已存在 `wecom_sync_profiles` 行的重连，会无条件用 `validate_connection()` 里刚计算出的首次连接默认值覆盖 `field_mapping_json`（清空为空规则 + `unmapped_policy="block"`）与 `recipient_config_json`（重置收件人 vid 猜测）——而 `field_mapping` 本身只按本地模板 `field_key` 路由，跟连接的是哪个企业微信表单完全无关，重连没有理由重置它。
+- 用户明确要求处理，判定为产品决策（`PROD-030`）：`_upsert_profile()` 改为只有该用户从未有过 profile 行（含并发插入竞态回退到 `IntegrityError` 分支）时，才写入首次计算的默认 `field_mapping`/`recipient_config`；已存在 profile 的重连（无论是否换了 `form_id`）只更新 `form_id`/`template_id`/`destination_fingerprint`/`question_mapping_json`/`schema_fingerprint`/`is_active`/`version`，不再触碰用户已配置的映射与收件人。`docs/方案设计.md` §5.1 步骤 5 同步补充一句澄清。
+- 新增回归测试 `test_reconnect_preserves_manually_configured_field_mapping_and_recipient_config`：先首次连接，再通过 `update_profile()` 写入自定义映射规则与收件人，然后切到 `another-form` 重连，断言两者原样保留、`form_id`/`version` 仍按预期更新。
+- 后端 `ruff check`/`mypy` strict（150 个源文件）/`pytest` 均实际执行：定向 `test_wecom_connection_service.py` 12 项全部通过；全量 pytest 唯一失败是 `test_config.py::test_test_environment_does_not_require_a_runtime_secret`，`git stash` 对比确认改动前后同样失败，是本机 `backend/.env` 残留空 `WEEKLY_REPORT_RUNTIME_SECRET` 导致，与 `ISS-046` 记录的是同一个已知环境问题，与本次改动无关。

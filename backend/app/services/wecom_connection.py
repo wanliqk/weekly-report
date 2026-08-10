@@ -463,22 +463,32 @@ class WeComConnectionService:
         schema_fingerprint: str,
     ) -> None:
         question_mapping_json = question_mapping.model_dump_json()
-        recipient_config_json = recipient_config.model_dump_json()
-        field_mapping_json = field_mapping.model_dump_json()
 
+        # `recipient_config`/`field_mapping` are this method's caller-computed
+        # *first-connect* defaults (empty rules, best-guess vid). A reconnect
+        # (this user already has a profile row, whatever its form_id) must
+        # not apply them: `field_mapping.rules` is keyed by this app's own
+        # template `field_key` and has no relationship to which WeCom form is
+        # connected, and `recipient_config` is a user-editable setting once
+        # established. Overwriting either on every reconnect silently erased
+        # a user's already-working sync setup even when reconnecting to a
+        # form with identical field labels (reported by a real user; see
+        # `ai-docs/issues.md` ISS-042's trailing note and `PROD-030`). Only a
+        # brand-new profile (no existing row for this owner, in either branch
+        # below) uses the freshly computed defaults.
         existing = await self._profiles.get_for_owner(owner_id)
         if existing is not None:
             existing.form_id = form_id
             existing.template_id = template_id
             existing.destination_fingerprint = destination_fingerprint
             existing.question_mapping_json = question_mapping_json
-            existing.recipient_config_json = recipient_config_json
-            existing.field_mapping_json = field_mapping_json
             existing.schema_fingerprint = schema_fingerprint
             existing.is_active = True
             existing.version += 1
             await self._session.flush()
             return
+        recipient_config_json = recipient_config.model_dump_json()
+        field_mapping_json = field_mapping.model_dump_json()
         profile = WeComSyncProfile(
             id=generate_ulid(),
             user_id=owner_id,
@@ -500,6 +510,9 @@ class WeComConnectionService:
             async with self._session.begin_nested():
                 await self._profiles.add(profile)
         except IntegrityError:
+            # A concurrent connect() from the same user raced us and won: the
+            # row that now exists is a real "existing profile" case, so the
+            # same preserve-don't-overwrite rule applies here too.
             existing = await self._profiles.get_for_owner(owner_id)
             if existing is None:
                 raise
@@ -507,8 +520,6 @@ class WeComConnectionService:
             existing.template_id = template_id
             existing.destination_fingerprint = destination_fingerprint
             existing.question_mapping_json = question_mapping_json
-            existing.recipient_config_json = recipient_config_json
-            existing.field_mapping_json = field_mapping_json
             existing.schema_fingerprint = schema_fingerprint
             existing.is_active = True
             existing.version += 1
