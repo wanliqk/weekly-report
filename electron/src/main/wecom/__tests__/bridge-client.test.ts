@@ -171,6 +171,46 @@ describe('WeComBridgeClient', () => {
     ).rejects.toBeInstanceOf(WeComBridgeClientError)
   })
 
+  it('surfaces the sidecar error envelope msg instead of a generic HTTP status message', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(
+        { code: 50201, msg: '企业微信返回内容不符合已知协议', data: {} },
+        { ok: false, status: 502 }
+      )
+    )
+    const client = new WeComBridgeClient(baseDeps(fetchImpl))
+
+    await expect(
+      client.executeSync('01ARZ3NDEKTSV4RRFFQ69G5FAV', sampleCookieJar())
+    ).rejects.toThrow('企业微信返回内容不符合已知协议')
+  })
+
+  it('falls back to a generic HTTP status message when the error body has no msg', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ detail: 'Not Found' }, { ok: false, status: 404 })
+    )
+    const client = new WeComBridgeClient(baseDeps(fetchImpl))
+
+    await expect(
+      client.executeSync('01ARZ3NDEKTSV4RRFFQ69G5FAV', sampleCookieJar())
+    ).rejects.toThrow('企业微信内部服务请求失败（HTTP 404）')
+  })
+
+  it('falls back to a generic HTTP status message when the error body is not JSON', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new Error('Unexpected token < in JSON')
+      }
+    })) as unknown as WeComFetch
+    const client = new WeComBridgeClient(baseDeps(fetchImpl))
+
+    await expect(
+      client.executeSync('01ARZ3NDEKTSV4RRFFQ69G5FAV', sampleCookieJar())
+    ).rejects.toThrow('企业微信内部服务请求失败（HTTP 502）')
+  })
+
   it('turns a network-level fetch failure into a clean typed error', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('ECONNREFUSED')

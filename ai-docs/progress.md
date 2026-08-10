@@ -628,3 +628,9 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - 用户明确要求处理，判定为产品决策（`PROD-030`）：`_upsert_profile()` 改为只有该用户从未有过 profile 行（含并发插入竞态回退到 `IntegrityError` 分支）时，才写入首次计算的默认 `field_mapping`/`recipient_config`；已存在 profile 的重连（无论是否换了 `form_id`）只更新 `form_id`/`template_id`/`destination_fingerprint`/`question_mapping_json`/`schema_fingerprint`/`is_active`/`version`，不再触碰用户已配置的映射与收件人。`docs/方案设计.md` §5.1 步骤 5 同步补充一句澄清。
 - 新增回归测试 `test_reconnect_preserves_manually_configured_field_mapping_and_recipient_config`：先首次连接，再通过 `update_profile()` 写入自定义映射规则与收件人，然后切到 `another-form` 重连，断言两者原样保留、`form_id`/`version` 仍按预期更新。
 - 后端 `ruff check`/`mypy` strict（150 个源文件）/`pytest` 均实际执行：定向 `test_wecom_connection_service.py` 12 项全部通过；全量 pytest 唯一失败是 `test_config.py::test_test_environment_does_not_require_a_runtime_secret`，`git stash` 对比确认改动前后同样失败，是本机 `backend/.env` 残留空 `WEEKLY_REPORT_RUNTIME_SECRET` 导致，与 `ISS-046` 记录的是同一个已知环境问题，与本次改动无关。
+
+## 26. 同步失败提示只显示 HTTP 状态码，丢弃了 sidecar 的具体错误信息（`ISS-049`）
+
+- 用户报告日报同步失败时提示"企业微信内部服务请求失败（HTTP 502）"，看不出具体是什么问题。定位到 `electron/src/main/wecom/bridge-client.ts::request()`：非 2xx 响应时只拼接状态码抛出，从未读取响应体——而 sidecar 的统一异常处理（`backend/app/core/errors.py::register_exception_handlers`）对包括 Main-only `internal/wecom/**` 在内的所有路由都返回 `{code,msg,data}` 信封，`msg` 本来就是具体原因（该场景是 `_app_error_for()` 兜底分支的"企业微信返回内容不符合已知协议"）。这个 `WeComBridgeClientError.message` 会经 `register-wecom-bridge.ts::toReason()` 原样透传成 renderer `ElMessage.error` 展示的文案，所以之前用户看到的只有状态码。
+- 新增 `WeComBridgeClient.extractErrorMessage()`：非 2xx 响应先尝试解析 JSON 取非空 `msg` 字段作为错误信息；只有响应体不是这个形状（非 FastAPI 响应、代理错误页、非 JSON 内容等）时才回退到原来的"企业微信内部服务请求失败（HTTP {status}）"通用文案，作为安全网而非被删除。
+- 新增 2 项 Vitest 用例：sidecar 错误信封 `msg` 优先展示（502 + 具体 `msg`）、无 `msg`/响应体非 JSON 两种场景都正确回退到通用文案；既有"404 变成 clean typed error"用例未改动、仍通过。前端 `lint`/`typecheck`/`test`（27 文件 264 项）/`build` 均实际执行并通过。

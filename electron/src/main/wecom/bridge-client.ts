@@ -151,7 +151,7 @@ export class WeComBridgeClient {
     }
 
     if (!response.ok) {
-      throw new WeComBridgeClientError(`企业微信内部服务请求失败（HTTP ${response.status}）`)
+      throw new WeComBridgeClientError(await this.extractErrorMessage(response))
     }
 
     try {
@@ -159,6 +159,24 @@ export class WeComBridgeClient {
     } catch {
       throw new WeComBridgeClientError('企业微信内部服务返回了无法解析的响应')
     }
+  }
+
+  // The sidecar's unified `{code,msg,data}` envelope (`app/core/errors.py`)
+  // puts the actual, specific reason in `msg` even on a non-2xx response
+  // (e.g. "企业微信模板结构已变化" for a 502) — showing only the HTTP status
+  // discarded that and left the user with an undiagnosable "HTTP 502". Falls
+  // back to the generic status message only when the body genuinely isn't
+  // that shape (a non-FastAPI 404, a proxy error page, etc.).
+  private async extractErrorMessage(response: Response): Promise<string> {
+    try {
+      const body: unknown = await response.json()
+      if (isRecord(body) && typeof body.msg === 'string' && body.msg.trim().length > 0) {
+        return body.msg
+      }
+    } catch {
+      // Body isn't JSON at all — fall through to the generic message below.
+    }
+    return `企业微信内部服务请求失败（HTTP ${response.status}）`
   }
 }
 
