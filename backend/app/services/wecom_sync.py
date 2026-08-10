@@ -264,6 +264,30 @@ def _rebuild_current_specs(
     return specs[0], specs[1], specs[2]
 
 
+def _resolve_current_fork_form_id(form_detail: WeComFormDetail, *, fallback: str) -> str:
+    """WeCom's recurring "日报" form materializes a new per-day sub-form
+    ("fork", `fork_items`) over time rather than keeping one stable
+    `form_id` forever (`docs/方案设计.md` §10.2: "这个周期性表单存在哪些日期的实例
+    (fork)"). `profile.form_id` is only ever set at connect time and never
+    updated afterwards, so it drifts behind as new forks get created; real
+    usage showed `submit_daily` rejecting a write against a fork that was
+    already superseded by a newer one present in the very same
+    `get_form_detail()` response's `fork_items` (`business_code=-1000888`).
+
+    The freshest fork (largest `ctime`) is resolved fresh on every submit
+    attempt and used **only** for this one wire call — `profile.form_id`/
+    `destination_fingerprint` deliberately stay untouched, since those are
+    the stable connect-time identity `wecom_daily_sync_records`' uniqueness
+    and this integration's whole idempotency model (`PROD-029`) are built
+    on; rotating fork ids were never meant to be part of that identity.
+    Falls back to `fallback` (the profile's own `form_id`, i.e. today's
+    previous behavior) when `fork_items` is empty, matching how a
+    newly-connected profile with no fork history yet still submits."""
+    if not form_detail.fork_items:
+        return fallback
+    return max(form_detail.fork_items, key=lambda item: item.ctime).form_id
+
+
 @dataclass
 class _SyncAttemptOutcome:
     status: str
@@ -710,9 +734,12 @@ class WeComSyncService:
             recipient_config = WeComRecipientConfig.model_validate_json(
                 profile.recipient_config_json
             )
+            submission_form_id = _resolve_current_fork_form_id(
+                form_detail, fallback=profile.form_id
+            )
             try:
                 payload = WeComSubmitDailyPayload(
-                    form_id=profile.form_id,
+                    form_id=submission_form_id,
                     template_id=profile.template_id,
                     items=[
                         WeComAnswerItem(

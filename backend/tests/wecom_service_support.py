@@ -181,6 +181,7 @@ class StubWeComClient:
         self.get_template_info_calls = 0
         self.get_form_detail_calls = 0
         self.submit_daily_calls = 0
+        self.last_submit_payload: WeComSubmitDailyPayload | None = None
 
     async def get_template_info(
         self, cookie_jar: Sequence[WeComCookieIn], form_id: str
@@ -202,6 +203,7 @@ class StubWeComClient:
         self, cookie_jar: Sequence[WeComCookieIn], payload: WeComSubmitDailyPayload
     ) -> WeComSubmissionResult:
         self.submit_daily_calls += 1
+        self.last_submit_payload = payload
         if self.submit_error is not None:
             raise self.submit_error
         return self.submission_result

@@ -464,6 +464,73 @@ async def test_execute_submits_even_when_a_fork_exists_on_the_matching_date(
     assert stub.submit_daily_calls == 1
 
 
+async def test_execute_submits_to_the_freshest_fork_not_the_stale_connect_time_form_id(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """Real usage: WeCom's recurring "日报" form materializes a new per-day
+    fork over time, and `profile.form_id` (frozen at connect time) can end
+    up pointing at one already superseded by a newer fork present in the
+    very same `get_form_detail()` response — submitting against the stale
+    one is rejected (`business_code=-1000888`, `ISS-051`). The wire-level
+    submission must target the fork with the largest `ctime`, even though
+    it's not `profile.form_id`."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    work_date = date(2026, 8, 5)
+    await _prepare_archived_day(session_factory, owner_id=user.id, work_date=work_date)
+    await _connect(session_factory, owner_id=user.id)
+    async with session_factory() as session:
+        record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
+        profile_before = await WeComConnectionService(session).get_profile(user.id)
+
+    stale_fork = build_fork_item(form_id=DEFAULT_FORM_ID, ctime=1_000_000)
+    fresh_fork = build_fork_item(form_id="SYNTHETIC-FORM-FRESH-FORK-00000000001", ctime=2_000_000)
+    stub = StubWeComClient(form_detail=build_form_detail(fork_items=[stale_fork, fresh_fork]))
+    async with session_factory() as session:
+        finished = await WeComSyncService(session, client=stub).execute(
+            user.id, record.id, cookie_jar=[]
+        )
+
+    assert finished.status == "succeeded"
+    assert stub.last_submit_payload is not None
+    assert stub.last_submit_payload.form_id == "SYNTHETIC-FORM-FRESH-FORK-00000000001"
+
+    async with session_factory() as session:
+        profile_after = await WeComConnectionService(session).get_profile(user.id)
+    # `destination_fingerprint`/`form_id` are the stable connect-time identity
+    # `wecom_daily_sync_records`' uniqueness (`PROD-029`) is built on — a
+    # rotating fork id must never leak into either, only into the one wire
+    # call above.
+    assert profile_after.form_id == profile_before.form_id == DEFAULT_FORM_ID
+    assert profile_after.destination_fingerprint == profile_before.destination_fingerprint
+    assert profile_after.version == profile_before.version
+
+
+async def test_execute_falls_back_to_profile_form_id_without_any_fork_items(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """No `fork_items` at all (e.g. a freshly connected profile with no fork
+    history yet) must behave exactly as before this fix: submit straight to
+    `profile.form_id`."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    work_date = date(2026, 8, 5)
+    await _prepare_archived_day(session_factory, owner_id=user.id, work_date=work_date)
+    await _connect(session_factory, owner_id=user.id)
+    async with session_factory() as session:
+        record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
+
+    stub = StubWeComClient(form_detail=build_form_detail(fork_items=[]))
+    async with session_factory() as session:
+        finished = await WeComSyncService(session, client=stub).execute(
+            user.id, record.id, cookie_jar=[]
+        )
+
+    assert finished.status == "succeeded"
+    assert stub.last_submit_payload is not None
+    assert stub.last_submit_payload.form_id == DEFAULT_FORM_ID
+
+
 async def test_execute_maps_an_uncertain_outcome_and_blocks_direct_retry(
     wecom_engine: AsyncEngine,
 ) -> None:
