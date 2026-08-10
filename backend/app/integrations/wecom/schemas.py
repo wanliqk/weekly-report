@@ -72,7 +72,13 @@ class WeComTemplateEntry(BaseModel):
     """One `body.entrys[]` entry from `get_template_combine_info` — an
     existing submission summary, connect-time only (see
     `WeComFormDetailForkItem` for the execute-time equivalent used for
-    duplicate-checking, sourced from a different endpoint/shape)."""
+    duplicate-checking, sourced from a different endpoint/shape).
+
+    `reportvids`: WeCom's own already-resolved recipient list for this
+    submission (real captures confirm it is the template's configured
+    approvers, never the submitting user's own vid — `ai-docs/issues.md`
+    `ISS-052`). Optional/defaults to empty since older captures and a
+    first-ever connect with no submission history at all never carry it."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -81,6 +87,7 @@ class WeComTemplateEntry(BaseModel):
     reply_id: RemoteId
     reply_name: str
     form_id: RemoteId
+    reportvids: list[RemoteId] = Field(default_factory=list)
 
 
 class WeComTemplateInfo(BaseModel):

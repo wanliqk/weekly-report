@@ -339,21 +339,29 @@ class WeComConnectionService:
             best_guess_entry = template_info.entries[0] if template_info.entries else None
             wecom_vid = best_guess_entry.reply_id if best_guess_entry is not None else ""
             display_name = best_guess_entry.reply_name if best_guess_entry is not None else ""
-            # §5.1 step 6 / §6.3: no reliable source can discover a general
-            # recipient *list* at connect time, but real submitted traffic
-            # (`ISS-042`) shows WeCom rejects a write whose `wwjournal_data.
-            # entry.reporter` is empty — this integration's whole purpose is
-            # "sync my own daily report", so defaulting `reporter_vids` to
-            # the same best-guess `wecom_vid` already computed above (rather
-            # than leaving it empty and requiring everyone to hand-enter
-            # their own vid in Settings before their first successful sync)
-            # is the honest, low-risk default: it's never worse than empty
-            # (which is proven to always fail), and Settings still lets a
-            # user override/add more recipients afterward.
+            # §5.1 step 6 / §6.3, 2026-08-11 revision (`ISS-052`):
+            # `entries[0].reportvids` (always present on a real historical
+            # entry, previously parsed and silently discarded by
+            # `WeComTemplateEntry`'s `extra="ignore"`) is WeCom's own
+            # already-resolved recipient list — real captures confirm it is
+            # the template's configured approvers, never the submitting
+            # user's own vid. `ISS-042`'s "default to the connecting user's
+            # own `wecom_vid`" was only ever a stopgap for "empty is proven
+            # to always fail"; real usage then proved that self-targeted
+            # default itself gets rejected too (`business_code=-1000888`)
+            # once real approvers exist. `reportvids` wins whenever an entry
+            # provides it; the old self-vid fallback is kept only for a
+            # first-ever connect with no submission history at all to
+            # discover any recipient from — still better than empty.
+            default_reporter_vids = (
+                list(best_guess_entry.reportvids)
+                if best_guess_entry is not None and best_guess_entry.reportvids
+                else ([wecom_vid] if wecom_vid else [])
+            )
             recipient_config = WeComRecipientConfig(
                 schema_version=1,
                 mngreporter_vids=[],
-                reporter_vids=[wecom_vid] if wecom_vid else [],
+                reporter_vids=default_reporter_vids,
                 remote_version=0,
             )
             field_mapping = WeComFieldMappingConfig(

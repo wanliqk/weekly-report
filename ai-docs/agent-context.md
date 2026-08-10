@@ -1,7 +1,7 @@
 # Agent 启动上下文
 
 > 适用分支：`v1`
-> 快照日期：2026-08-10
+> 快照日期：2026-08-11
 > 用途：让新 Agent 在开始任务前快速恢复可靠上下文
 
 ## 1. 启动必读顺序
@@ -71,6 +71,8 @@
 - 2026-08-10 完成 `ISS-049`：用户报告日报同步失败只提示"企业微信内部服务请求失败（HTTP 502）"，看不出具体原因。根因是 `electron/src/main/wecom/bridge-client.ts::request()` 对非 2xx 响应只拼状态码，从未读取 sidecar 统一 `{code,msg,data}` 错误信封（`backend/app/core/errors.py`，对全部路由生效，含 Main-only `internal/wecom/**`）里本来携带的具体 `msg`，而这个 message 会经 `register-wecom-bridge.ts::toReason()` 原样透传给 renderer 的 `ElMessage.error`。新增 `extractErrorMessage()`：非 2xx 响应优先取响应体里的非空 `msg`，只有响应体不是该形状时才回退到原来的"HTTP {status}"通用文案。新增 2 项 Vitest 用例，前端 `lint`/`typecheck`/`test`（27 文件 264 项）/`build` 均通过。
 - 2026-08-10 完成 `ISS-050`：`ISS-049` 之后用户又报告同步失败提示变成固定文案"企业微信拒绝了本次提交"，仍看不出原因——问题挪到了更深一层：后端 `wecom_sync.py::_classify_write_client_error()`/`_classify_read_client_error()` 对 `WeComBusinessRejected` 都写死一句通用消息，丢弃了异常自带的 `biz_code`（真实场景常见 `business_code=-120000035`，`ISS-042` 已记录），且 `_app_error_for()` 对 `business_rejected` 没有专属分支，即时报错和持久化的 `last_error_message` 文案还互相不一致。新增 `_business_rejection_message()` 把 `biz_code` 直接拼进消息（如"企业微信拒绝了本次提交(业务码 -120000035)"），`_app_error_for()` 新增 `message` 形参消掉两处文案不一致；`exc.biz_message`（WeCom 原始响应文案）按 `docs/方案设计.md` §9.4"不透传企业微信原始响应"明确不转发，只暴露已被判定为安全分类信息的 `biz_code`。新增 3 项 pytest（含一个显式验证 `biz_message` 不泄露的负向用例），后端 `ruff check`/`mypy` strict（150 个源文件）/`pytest` 均通过（唯一失败仍是 `ISS-046`/`ISS-048` 同源的本机 `.env` 环境问题）；未触碰 `electron/**`。
 - 2026-08-10 完成 `ISS-051`（`PROD-031`）：`ISS-050` 之后用户报告的新提示是"企业微信拒绝了本次提交(业务码 -1000888)"，问题回到协议本身。用户此前排障留下的 `WEEKLY_REPORT_WECOM_DEBUG_RAW_BODY` 仍开着（`backend/.env`），读取本机真实原始日志定位到根因：企业微信"周期性日报表单"的 `form_id` 会随时间持续生成新 fork，旧 fork 到某个时间点后不再接受提交；`wecom_sync_profiles.form_id` 只在连接时写入一次、此后从不更新，真实账号连接时保存的 fork 已落后约一天，而更新的 fork 其实就在同一次 `get_form_detail()` 响应的 `fork_items` 里，此前从未被用来选择提交目标。新增 `_resolve_current_fork_form_id()`：提交时从当次 `fork_items` 选 `ctime` 最大的一项，`fork_items` 为空退回 `profile.form_id`；解析出的 form_id 只用于这一次提交 HTTP 调用，刻意不回写 `profile.form_id`/`destination_fingerprint`——两者仍是 `wecom_daily_sync_records` 唯一约束和整套幂等模型（`PROD-029`）依赖的稳定身份，轮换的 fork id 不得混入。`docs/方案设计.md` §10.2 追加第三次修订。新增 2 项 pytest（`StubWeComClient` 新增 `last_submit_payload` 供断言），全部真实标识落地前已替换为合成占位值。后端 `ruff check`/`mypy` strict（150 个源文件）/`pytest` 均通过（唯一失败仍是同源 `.env` 环境问题）。**此修复基于单次真实抓包的最佳推断（`fork_items` 里 `ctime` 最大者即当前有效目标），尚未经用户真实重试确认成功**，下一个新会话如果用户报告同一业务码仍未解决，需要重新评估这个判据（可能需要更多真实样本）。
+- 2026-08-11：`ISS-051` 的推断被用户真实重试证伪——原始日志确认提交已经改用最新 fork，但仍是同一个 `business_code=-1000888`；修复本身保留（仍是合理的独立正确性改进），根因另有其人。同一轮排障还发现一个独立、更严重的问题：这一个多小时里的 7 次重试，每次都在用户真实企业微信账号里多写入一条新记录（即便响应报错），已提醒用户检查/清理真实账号里的重复占位内容并暂停继续重试，记为 `ISS-053`（P1，OPEN，"报错但实际已写入"该不该改判成不可直接重试的 `uncertain`，留给用户决定，未擅自改状态机）。
+- 2026-08-11 完成 `ISS-052`：用户提供新真实抓包（`backend/wx-ribao/获取reportvids.txt`，用户自行获取，遵循既定治理只本地读取、未提交仓库）证实真正根因：`get_template_combine_info?_prefetch=1`（连接时已在调用的同一端点）响应 `body.entrys[].reportvids` 字段一直存在，是企业微信自己解析好的收件人（模板配置的审批人），从来不是提交者本人；而 `ISS-042` 把 `reporter_vids` 默认成"提交者自己的 vid"这个假设从一开始就错了，只是当时错误地被真实使用"证明"为可行（避开了空列表必被拒绝的问题，却没避开真正的收件人校验）。`WeComTemplateEntry` 新增 `reportvids: list[RemoteId]`（此前一直被 `extra="ignore"` 静默丢弃）；`validate_connection()` 改为优先用 `entries[0].reportvids`，无历史记录时才退回旧的自身 vid 兜底。`docs/方案设计.md` §6.3 追加修订。新增 2 项 pytest，后端 `ruff check`/`mypy` strict（150 个源文件）/`pytest` 均通过（唯一失败仍是同源 `.env` 环境问题）。**这个修复只影响新连接**：该真实用户已有 profile，`ISS-048` 让重连不再覆盖已有 `recipient_config`，新默认值不会自动应用，已告知用户直接在设置页把"填报接收人 vid"手动改成抓包里的两个真实审批人 vid 立即测试。**尚未经用户真实重试确认 -1000888 消失**，下一个新会话如果用户报告同一业务码仍未解决，说明"收件人不对"不是全部根因，需要再要一次真实抓包。
 
 “依赖已列入清单”不等于对应业务已完成；“技术方案已描述”也不等于已经落地。
 

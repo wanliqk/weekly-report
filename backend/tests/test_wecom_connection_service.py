@@ -6,7 +6,14 @@ from pathlib import Path
 import pytest
 from conftest import STAGE5_PASSWORD
 from sqlalchemy.ext.asyncio import AsyncEngine
-from wecom_service_support import StubWeComClient, build_target_questions, build_template_info
+from wecom_service_support import (
+    DEFAULT_FORM_ID,
+    DEFAULT_REPLY_NAME,
+    DEFAULT_REPLY_VID,
+    StubWeComClient,
+    build_target_questions,
+    build_template_info,
+)
 
 from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
@@ -15,7 +22,7 @@ from app.db.engine import create_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
 from app.integrations.wecom.client import WeComAuthExpired
-from app.integrations.wecom.schemas import WeComQuestionItem
+from app.integrations.wecom.schemas import WeComQuestionItem, WeComTemplateEntry
 from app.models import User
 from app.schemas.wecom import WeComFieldMappingConfig, WeComFieldMappingRule, WeComRecipientConfig
 from app.services.bootstrap import BootstrapService
@@ -134,6 +141,61 @@ async def test_validate_connection_leaves_reporter_vids_empty_without_a_best_gue
         profile = await WeComConnectionService(session).get_profile(user.id)
         recipient_config = WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
         assert recipient_config.reporter_vids == []
+
+
+async def test_validate_connection_prefers_reportvids_over_the_connecting_users_own_vid(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """`ISS-052`: real captures show `entrys[0].reportvids` is WeCom's own
+    already-resolved recipient list (the template's configured approvers) —
+    never the submitting user's own vid. It must win over `ISS-042`'s
+    self-vid fallback whenever a real entry provides it, since real traffic
+    later proved the self-targeted default itself gets rejected too."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    entry = WeComTemplateEntry(
+        journalid="SYNTHETIC-JOURNAL-0000000000000002",
+        createtime=1700000000,
+        reply_id=DEFAULT_REPLY_VID,
+        reply_name=DEFAULT_REPLY_NAME,
+        form_id=DEFAULT_FORM_ID,
+        reportvids=["9000000000000099", "9000000000000098"],
+    )
+    stub = StubWeComClient(template_info=build_template_info(entries=[entry]))
+
+    async with session_factory() as session:
+        await WeComConnectionService(session, client=stub).validate_connection(
+            user.id, cookie_jar=[], credential_slot="slot-1", form_id="form-1"
+        )
+
+    async with session_factory() as session:
+        profile = await WeComConnectionService(session).get_profile(user.id)
+        recipient_config = WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
+        assert recipient_config.reporter_vids == ["9000000000000099", "9000000000000098"]
+        assert recipient_config.mngreporter_vids == []
+
+
+async def test_validate_connection_falls_back_to_own_vid_when_entry_has_no_reportvids(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """A legacy/older capture shape or an entry that simply never carried
+    `reportvids` must fall back to `ISS-042`'s self-vid default, exactly as
+    before this change — `reportvids` is preferred, not required."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    stub = StubWeComClient(template_info=build_template_info())
+
+    async with session_factory() as session:
+        await WeComConnectionService(session, client=stub).validate_connection(
+            user.id, cookie_jar=[], credential_slot="slot-1", form_id="form-1"
+        )
+
+    async with session_factory() as session:
+        binding = await WeComConnectionService(session).get_binding(user.id)
+        assert binding is not None
+        profile = await WeComConnectionService(session).get_profile(user.id)
+        recipient_config = WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
+        assert recipient_config.reporter_vids == [binding.wecom_vid]
 
 
 async def test_validate_connection_maps_auth_error_and_persists_nothing(
