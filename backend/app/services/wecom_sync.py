@@ -161,7 +161,7 @@ _RETRY_ALLOWED_SOURCE_STATUSES = ("failed", "auth_required", "schema_changed", "
 STALE_SYNCING_LEASE_SECONDS = 300
 
 
-def _app_error_for(status: str, kind: str | None = None) -> AppError:
+def _app_error_for(status: str, kind: str | None = None, *, message: str | None = None) -> AppError:
     if status == "auth_required":
         return AppError(
             code=40911, http_status=409, message="企业微信未连接或登录已失效,请先重新登录"
@@ -181,7 +181,32 @@ def _app_error_for(status: str, kind: str | None = None) -> AppError:
         return AppError(
             code=40001, http_status=400, message="同步内容未完成映射或超出限制,请检查同步设置"
         )
+    if kind == "business_rejected":
+        # `message` is `_classify_read_client_error`/`_classify_write_client_error`'s
+        # already-built `_business_rejection_message()` text (includes
+        # `biz_code`) — reused here instead of a second, independently
+        # hardcoded generic sentence so the synchronous error response the
+        # caller sees immediately matches what gets persisted to
+        # `last_error_message`.
+        return AppError(code=50201, http_status=502, message=message or "企业微信拒绝了本次操作")
     return AppError(code=50201, http_status=502, message="企业微信返回内容不符合已知协议")
+
+
+def _business_rejection_message(exc: WeComBusinessRejected, *, action: str) -> str:
+    """`action` is "请求"(读取模板结构) or "提交"(写入日报答案).
+
+    WeCom frequently rejects with a non-zero business code and no `head.msg`
+    text at all (`ai-docs/issues.md` `ISS-042`: `business_code=-120000035`,
+    no文案) — the business code is the only diagnostic ever actually
+    available, so it's always surfaced directly instead of being hidden
+    behind one fixed generic sentence regardless of the real reason.
+    `exc.biz_message` (verbatim text from WeCom's own response body, when it
+    does provide one) is deliberately never forwarded to the user —
+    `docs/方案设计.md` §9.4: "响应只给出用户可行动建议和本地 record_id,不透传企业微信
+    原始响应"; `biz_code` is the documented safe exception (`WeComClientError`'s
+    own docstring lists "a business code" alongside an HTTP status as
+    safe-to-surface classification context, unlike a raw body)."""
+    return f"企业微信拒绝了本次{action}(业务码 {exc.biz_code})"
 
 
 def _classify_read_client_error(exc: WeComClientError) -> tuple[str, str, str, str | None]:
@@ -192,7 +217,7 @@ def _classify_read_client_error(exc: WeComClientError) -> tuple[str, str, str, s
     if isinstance(exc, WeComSchemaChanged | WeComProtocolChanged):
         return "schema_changed", "schema_changed", "企业微信模板结构已变化,请重新连接", None
     if isinstance(exc, WeComBusinessRejected):
-        return "failed", "business_rejected", "企业微信拒绝了本次请求", None
+        return "failed", "business_rejected", _business_rejection_message(exc, action="请求"), None
     if isinstance(exc, WeComTransportFailed):
         return "failed", "transport_failed", "无法连接企业微信服务,请稍后重试", None
     # WeComOutcomeUncertain: a read timed out mid-request.
@@ -207,7 +232,7 @@ def _classify_write_client_error(exc: WeComClientError) -> tuple[str, str, str, 
     if isinstance(exc, WeComAuthExpired):
         return "auth_required", "auth_expired", "登录状态已失效,请重新连接企业微信", "expired"
     if isinstance(exc, WeComBusinessRejected):
-        return "failed", "business_rejected", "企业微信拒绝了本次提交", None
+        return "failed", "business_rejected", _business_rejection_message(exc, action="提交"), None
     if isinstance(exc, WeComTransportFailed):
         return "failed", "transport_failed", "无法连接企业微信服务,请稍后重试", None
     return "uncertain", "uncertain", "提交结果不确定,请勿重复提交,需先对账", None
@@ -621,7 +646,7 @@ class WeComSyncService:
                     last_error_kind=kind,
                     last_error_message=message,
                     binding_status=binding_status,
-                    app_error=_app_error_for(status, kind),
+                    app_error=_app_error_for(status, kind, message=message),
                 )
 
             question_mapping = WeComQuestionMappingConfig.model_validate_json(
@@ -734,7 +759,7 @@ class WeComSyncService:
                     last_error_kind=kind,
                     last_error_message=message,
                     binding_status=binding_status,
-                    app_error=_app_error_for(status, kind),
+                    app_error=_app_error_for(status, kind, message=message),
                 )
 
             return _SyncAttemptOutcome(

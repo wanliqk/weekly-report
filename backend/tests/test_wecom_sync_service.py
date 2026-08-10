@@ -18,7 +18,11 @@ from app.core.ulid import generate_ulid
 from app.db.engine import create_engine
 from app.db.migrate import run_startup_migrations
 from app.db.session import create_session_factory
-from app.integrations.wecom.client import WeComAuthExpired, WeComOutcomeUncertain
+from app.integrations.wecom.client import (
+    WeComAuthExpired,
+    WeComBusinessRejected,
+    WeComOutcomeUncertain,
+)
 from app.integrations.wecom.schemas import WeComQuestionItem
 from app.models import DailyReport, DailyReportDay, User
 from app.repositories.daily_report_day import DailyReportDayRepository
@@ -291,6 +295,108 @@ async def test_execute_maps_auth_expired_and_marks_the_binding_expired(
         assert binding is not None
         assert binding.status == "expired"
         assert binding.last_auth_error_at is not None
+
+
+async def test_execute_maps_a_business_rejected_submit_to_a_message_with_the_biz_code(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """A real remote rejection during `submit_daily` (`ai-docs/issues.md`
+    `ISS-042`: `business_code=-120000035`, no `head.msg` text at all) must
+    surface the business code directly instead of the fixed, undiagnosable
+    generic sentence this used to collapse to (`ISS-049` follow-up)."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    work_date = date(2026, 8, 5)
+    await _prepare_archived_day(session_factory, owner_id=user.id, work_date=work_date)
+    await _connect(session_factory, owner_id=user.id)
+    async with session_factory() as session:
+        record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
+
+    stub = StubWeComClient(
+        submit_error=WeComBusinessRejected(
+            "business rejected", biz_code=-120000035, biz_message=None
+        )
+    )
+    async with session_factory() as session:
+        with pytest.raises(Exception) as excinfo:
+            await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
+    assert getattr(excinfo.value, "code", None) == 50201
+    assert getattr(excinfo.value, "message", None) == "企业微信拒绝了本次提交(业务码 -120000035)"
+
+    async with session_factory() as session:
+        refreshed = await WeComDailySyncRecordRepository(session).get_for_owner(record.id, user.id)
+        assert refreshed is not None
+        assert refreshed.status == "failed"
+        assert refreshed.last_error_kind == "business_rejected"
+        assert refreshed.last_error_message == "企业微信拒绝了本次提交(业务码 -120000035)"
+
+
+async def test_execute_never_forwards_wecom_own_rejection_text_to_the_user(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """`docs/方案设计.md` §9.4: "响应只给出用户可行动建议和本地 record_id,不透传企业微信
+    原始响应" — even when WeCom's response does include a `head.msg`, that
+    verbatim remote text must never reach `last_error_message` or the raised
+    `AppError`; only the business code (already treated elsewhere in this
+    codebase as safe classification context) is surfaced."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    work_date = date(2026, 8, 5)
+    await _prepare_archived_day(session_factory, owner_id=user.id, work_date=work_date)
+    await _connect(session_factory, owner_id=user.id)
+    async with session_factory() as session:
+        record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
+
+    stub = StubWeComClient(
+        submit_error=WeComBusinessRejected(
+            "business rejected", biz_code=40001, biz_message="真实企业微信原始文案,不应透传"
+        )
+    )
+    async with session_factory() as session:
+        with pytest.raises(Exception) as excinfo:
+            await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
+    assert "真实企业微信原始文案" not in getattr(excinfo.value, "message", "")
+
+    async with session_factory() as session:
+        refreshed = await WeComDailySyncRecordRepository(session).get_for_owner(record.id, user.id)
+        assert refreshed is not None
+        assert refreshed.last_error_message is not None
+        assert "真实企业微信原始文案" not in refreshed.last_error_message
+        assert "40001" in refreshed.last_error_message
+
+
+async def test_execute_maps_a_business_rejected_read_to_a_message_with_the_biz_code(
+    wecom_engine: AsyncEngine,
+) -> None:
+    """Same coverage as the submit-path tests above, but for a business
+    rejection raised from the read-only `get_form_detail()` structure
+    re-check step (`_classify_read_client_error`, distinct code path)."""
+    session_factory = create_session_factory(wecom_engine)
+    user = await _bootstrap_user(session_factory)
+    work_date = date(2026, 8, 5)
+    await _prepare_archived_day(session_factory, owner_id=user.id, work_date=work_date)
+    await _connect(session_factory, owner_id=user.id)
+    async with session_factory() as session:
+        record, _created = await WeComSyncService(session).get_or_create_record(user.id, work_date)
+
+    stub = StubWeComClient(
+        form_detail_error=WeComBusinessRejected(
+            "business rejected", biz_code=-120000035, biz_message=None
+        )
+    )
+    async with session_factory() as session:
+        with pytest.raises(Exception) as excinfo:
+            await WeComSyncService(session, client=stub).execute(user.id, record.id, cookie_jar=[])
+    assert getattr(excinfo.value, "code", None) == 50201
+    assert getattr(excinfo.value, "message", None) == "企业微信拒绝了本次请求(业务码 -120000035)"
+    assert stub.submit_daily_calls == 0
+
+    async with session_factory() as session:
+        refreshed = await WeComDailySyncRecordRepository(session).get_for_owner(record.id, user.id)
+        assert refreshed is not None
+        assert refreshed.status == "failed"
+        assert refreshed.last_error_kind == "business_rejected"
+        assert refreshed.last_error_message == "企业微信拒绝了本次请求(业务码 -120000035)"
 
 
 async def test_execute_maps_missing_target_question_to_schema_changed(
