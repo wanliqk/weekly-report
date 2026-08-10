@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
-from wecom_service_support import build_template_info
+from wecom_service_support import DEFAULT_REPLY_VID, build_template_info
 
 from app.core.config import Settings
 from app.core.paths import ensure_runtime_directories
@@ -235,20 +235,27 @@ def test_full_public_flow_after_connecting_and_archiving(
         headers=headers,
         json={
             "expected_version": 1,
-            "recipient_config": {
+            "field_mapping": {
                 "schema_version": 1,
-                "mngreporter_vids": ["9000000000000099"],
-                "reporter_vids": [],
-                "remote_version": 1,
+                "rules": [],
+                "unmapped_policy": "ignore",
             },
         },
     )
     assert update.status_code == 200, update.text
     assert update.json()["data"]["version"] == 2
-    assert update.json()["data"]["recipient_config"]["mngreporter_vids"] == ["9000000000000099"]
+    assert update.json()["data"]["field_mapping"]["unmapped_policy"] == "ignore"
+    # `recipient_config` is never user-editable (`PROD-032`) — it stays
+    # whatever `_connect()`'s connect-time resolution produced.
+    assert update.json()["data"]["recipient_config"]["reporter_vids"] == [DEFAULT_REPLY_VID]
 
     stale_update = client.put(
-        "/api/v1/wecom/profile", headers=headers, json={"expected_version": 1}
+        "/api/v1/wecom/profile",
+        headers=headers,
+        json={
+            "expected_version": 1,
+            "field_mapping": {"schema_version": 1, "rules": [], "unmapped_policy": "block"},
+        },
     )
     assert stale_update.status_code == 409
     assert stale_update.json()["code"] == 40904

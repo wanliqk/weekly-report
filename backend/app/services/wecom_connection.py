@@ -339,25 +339,30 @@ class WeComConnectionService:
             best_guess_entry = template_info.entries[0] if template_info.entries else None
             wecom_vid = best_guess_entry.reply_id if best_guess_entry is not None else ""
             display_name = best_guess_entry.reply_name if best_guess_entry is not None else ""
-            # §5.1 step 6 / §6.3, 2026-08-11 revision (`ISS-052`):
-            # `entries[0].reportvids` (always present on a real historical
-            # entry, previously parsed and silently discarded by
-            # `WeComTemplateEntry`'s `extra="ignore"`) is WeCom's own
-            # already-resolved recipient list — real captures confirm it is
-            # the template's configured approvers, never the submitting
-            # user's own vid. `ISS-042`'s "default to the connecting user's
-            # own `wecom_vid`" was only ever a stopgap for "empty is proven
-            # to always fail"; real usage then proved that self-targeted
-            # default itself gets rejected too (`business_code=-1000888`)
-            # once real approvers exist. `reportvids` wins whenever an entry
-            # provides it; the old self-vid fallback is kept only for a
-            # first-ever connect with no submission history at all to
-            # discover any recipient from — still better than empty.
-            default_reporter_vids = (
-                list(best_guess_entry.reportvids)
-                if best_guess_entry is not None and best_guess_entry.reportvids
-                else ([wecom_vid] if wecom_vid else [])
-            )
+            # §5.1 step 6 / §6.3, 2026-08-11 revision (`ISS-052`/`ISS-054`,
+            # `PROD-032`): recipients are entirely system-resolved — a user
+            # is never asked to hand-type a vid. Three-tier fallback, most
+            # to least specific:
+            #   1. `entries[0].reportvids` — WeCom's own already-resolved
+            #      recipient list for a real past submission (previously
+            #      parsed and silently discarded by `WeComTemplateEntry`'s
+            #      `extra="ignore"`); real captures confirm it is the
+            #      template's configured approvers, never the submitter.
+            #   2. `template_info.appro[]` — the template's own configured
+            #      approver list, template-scoped so it's available even
+            #      before this user has ever submitted anything.
+            #   3. The connecting user's own `wecom_vid` (`ISS-042`) — kept
+            #      only as a last resort when neither of the above exists;
+            #      real usage proved this self-targeted default itself gets
+            #      rejected (`business_code=-1000888`) once real approvers
+            #      exist, so it must never be preferred over either tier
+            #      above.
+            if best_guess_entry is not None and best_guess_entry.reportvids:
+                default_reporter_vids = list(best_guess_entry.reportvids)
+            elif template_info.appro:
+                default_reporter_vids = [approver.vid for approver in template_info.appro]
+            else:
+                default_reporter_vids = [wecom_vid] if wecom_vid else []
             recipient_config = WeComRecipientConfig(
                 schema_version=1,
                 mngreporter_vids=[],
@@ -471,31 +476,37 @@ class WeComConnectionService:
         schema_fingerprint: str,
     ) -> None:
         question_mapping_json = question_mapping.model_dump_json()
+        recipient_config_json = recipient_config.model_dump_json()
 
-        # `recipient_config`/`field_mapping` are this method's caller-computed
-        # *first-connect* defaults (empty rules, best-guess vid). A reconnect
-        # (this user already has a profile row, whatever its form_id) must
-        # not apply them: `field_mapping.rules` is keyed by this app's own
-        # template `field_key` and has no relationship to which WeCom form is
-        # connected, and `recipient_config` is a user-editable setting once
-        # established. Overwriting either on every reconnect silently erased
-        # a user's already-working sync setup even when reconnecting to a
-        # form with identical field labels (reported by a real user; see
-        # `ai-docs/issues.md` ISS-042's trailing note and `PROD-030`). Only a
-        # brand-new profile (no existing row for this owner, in either branch
-        # below) uses the freshly computed defaults.
+        # `field_mapping` is this method's caller-computed *first-connect*
+        # default (empty rules). A reconnect (this user already has a
+        # profile row, whatever its form_id) must not apply it:
+        # `field_mapping.rules` is keyed by this app's own template
+        # `field_key` and has no relationship to which WeCom form is
+        # connected — overwriting it on every reconnect silently erased a
+        # user's already-working sync setup even when reconnecting to a form
+        # with identical field labels (reported by a real user; see
+        # `ai-docs/issues.md` ISS-042's trailing note and `PROD-030`).
+        #
+        # `recipient_config` is the opposite: it is *never* user-edited
+        # (`PROD-032` — the caller always computes it fresh from WeCom's own
+        # template/submission data, never from user input), so there is no
+        # user customization to protect here. A reconnect refreshing it to
+        # whatever the template's approvers currently resolve to is exactly
+        # the desired behavior, not a regression — it is overwritten on
+        # every connect, first or not.
         existing = await self._profiles.get_for_owner(owner_id)
         if existing is not None:
             existing.form_id = form_id
             existing.template_id = template_id
             existing.destination_fingerprint = destination_fingerprint
             existing.question_mapping_json = question_mapping_json
+            existing.recipient_config_json = recipient_config_json
             existing.schema_fingerprint = schema_fingerprint
             existing.is_active = True
             existing.version += 1
             await self._session.flush()
             return
-        recipient_config_json = recipient_config.model_dump_json()
         field_mapping_json = field_mapping.model_dump_json()
         profile = WeComSyncProfile(
             id=generate_ulid(),
@@ -520,7 +531,8 @@ class WeComConnectionService:
         except IntegrityError:
             # A concurrent connect() from the same user raced us and won: the
             # row that now exists is a real "existing profile" case, so the
-            # same preserve-don't-overwrite rule applies here too.
+            # same field_mapping-preserved/recipient_config-refreshed rule
+            # applies here too.
             existing = await self._profiles.get_for_owner(owner_id)
             if existing is None:
                 raise
@@ -528,6 +540,7 @@ class WeComConnectionService:
             existing.template_id = template_id
             existing.destination_fingerprint = destination_fingerprint
             existing.question_mapping_json = question_mapping_json
+            existing.recipient_config_json = recipient_config_json
             existing.schema_fingerprint = schema_fingerprint
             existing.is_active = True
             existing.version += 1
@@ -561,28 +574,16 @@ class WeComConnectionService:
         owner_id: str,
         *,
         expected_version: int,
-        recipient_config: WeComRecipientConfig | None,
-        field_mapping: WeComFieldMappingConfig | None,
+        field_mapping: WeComFieldMappingConfig,
     ) -> WeComSyncProfile:
         profile = await self._profiles.get_for_owner(owner_id)
         if profile is None:
             raise WeComNotConnectedError()
 
-        next_recipient_config = (
-            recipient_config
-            if recipient_config is not None
-            else WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
-        )
-        next_field_mapping = (
-            field_mapping
-            if field_mapping is not None
-            else WeComFieldMappingConfig.model_validate_json(profile.field_mapping_json)
-        )
-        updated = await self._profiles.update_config_if_version(
+        updated = await self._profiles.update_field_mapping_if_version(
             owner_id=owner_id,
             expected_version=expected_version,
-            recipient_config_json=next_recipient_config.model_dump_json(),
-            field_mapping_json=next_field_mapping.model_dump_json(),
+            field_mapping_json=field_mapping.model_dump_json(),
             updated_at=self._clock(),
         )
         if not updated:

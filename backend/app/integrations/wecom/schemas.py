@@ -90,6 +90,19 @@ class WeComTemplateEntry(BaseModel):
     reportvids: list[RemoteId] = Field(default_factory=list)
 
 
+class WeComTemplateApprover(BaseModel):
+    """One `body.template_info.appro[]` entry from `get_template_combine_info`
+    — the template's own configured approver, template-scoped (unlike
+    `WeComTemplateEntry.reportvids`, which is per past submission) and so
+    always available even before this user has ever submitted anything
+    (`ai-docs/issues.md` `ISS-054`)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    vid: RemoteId
+    name: str
+
+
 class WeComTemplateInfo(BaseModel):
     """Return value of `WeComInternalClient.get_template_info()` (connect-time
     only — see `WeComFormDetail` for the execute-time equivalent)."""
@@ -98,6 +111,7 @@ class WeComTemplateInfo(BaseModel):
     form_id: RemoteId
     entries: list[WeComTemplateEntry]
     questions: list[WeComQuestionItem]
+    appro: list[WeComTemplateApprover] = Field(default_factory=list)
 
 
 class WeComFormDetailForkItem(BaseModel):

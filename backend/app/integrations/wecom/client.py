@@ -47,6 +47,7 @@ from app.integrations.wecom.schemas import (
     WeComQuestionItem,
     WeComSubmissionResult,
     WeComSubmitDailyPayload,
+    WeComTemplateApprover,
     WeComTemplateEntry,
     WeComTemplateInfo,
 )
@@ -370,6 +371,29 @@ def _normalize_template_entry(entry: Any) -> Any:
         if isinstance(doc_info, dict):
             normalized["form_id"] = doc_info.get("form_id")
     return normalized
+
+
+def _parse_approvers(body: dict[str, Any]) -> list[WeComTemplateApprover]:
+    """`body.template_info.appro[]` — the template's own configured approver
+    list (`ai-docs/issues.md` `ISS-054`), used as a template-scoped fallback
+    recipient source when no submission history exists yet for
+    `entrys[0].reportvids` to be read from. Best-effort like `fork_items`
+    (`_parse_form_detail`): a missing/malformed node yields an empty list
+    (never blocks connecting) rather than raising — this is a fallback data
+    source, not a required protocol field."""
+    template_info = body.get("template_info")
+    appro = template_info.get("appro") if isinstance(template_info, dict) else None
+    if not isinstance(appro, list):
+        return []
+    approvers: list[WeComTemplateApprover] = []
+    for item in appro:
+        if not isinstance(item, dict):
+            continue
+        try:
+            approvers.append(WeComTemplateApprover.model_validate(item))
+        except ValidationError:
+            continue
+    return approvers
 
 
 def _parse_json_response(response: httpx.Response, *, on_send: bool) -> dict[str, Any]:
@@ -807,6 +831,7 @@ class WeComInternalClient:
             form_id=str(form_id),
             entries=entries,
             questions=questions,
+            appro=_parse_approvers(body),
         )
 
     def _parse_form_detail(self, payload: dict[str, Any]) -> WeComFormDetail:

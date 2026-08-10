@@ -36,21 +36,23 @@ class WeComSyncProfileRepository:
         )
         return result.scalar_one_or_none()
 
-    async def update_config_if_version(
+    async def update_field_mapping_if_version(
         self,
         *,
         owner_id: str,
         expected_version: int,
-        recipient_config_json: str,
         field_mapping_json: str,
         updated_at: datetime,
     ) -> bool:
         """Conditional update for `PUT /api/v1/wecom/profile` (WECOM-06).
 
-        Only the two user-adjustable JSON columns are ever written here —
+        Only `field_mapping_json` is ever written here — the only column a
+        user is meant to adjust after connecting.
         `question_mapping_json`/`schema_fingerprint`/`destination_fingerprint`
-        stay whatever connect-time discovery produced
-        (`WeComProfileUpdateRequest`'s docstring explains why). Mirrors the
+        stay whatever connect-time discovery produced, and `recipient_config_json`
+        is never user-editable at all (`ai-docs/decisions.md` `PROD-032`) — it
+        is only ever written by `WeComConnectionService._upsert_profile()` at
+        connect/reconnect time. Mirrors the
         `update(...).where(..., version == expected)` + `rowcount` idiom used
         throughout `app/repositories/daily_report.py`.
         """
@@ -61,7 +63,6 @@ class WeComSyncProfileRepository:
                 WeComSyncProfile.version == expected_version,
             )
             .values(
-                recipient_config_json=recipient_config_json,
                 field_mapping_json=field_mapping_json,
                 version=WeComSyncProfile.version + 1,
                 updated_at=updated_at,

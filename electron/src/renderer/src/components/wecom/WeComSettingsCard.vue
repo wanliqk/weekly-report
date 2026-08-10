@@ -52,8 +52,6 @@ const formUrlInput = ref('')
 const connecting = ref(false)
 const disconnecting = ref(false)
 
-const mngreporterVids = ref<string[]>([])
-const reporterVids = ref<string[]>([])
 const unmappedPolicy = ref<WeComUnmappedFieldPolicy>('block')
 const fieldTargets = reactive<Record<string, WeComFieldMappingTarget | 'unmapped'>>({})
 const savingMapping = ref(false)
@@ -65,6 +63,13 @@ const hasEverConnected = computed(
   () => connection.value !== null && connection.value.status !== null
 )
 const isConnected = computed(() => connection.value?.connected === true)
+const recipientVidsSummary = computed(() => {
+  const vids = [
+    ...(profile.value?.recipient_config.mngreporter_vids ?? []),
+    ...(profile.value?.recipient_config.reporter_vids ?? [])
+  ]
+  return vids.length > 0 ? vids.join('、') : '暂无'
+})
 
 watch(
   () => props.enabled,
@@ -112,8 +117,6 @@ async function loadProfile(): Promise<void> {
 }
 
 function resetMappingForm(loadedProfile: WeComProfileData): void {
-  mngreporterVids.value = [...loadedProfile.recipient_config.mngreporter_vids]
-  reporterVids.value = [...loadedProfile.recipient_config.reporter_vids]
   unmappedPolicy.value = loadedProfile.field_mapping.unmapped_policy
   for (const key of Object.keys(fieldTargets)) {
     delete fieldTargets[key]
@@ -205,22 +208,10 @@ async function saveMapping(): Promise<void> {
     mappableFields.value.map((field) => field.field_key),
     fieldTargets
   )
-  const normalizedMngreporterVids = normalizeVids(mngreporterVids.value)
-  const normalizedReporterVids = normalizeVids(reporterVids.value)
-  if (normalizedMngreporterVids.length === 0 && normalizedReporterVids.length === 0) {
-    ElMessage.warning('请至少配置一个企业微信接收人 vid')
-    return
-  }
   savingMapping.value = true
   try {
     const updatedProfile = await updateWeComProfile({
       expected_version: profile.value.version,
-      recipient_config: {
-        schema_version: 1,
-        mngreporter_vids: normalizedMngreporterVids,
-        reporter_vids: normalizedReporterVids,
-        remote_version: profile.value.recipient_config.remote_version
-      },
       field_mapping: {
         schema_version: 1,
         rules,
@@ -240,10 +231,6 @@ async function saveMapping(): Promise<void> {
   } finally {
     savingMapping.value = false
   }
-}
-
-function normalizeVids(values: string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
 }
 
 function changeSyncStatus(): void {
@@ -403,6 +390,11 @@ function runHistoryAction(record: WeComSyncRecordData): void {
       <p class="field-hint">
         "今日工作内容""明日工作计划"和"项目列表"字段自动映射，无需配置；其余自定义字段需要指定映射目标，否则非空值会阻止同步。
       </p>
+      <p class="field-hint">
+        当前收件人 vid：{{
+          recipientVidsSummary
+        }}（系统自动从企业微信表单识别，无需手动填写；重新连接后会自动刷新）
+      </p>
       <el-table :data="mappableFields" row-key="field_key" size="small">
         <el-table-column prop="label" label="字段" min-width="160" />
         <el-table-column label="映射目标" min-width="200">
@@ -425,27 +417,6 @@ function runHistoryAction(record: WeComSyncRecordData): void {
             <el-radio value="ignore">静默忽略</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="管理者接收人 vid（mngreporter）">
-          <el-select
-            v-model="mngreporterVids"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-          >
-            <el-option v-for="vid in mngreporterVids" :key="vid" :label="vid" :value="vid" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="填报接收人 vid（reporter）">
-          <el-select v-model="reporterVids" multiple filterable allow-create default-first-option>
-            <el-option v-for="vid in reporterVids" :key="vid" :label="vid" :value="vid" />
-          </el-select>
-        </el-form-item>
-        <span class="field-hint">
-          vid
-          是企业微信内部成员标识，无法在本应用内查询，请从原表单已提交记录或管理员处获取后手动输入，按
-          Enter 添加。
-        </span>
         <el-button
           style="margin-top: 20px"
           type="primary"

@@ -157,6 +157,7 @@ async def test_get_template_info_success() -> None:
     ]
     assert result.questions[1].must_reply is True
     assert result.questions[0].reply_type == 11
+    assert result.appro == []
 
 
 async def test_get_template_info_supports_live_form_info_shape() -> None:
@@ -190,6 +191,7 @@ async def test_get_template_info_supports_live_template_entry_shape() -> None:
             "doc_info": {"form_id": "SYNTHETIC-LIVE-FORM-1"},
             "content": "SYNTHETIC-IGNORED-CONTENT",
             "template_name": "SYNTHETIC-IGNORED-TEMPLATE-NAME",
+            "reportvids": ["SYNTHETIC-APPROVER-1", "SYNTHETIC-APPROVER-2"],
         }
     ]
 
@@ -208,6 +210,56 @@ async def test_get_template_info_supports_live_template_entry_shape() -> None:
     assert entry.reply_id == "SYNTHETIC-LIVE-CREATOR-1"
     assert entry.reply_name == ""
     assert entry.form_id == "SYNTHETIC-LIVE-FORM-1"
+    assert entry.reportvids == ["SYNTHETIC-APPROVER-1", "SYNTHETIC-APPROVER-2"]
+
+
+async def test_get_template_info_parses_template_appro_list() -> None:
+    """`ai-docs/issues.md` `ISS-054`: `body.template_info.appro[]` is the
+    template's own configured approver list — a template-scoped fallback
+    recipient source, independent of any specific past submission."""
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+    fixture["body"]["template_info"] = {
+        "appro": [
+            {"vid": 9000000000000091, "name": "SYNTHETIC-APPROVER-A", "tagid": 0},
+            {"vid": "9000000000000092", "name": "SYNTHETIC-APPROVER-B"},
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+    assert [(a.vid, a.name) for a in result.appro] == [
+        ("9000000000000091", "SYNTHETIC-APPROVER-A"),
+        ("9000000000000092", "SYNTHETIC-APPROVER-B"),
+    ]
+
+
+async def test_get_template_info_skips_malformed_appro_entries_without_failing() -> None:
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+    fixture["body"]["template_info"] = {
+        "appro": [
+            {"vid": "9000000000000091", "name": "SYNTHETIC-APPROVER-A"},
+            {"name": "SYNTHETIC-APPROVER-MISSING-VID"},
+            "SYNTHETIC-NOT-EVEN-A-DICT",
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+    assert [(a.vid, a.name) for a in result.appro] == [("9000000000000091", "SYNTHETIC-APPROVER-A")]
 
 
 async def test_get_form_detail_success() -> None:

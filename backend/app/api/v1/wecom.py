@@ -146,7 +146,6 @@ async def update_profile(
     profile = await WeComConnectionService(session).update_profile(
         current_user.id,
         expected_version=payload.expected_version,
-        recipient_config=payload.recipient_config,
         field_mapping=payload.field_mapping,
     )
     return ApiResponse(data=_profile_data(profile))

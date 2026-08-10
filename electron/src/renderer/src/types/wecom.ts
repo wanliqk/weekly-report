@@ -67,8 +67,7 @@ export interface WeComProfileData {
 
 export interface WeComProfileUpdateRequest {
   expected_version: number
-  recipient_config?: WeComRecipientConfig
-  field_mapping?: WeComFieldMappingConfig
+  field_mapping: WeComFieldMappingConfig
 }
 
 export interface WeComPreviewData {

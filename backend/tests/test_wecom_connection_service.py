@@ -289,15 +289,18 @@ async def test_reconnect_updates_existing_binding_and_profile_in_place(
         assert profile.version == 2
 
 
-async def test_reconnect_preserves_manually_configured_field_mapping_and_recipient_config(
+async def test_reconnect_preserves_field_mapping_but_refreshes_recipient_config(
     wecom_engine: AsyncEngine,
 ) -> None:
     """Reconnecting (e.g. to a different `form_id`) must not silently wipe a
-    user's already-working `field_mapping`/`recipient_config` back to the
-    first-connect defaults, even though the *remote* form's date/today/
-    tomorrow question structure is re-discovered fresh every time —
-    `field_mapping` is keyed by this app's own template `field_key` and has
-    no relationship to which WeCom form is connected (`PROD-030`)."""
+    user's already-working `field_mapping` back to the first-connect
+    default, even though the *remote* form's date/today/tomorrow question
+    structure is re-discovered fresh every time — `field_mapping` is keyed
+    by this app's own template `field_key` and has no relationship to which
+    WeCom form is connected (`PROD-030`). `recipient_config` is the
+    opposite: it is never user-edited (`PROD-032`), so a reconnect *should*
+    refresh it to whatever the template currently resolves to, rather than
+    keep whatever was resolved at the previous connect."""
     session_factory = create_session_factory(wecom_engine)
     user = await _bootstrap_user(session_factory)
     async with session_factory() as session:
@@ -306,12 +309,6 @@ async def test_reconnect_preserves_manually_configured_field_mapping_and_recipie
         )
 
     custom_field_key = generate_ulid()
-    custom_recipient_config = WeComRecipientConfig(
-        schema_version=1,
-        mngreporter_vids=["9000000000000042"],
-        reporter_vids=["9000000000000043"],
-        remote_version=0,
-    )
     custom_field_mapping = WeComFieldMappingConfig(
         schema_version=1,
         rules=[WeComFieldMappingRule(field_key=custom_field_key, target="today_work")],
@@ -321,13 +318,22 @@ async def test_reconnect_preserves_manually_configured_field_mapping_and_recipie
         await WeComConnectionService(session).update_profile(
             user.id,
             expected_version=1,
-            recipient_config=custom_recipient_config,
             field_mapping=custom_field_mapping,
         )
 
     reconnect_questions = build_target_questions()
+    reconnect_entry = WeComTemplateEntry(
+        journalid="SYNTHETIC-JOURNAL-RECONNECT-0000001",
+        createtime=1700000000,
+        reply_id=DEFAULT_REPLY_VID,
+        reply_name=DEFAULT_REPLY_NAME,
+        form_id="another-form",
+        reportvids=["9000000000000077"],
+    )
     stub = StubWeComClient(
-        template_info=build_template_info(form_id="another-form", questions=reconnect_questions)
+        template_info=build_template_info(
+            form_id="another-form", questions=reconnect_questions, entries=[reconnect_entry]
+        )
     )
     async with session_factory() as session:
         await WeComConnectionService(session, client=stub).validate_connection(
@@ -338,10 +344,10 @@ async def test_reconnect_preserves_manually_configured_field_mapping_and_recipie
         profile = await WeComConnectionService(session).get_profile(user.id)
         assert profile.form_id == "another-form"
         assert profile.version == 3
-        recipient_config = WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
-        assert recipient_config == custom_recipient_config
         field_mapping = WeComFieldMappingConfig.model_validate_json(profile.field_mapping_json)
         assert field_mapping == custom_field_mapping
+        recipient_config = WeComRecipientConfig.model_validate_json(profile.recipient_config_json)
+        assert recipient_config.reporter_vids == ["9000000000000077"]
 
 
 async def test_concurrent_validate_connection_only_creates_one_binding_and_profile(
@@ -392,38 +398,46 @@ async def test_update_profile_rejects_stale_version(wecom_engine: AsyncEngine) -
             await WeComConnectionService(session).update_profile(
                 user.id,
                 expected_version=99,
-                recipient_config=None,
-                field_mapping=None,
+                field_mapping=WeComFieldMappingConfig(schema_version=1, rules=[]),
             )
 
 
-async def test_update_profile_only_touches_recipient_and_field_mapping(
+async def test_update_profile_only_touches_field_mapping(
     wecom_engine: AsyncEngine,
 ) -> None:
+    """`recipient_config` is never user-editable (`PROD-032`) — `update_profile()`
+    only ever writes `field_mapping_json`; connect-time-only columns
+    (`question_mapping`/`schema_fingerprint`/`form_id`/`recipient_config`)
+    must stay exactly what `validate_connection()` produced."""
     session_factory = create_session_factory(wecom_engine)
     user = await _bootstrap_user(session_factory)
     async with session_factory() as session:
         await WeComConnectionService(session, client=StubWeComClient()).validate_connection(
             user.id, cookie_jar=[], credential_slot="slot-1", form_id="form-1"
         )
+        original_profile = await WeComConnectionService(session).get_profile(user.id)
 
-    new_recipient_config = WeComRecipientConfig(
-        schema_version=1, mngreporter_vids=["9000000000000099"], reporter_vids=[], remote_version=1
+    custom_field_key = generate_ulid()
+    new_field_mapping = WeComFieldMappingConfig(
+        schema_version=1,
+        rules=[WeComFieldMappingRule(field_key=custom_field_key, target="today_work")],
+        unmapped_policy="ignore",
     )
     async with session_factory() as session:
         updated = await WeComConnectionService(session).update_profile(
             user.id,
             expected_version=1,
-            recipient_config=new_recipient_config,
-            field_mapping=None,
+            field_mapping=new_field_mapping,
         )
 
     assert updated.version == 2
-    recipient_config = WeComRecipientConfig.model_validate_json(updated.recipient_config_json)
-    assert recipient_config.mngreporter_vids == ["9000000000000099"]
-    # question_mapping / schema_fingerprint / form_id are connect-time-only
-    # (`WeComProfileUpdateRequest`'s docstring) and must be untouched.
+    field_mapping = WeComFieldMappingConfig.model_validate_json(updated.field_mapping_json)
+    assert field_mapping == new_field_mapping
+    # question_mapping / schema_fingerprint / form_id / recipient_config are
+    # connect-time-only (`WeComProfileUpdateRequest`'s docstring) and must be
+    # untouched.
     assert updated.form_id == "SYNTHETIC-FORM-0000000000000000000fork"
+    assert updated.recipient_config_json == original_profile.recipient_config_json
 
 
 async def test_disconnect_marks_status_and_is_a_noop_without_a_binding(

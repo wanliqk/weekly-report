@@ -167,13 +167,15 @@ class WeComProfileUpdateRequest(BaseModel):
     (`WeComConnectionService.validate_connection`), and §7.1 forbids
     resolving it from anything but that first-connect discovery ("标签匹配只
     用于首次配置时给出候选,不得把'名称包含计划'作为运行时规则"). `recipient_config`
-    and `field_mapping` are the two things a user is actually meant to
-    adjust after connecting.
+    is likewise never user-editable (`ai-docs/decisions.md` `PROD-032`: a
+    user is never asked to hand-type a vid — it is always system-resolved
+    from WeCom's own template/submission data and refreshed on every
+    connect/reconnect). `field_mapping` is the only thing a user is
+    actually meant to adjust after connecting.
     """
 
     expected_version: int = Field(ge=1)
-    recipient_config: WeComRecipientConfig | None = None
-    field_mapping: WeComFieldMappingConfig | None = None
+    field_mapping: WeComFieldMappingConfig
 
 
 class WeComPreviewRequest(BaseModel):

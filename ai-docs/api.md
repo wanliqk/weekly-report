@@ -368,7 +368,7 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 | 方法 | 路径 | 权限/用途 |
 |---|---|---|
 | GET | `/wecom/connection` | 本人连接状态和非敏感账号摘要；从未连接过返回 `connected:false,status:null`，区别于"曾连接后断开"的 `status:"disconnected"` |
-| GET/PUT | `/wecom/profile` | 本人读取/版本化更新映射配置；未连接返回 `40911`；`PUT` 只接受 `expected_version`+可选 `recipient_config`/`field_mapping`，`question_mapping`/`schema_fingerprint`/`form_id` 只能由连接时发现产生；版本冲突复用 `40904` |
+| GET/PUT | `/wecom/profile` | 本人读取/版本化更新映射配置；未连接返回 `40911`；`PUT` 只接受 `expected_version`+必填 `field_mapping`（2026-08-11 起不再接受 `recipient_config`——`ISS-054`/`PROD-032`：收件人不再是用户配置项，由系统在连接/重连时自动解析），`question_mapping`/`schema_fingerprint`/`form_id`/`recipient_config` 只能由连接时发现产生；版本冲突复用 `40904` |
 | POST | `/wecom/previews` | 本人预览指定 `daily_report_day_id` 的转换结果；非本人/不存在 `40401`，未归档复用 `40902`，未连接 `40911`；从不落库、不写日志 |
 | POST | `/daily-report-days/{work_date}/wecom-syncs` | 本人幂等创建/取得同步记录（响应含 `created` 标记，与日报创建同一模式）；未归档/未连接同上 |
 | GET | `/wecom/sync-records` | 本人按 `status`/`date_from`/`date_to`/`page`/`page_size` 查询历史 |
