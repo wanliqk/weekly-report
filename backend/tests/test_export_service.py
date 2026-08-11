@@ -215,7 +215,7 @@ async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeed
 
     assert job.status == "succeeded"
     assert job.record_count == 2
-    assert job.file_name == "日报-owner_2026年8月4日.xlsx"
+    assert job.file_name == "日报_Owner_2026年8月4日.xlsx"
     workbook_path = _workbook_path(job)
     assert workbook_path.parent == export_settings.export_temp_dir.resolve()
 
@@ -805,13 +805,13 @@ def test_safe_filename_component_strips_characters_outside_the_electron_whitelis
     assert _safe_filename_component(username) == expected
 
 
-async def test_create_sanitizes_an_unsafe_username_in_the_file_name(
+async def test_create_sanitizes_an_unsafe_display_name_in_the_file_name(
     export_engine: AsyncEngine, export_settings: Settings
 ) -> None:
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
         user = await BootstrapService(session).bootstrap(
-            username="ali/ce bob", password=STAGE5_PASSWORD, display_name="Alice"
+            username="alice", password=STAGE5_PASSWORD, display_name="ali/ce bob"
         )
         archived = await _archived_day(
             session, owner_id=user.id, work_date=date(2026, 8, 5), fields=[], content={}
@@ -822,4 +822,4 @@ async def test_create_sanitizes_an_unsafe_username_in_the_file_name(
             user.id, daily_report_day_ids=[archived.id], filter_=None
         )
 
-    assert job.file_name == "日报-ali_ce_bob_2026年8月5日.xlsx"
+    assert job.file_name == "日报_ali_ce_bob_2026年8月5日.xlsx"

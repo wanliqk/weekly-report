@@ -15,14 +15,16 @@ from openpyxl.worksheet.worksheet import Worksheet
 REPORT_TITLE = "每日工作汇报"
 
 _FONT_NAME = "微软雅黑"
-_BRAND_COLOR = "FF1F3864"
+_TITLE_FONT_COLOR = "FF000000"
+_HEADER_FONT_COLOR = "FF000000"
+_HEADER_FILL_COLOR = "FF808080"
 
-_TITLE_FONT = Font(name=_FONT_NAME, size=18, bold=True, color=_BRAND_COLOR)
+_TITLE_FONT = Font(name=_FONT_NAME, size=18, bold=True, color=_TITLE_FONT_COLOR)
 _TITLE_ALIGNMENT = Alignment(horizontal="center", vertical="center")
 _TITLE_ROW_HEIGHT = 34.0
 
-_HEADER_FONT = Font(name=_FONT_NAME, size=11, bold=True, color="FFFFFFFF")
-_HEADER_FILL = PatternFill("solid", fgColor=_BRAND_COLOR)
+_HEADER_FONT = Font(name=_FONT_NAME, size=11, bold=True, color=_HEADER_FONT_COLOR)
+_HEADER_FILL = PatternFill("solid", fgColor=_HEADER_FILL_COLOR)
 _HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
 _HEADER_ROW_HEIGHT = 26.0
 

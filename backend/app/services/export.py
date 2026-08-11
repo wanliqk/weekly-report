@@ -301,20 +301,20 @@ def build_export_workbook(
 _UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9一-鿿]+")
 
 
-def _safe_filename_component(username: str) -> str:
+def _safe_filename_component(raw: str) -> str:
     """Keeps the export file name inside the Electron save-dialog whitelist
 
     (`electron/src/main/export/file-saver.ts`'s `SAFE_FILE_NAME_PATTERN`)
-    regardless of what characters the username itself contains — usernames
+    regardless of what characters the source string contains — display names
     have no character restriction beyond length (`app/schemas/user.py`).
     """
-    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", username).strip("_")
+    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", raw).strip("_")
     return cleaned or "user"
 
 
-def _export_file_name(username: str, target_date: date) -> str:
-    safe_username = _safe_filename_component(username)
-    return f"日报-{safe_username}_{target_date.year}年{target_date.month}月{target_date.day}日.xlsx"
+def _export_file_name(display_name: str, target_date: date) -> str:
+    safe_display_name = _safe_filename_component(display_name)
+    return f"日报_{safe_display_name}_{target_date.year}年{target_date.month}月{target_date.day}日.xlsx"
 
 
 class ExportService:
@@ -377,7 +377,7 @@ class ExportService:
         else:
             target_date = max((day.work_date for day in days), default=to_shanghai(now).date())
             job.status = "succeeded"
-            job.file_name = _export_file_name(user.username, target_date)
+            job.file_name = _export_file_name(user.display_name, target_date)
             job.file_path = str(file_path)
             job.record_count = len(days)
 
