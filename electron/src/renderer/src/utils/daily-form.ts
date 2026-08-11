@@ -1,12 +1,25 @@
 import { ApiError } from '../api/client'
 import type { DailyContent, DailyFieldValue, DailyStatus } from '../types/daily-report'
 import type { TemplateFieldData } from '../types/template'
-import { emptyFieldValue, formatProjectListEntries, isProjectListArray } from './template-fields'
+import {
+  emptyFieldValue,
+  emptyProjectListEntry,
+  formatProjectListEntries,
+  isBlankProjectListEntry,
+  isProjectListArray
+} from './template-fields'
 
 interface FieldErrorData {
   errors: Array<{ field: string; message: string }>
 }
 
+/**
+ * A `PROJECT_LIST` field with no rows initializes with one blank, editable
+ * row instead of the empty-state placeholder, so the user can start typing
+ * without an extra "add project" click. `sanitizeDailyContent` strips
+ * untouched blank rows back out before the content is sent to the backend,
+ * so an unfilled default row never trips required-field or entry validation.
+ */
 export function initializeDailyContent(
   fields: TemplateFieldData[],
   source: DailyContent
@@ -15,12 +28,34 @@ export function initializeDailyContent(
     fields
       .filter((field) => field.enabled)
       .sort((left, right) => left.sort_order - right.sort_order)
-      .map((field) => [
-        field.field_key,
-        field.field_key in source
-          ? cloneDailyValue(source[field.field_key])
-          : emptyFieldValue(field.field_type)
-      ])
+      .map((field) => [field.field_key, initialFieldValue(field, source)])
+  )
+}
+
+function initialFieldValue(field: TemplateFieldData, source: DailyContent): DailyFieldValue {
+  const value =
+    field.field_key in source
+      ? cloneDailyValue(source[field.field_key])
+      : emptyFieldValue(field.field_type)
+  if (field.field_type === 'PROJECT_LIST' && Array.isArray(value) && value.length === 0) {
+    return [emptyProjectListEntry()]
+  }
+  return value
+}
+
+export function sanitizeDailyContent(
+  fields: TemplateFieldData[],
+  content: DailyContent
+): DailyContent {
+  const fieldTypeByKey = new Map(fields.map((field) => [field.field_key, field.field_type]))
+  return Object.fromEntries(
+    Object.entries(content).map(([key, value]) => {
+      const isProjectList =
+        fieldTypeByKey.get(key) === 'PROJECT_LIST' &&
+        Array.isArray(value) &&
+        isProjectListArray(value)
+      return [key, isProjectList ? value.filter((entry) => !isBlankProjectListEntry(entry)) : value]
+    })
   )
 }
 

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 
 import type { DailyFieldValue, ProjectListEntry } from '@renderer/types/daily-report'
 import type { TemplateFieldData } from '@renderer/types/template'
-import { isProjectListArray } from '@renderer/utils/template-fields'
+import { emptyProjectListEntry, isProjectListArray } from '@renderer/utils/template-fields'
 
 const props = defineProps<{
   field: TemplateFieldData
@@ -43,19 +43,7 @@ function updateMultiple(value: unknown): void {
 }
 
 function addProjectListItem(): void {
-  emit('update:modelValue', [
-    ...projectListValue.value,
-    {
-      project: '',
-      content: '',
-      planned_completion_date: '',
-      actual_completion_date: '',
-      owner: '',
-      assistant: '',
-      required_resources: '',
-      completion_notes: ''
-    }
-  ])
+  emit('update:modelValue', [...projectListValue.value, emptyProjectListEntry()])
 }
 
 function removeProjectListItem(index: number): void {

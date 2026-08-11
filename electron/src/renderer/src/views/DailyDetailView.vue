@@ -23,6 +23,7 @@ import {
   formatShanghaiTime,
   generateClientRequestId,
   initializeDailyContent,
+  sanitizeDailyContent,
   todayInShanghai
 } from '@renderer/utils/daily-form'
 import { invalidExportDayIds } from '@renderer/utils/export'
@@ -109,7 +110,11 @@ async function save(showSuccess = true): Promise<boolean> {
   saving.value = true
   fieldErrors.value = {}
   try {
-    const saved = await saveDailyReport(report.value.id, report.value.version, content.value)
+    const saved = await saveDailyReport(
+      report.value.id,
+      report.value.version,
+      sanitizeDailyContent(visibleFields.value, content.value)
+    )
     assignReport(saved)
     if (showSuccess) {
       ElMessage.success('草稿已保存')

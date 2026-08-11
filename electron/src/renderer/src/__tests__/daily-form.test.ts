@@ -9,8 +9,20 @@ import {
   formatShanghaiTime,
   generateClientRequestId,
   initializeDailyContent,
+  sanitizeDailyContent,
   todayInShanghai
 } from '@renderer/utils/daily-form'
+
+const blankProjectRow = {
+  project: '',
+  content: '',
+  planned_completion_date: '',
+  actual_completion_date: '',
+  owner: '',
+  assistant: '',
+  required_resources: '',
+  completion_notes: ''
+}
 
 const fields: TemplateFieldData[] = [
   {
@@ -95,9 +107,33 @@ describe('daily form helpers', () => {
     expect((content['project-key'] as typeof originalProjects)[0]).not.toBe(originalProjects[0])
   })
 
-  it('defaults a missing PROJECT_LIST field to an empty, independently-mutable list', () => {
+  it('defaults a missing PROJECT_LIST field to a single blank, independently-mutable row', () => {
     const content = initializeDailyContent(fields, { 'text-key': '完成接口' })
-    expect(content['project-key']).toEqual([])
+    expect(content['project-key']).toEqual([blankProjectRow])
+  })
+
+  it('also defaults a previously-saved empty PROJECT_LIST list to a single blank row', () => {
+    const content = initializeDailyContent(fields, { 'text-key': '完成接口', 'project-key': [] })
+    expect(content['project-key']).toEqual([blankProjectRow])
+  })
+
+  it('strips untouched blank PROJECT_LIST rows before the content is sent to the backend', () => {
+    const filledRow = {
+      ...blankProjectRow,
+      project: '个人日报系统',
+      content: '完成导出'
+    }
+    const sanitized = sanitizeDailyContent(fields, {
+      'text-key': '完成接口',
+      'multi-key': ['A'],
+      'project-key': [blankProjectRow, filledRow, { ...blankProjectRow, project: '  ' }]
+    })
+
+    expect(sanitized).toEqual({
+      'text-key': '完成接口',
+      'multi-key': ['A'],
+      'project-key': [filledRow]
+    })
   })
 
   it('maps business validation errors back to their fields', () => {

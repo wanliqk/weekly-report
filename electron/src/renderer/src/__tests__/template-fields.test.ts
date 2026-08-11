@@ -4,7 +4,9 @@ import type { TemplateFieldData } from '@renderer/types/template'
 import {
   createTemplateFieldDraft,
   emptyFieldValue,
+  emptyProjectListEntry,
   formatProjectListEntries,
+  isBlankProjectListEntry,
   isProjectListArray,
   toTemplateFieldDrafts,
   toTemplateFieldPayload,
@@ -88,6 +90,14 @@ describe('template field helpers', () => {
     expect(emptyFieldValue('multiselect')).toEqual([])
     expect(emptyFieldValue('number')).toBeNull()
     expect(emptyFieldValue('text')).toBe('')
+  })
+
+  it('flags a project-list entry as blank only when every one of its fields is blank', () => {
+    expect(isBlankProjectListEntry(emptyProjectListEntry())).toBe(true)
+    expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), project: '  ' })).toBe(true)
+    expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), project: '个人日报系统' })).toBe(
+      false
+    )
   })
 
   it('distinguishes project-list arrays from multiselect string arrays', () => {

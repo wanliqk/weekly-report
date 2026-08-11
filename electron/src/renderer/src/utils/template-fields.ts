@@ -137,6 +137,23 @@ export function usesOptions(fieldType: TemplateFieldType): boolean {
   return fieldType === 'select' || fieldType === 'multiselect'
 }
 
+export function emptyProjectListEntry(): ProjectListEntry {
+  return {
+    project: '',
+    content: '',
+    planned_completion_date: '',
+    actual_completion_date: '',
+    owner: '',
+    assistant: '',
+    required_resources: '',
+    completion_notes: ''
+  }
+}
+
+export function isBlankProjectListEntry(entry: ProjectListEntry): boolean {
+  return Object.values(entry).every((value) => value.trim() === '')
+}
+
 export function emptyFieldValue(fieldType: TemplateFieldType): DailyFieldValue {
   if (fieldType === 'multiselect' || fieldType === 'PROJECT_LIST') {
     return []
