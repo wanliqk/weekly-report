@@ -68,6 +68,36 @@ def test_default_template_and_new_version_keep_stable_keys(
         assert json.loads(version_one[0])[0]["label"] == "今日工作内容"
 
 
+def test_show_in_export_defaults_to_true_and_round_trips_when_toggled_off(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    client, headers, _settings = stage5_context
+    current_fields = cast(list[dict[str, Any]], _current(client, headers)["fields"])
+    assert all(field["show_in_export"] is True for field in current_fields)
+
+    published = _publish(
+        client,
+        headers,
+        [
+            *current_fields,
+            {
+                "label": "内部备注",
+                "description": "",
+                "field_type": "text",
+                "required": False,
+                "enabled": True,
+                "show_in_export": False,
+                "sort_order": 30,
+                "options": [],
+            },
+        ],
+    )
+
+    published_fields = cast(list[dict[str, Any]], published["fields"])
+    assert published_fields[-1]["show_in_export"] is False
+    assert all(field["show_in_export"] is True for field in published_fields[:-1])
+
+
 @pytest.mark.parametrize("mutation", ["remove_core", "disable_cores"])
 def test_core_fields_cannot_be_removed_or_all_disabled(
     stage5_context: tuple[TestClient, dict[str, str], Settings], mutation: str
@@ -173,6 +203,7 @@ def test_project_list_field_publishes_without_options(
     published_fields = cast(list[dict[str, Any]], published["fields"])
     assert published_fields[-1]["field_type"] == "PROJECT_LIST"
     assert published_fields[-1]["options"] == []
+    assert published_fields[-1]["show_in_export"] is True  # omitted in the request body
 
 
 def test_template_requires_authentication(

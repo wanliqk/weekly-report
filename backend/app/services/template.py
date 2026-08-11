@@ -80,6 +80,7 @@ def build_next_template_fields(
                 field_type=field.field_type,
                 required=field.required,
                 enabled=field.enabled,
+                show_in_export=field.show_in_export,
                 sort_order=field.sort_order,
                 options=_normalized_options(field),
                 core_type=existing.core_type if existing is not None else None,

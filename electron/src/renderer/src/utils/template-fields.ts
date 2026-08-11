@@ -48,6 +48,7 @@ export interface TemplateFieldDraft {
   field_type: TemplateFieldType
   required: boolean
   enabled: boolean
+  show_in_export: boolean
   options: string[]
   core_type: TemplateCoreType | null
 }
@@ -63,6 +64,7 @@ export function toTemplateFieldDrafts(fields: TemplateFieldData[]): TemplateFiel
       field_type: field.field_type,
       required: field.required,
       enabled: field.enabled,
+      show_in_export: field.show_in_export,
       options: [...field.options],
       core_type: field.core_type
     }))
@@ -77,6 +79,7 @@ export function createTemplateFieldDraft(): TemplateFieldDraft {
     field_type: 'text',
     required: false,
     enabled: true,
+    show_in_export: true,
     options: [],
     core_type: null
   }
@@ -90,6 +93,7 @@ export function toTemplateFieldPayload(fields: TemplateFieldDraft[]): TemplateFi
       field_type: field.field_type,
       required: field.required,
       enabled: field.enabled,
+      show_in_export: field.show_in_export,
       sort_order: index,
       options: usesOptions(field.field_type)
         ? field.options.map((option) => option.trim()).filter(Boolean)

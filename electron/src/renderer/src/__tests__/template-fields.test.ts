@@ -20,6 +20,7 @@ const coreFields: TemplateFieldData[] = [
     field_type: 'textarea',
     required: true,
     enabled: true,
+    show_in_export: true,
     sort_order: 0,
     options: [],
     core_type: 'today_work'
@@ -31,6 +32,7 @@ const coreFields: TemplateFieldData[] = [
     field_type: 'textarea',
     required: false,
     enabled: true,
+    show_in_export: true,
     sort_order: 1,
     options: [],
     core_type: 'tomorrow_plan'
@@ -50,6 +52,18 @@ describe('template field helpers', () => {
     expect(payload[0]?.field_key).toBe(coreFields[0]?.field_key)
     expect(payload[2]).not.toHaveProperty('field_key')
     expect(payload.map((field) => field.sort_order)).toEqual([0, 1, 2])
+  })
+
+  it('defaults show_in_export to true for new fields and lets it be toggled off', () => {
+    const draft = createTemplateFieldDraft()
+    expect(draft.show_in_export).toBe(true)
+
+    draft.label = '内部备注'
+    draft.show_in_export = false
+    const payload = toTemplateFieldPayload([...toTemplateFieldDrafts(coreFields), draft])
+
+    expect(payload[0]?.show_in_export).toBe(true)
+    expect(payload[2]?.show_in_export).toBe(false)
   })
 
   it('rejects duplicate select options and disabling both core fields', () => {

@@ -16,6 +16,7 @@ export interface TemplateFieldData {
   field_type: TemplateFieldType
   required: boolean
   enabled: boolean
+  show_in_export: boolean
   sort_order: number
   options: string[]
   core_type: TemplateCoreType | null
@@ -28,6 +29,7 @@ export interface TemplateFieldInput {
   field_type: TemplateFieldType
   required: boolean
   enabled: boolean
+  show_in_export: boolean
   sort_order: number
   options: string[]
 }

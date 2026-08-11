@@ -201,6 +201,7 @@ function field(overrides: Partial<TemplateFieldData>): TemplateFieldData {
     field_type: 'text',
     required: false,
     enabled: true,
+    show_in_export: true,
     sort_order: 0,
     options: [],
     core_type: null,

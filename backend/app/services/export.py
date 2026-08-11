@@ -72,12 +72,17 @@ def plan_export_columns(snapshots: list[list[TemplateFieldData]]) -> list[Export
     a field's *label* can change release to release, so the most recent
     snapshot that still carries the key wins for the displayed header
     (requirements.md 4.4.2: label changes must not affect merging), and the
-    same "most recent wins" rule applies to `field_type`. Column order
-    follows first appearance across the chronologically ordered snapshots
-    (day by day, entry by entry within a day), so fields still in use lead
-    and fields only old entries used trail after them. Two distinct
-    `field_key`s that happen to end up with the same header text get a short
-    `field_key` suffix appended so the generated columns stay unambiguous.
+    same "most recent wins" rule applies to `field_type` and `show_in_export`
+    (a field the user has since hidden from export drops out even if older
+    entries' snapshots still had it visible). Column order follows first
+    appearance across the chronologically ordered snapshots (day by day,
+    entry by entry within a day), so fields still in use lead and fields
+    only old entries used trail after them. Two distinct `field_key`s that
+    happen to end up with the same header text get a short `field_key`
+    suffix appended so the generated columns stay unambiguous — this
+    disambiguation only considers fields that are actually visible, so a
+    hidden field sharing a label with a visible one never forces a needless
+    suffix onto the visible one.
 
     `PROJECT_LIST` columns stay in this same single ordered list — callers
     that need to render them differently from a plain single-value column
@@ -88,6 +93,7 @@ def plan_export_columns(snapshots: list[list[TemplateFieldData]]) -> list[Export
     order: dict[str, int] = {}
     label_by_key: dict[str, str] = {}
     type_by_key: dict[str, FieldType] = {}
+    show_by_key: dict[str, bool] = {}
     next_index = 0
     for snapshot in snapshots:
         for field in sorted(snapshot, key=lambda item: item.sort_order):
@@ -96,8 +102,9 @@ def plan_export_columns(snapshots: list[list[TemplateFieldData]]) -> list[Export
                 next_index += 1
             label_by_key[field.field_key] = field.label
             type_by_key[field.field_key] = field.field_type
-    ordered_keys = sorted(order, key=lambda key: order[key])
-    header_counts = Counter(label_by_key.values())
+            show_by_key[field.field_key] = field.show_in_export
+    ordered_keys = sorted((key for key in order if show_by_key[key]), key=lambda key: order[key])
+    header_counts = Counter(label_by_key[key] for key in ordered_keys)
     columns: list[ExportColumn] = []
     for key in ordered_keys:
         label = label_by_key[key]

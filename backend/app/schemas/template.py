@@ -18,6 +18,7 @@ class TemplateFieldInput(BaseModel):
     field_type: FieldType
     required: bool = False
     enabled: bool = True
+    show_in_export: bool = True
     sort_order: int = Field(ge=0, le=10_000)
     options: list[str] = Field(default_factory=list, max_length=50)
 
@@ -42,6 +43,7 @@ class TemplateFieldData(BaseModel):
     field_type: FieldType
     required: bool
     enabled: bool
+    show_in_export: bool = True
     sort_order: int
     options: list[str]
     core_type: CoreType | None = None

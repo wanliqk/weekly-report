@@ -261,6 +261,99 @@ async def test_create_merges_multiple_source_entries_for_one_day_into_numbered_l
     assert rows[2][1] == "[1] 上午写文档\n[2] 下午写测试"
 
 
+def _field(
+    key: str, label: str, *, sort_order: int = 0, show_in_export: bool = True
+) -> dict[str, object]:
+    return {
+        "field_key": key,
+        "label": label,
+        "description": "",
+        "field_type": "text",
+        "required": False,
+        "enabled": True,
+        "show_in_export": show_in_export,
+        "sort_order": sort_order,
+        "options": [],
+        "core_type": None,
+    }
+
+
+async def test_create_excludes_a_field_marked_hidden_from_export(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """A field with `show_in_export=False` contributes no column at all — its
+
+    value is never written for any day, and it does not count toward the
+    same-label disambiguation applied to the columns that remain visible.
+    """
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 3),
+            fields=[
+                _field("k1", "备注", sort_order=0, show_in_export=False),
+                _field("k2", "今日工作内容", sort_order=10),
+            ],
+            content={"k1": "仅供内部台账使用", "k2": "写文档"},
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    rows = list(sheet.iter_rows(values_only=True))
+    assert rows[1] == (_DATE_HEADER, "今日工作内容")
+    assert rows[2] == ("2026-08-03", "写文档")
+
+
+async def test_create_applies_most_recent_snapshot_wins_to_show_in_export(
+    export_engine: AsyncEngine, export_settings: Settings
+) -> None:
+    """Mirrors the existing "most recent label wins" merge rule
+
+    (`test_create_from_ids_merges_columns_across_snapshots_and_marks_succeeded`):
+    a field later hidden from export drops out of the merged column list even
+    though an older day's snapshot still had it visible.
+    """
+    session_factory = create_session_factory(export_engine)
+    async with session_factory() as session:
+        user = await _bootstrap_user(session)
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 3),
+            fields=[_field("k1", "今日工作内容", show_in_export=True)],
+            content={"k1": "写文档"},
+        )
+        await _archived_day(
+            session,
+            owner_id=user.id,
+            work_date=date(2026, 8, 4),
+            fields=[_field("k1", "今日工作内容", show_in_export=False)],
+            content={"k1": "评审代码"},
+        )
+
+    async with session_factory() as session:
+        job = await ExportService(session, export_settings).create(
+            user.id, daily_report_day_ids=None, filter_=ExportFilter()
+        )
+
+    workbook = openpyxl.load_workbook(_workbook_path(job))
+    sheet = workbook.active
+    assert sheet is not None
+    rows = list(sheet.iter_rows(values_only=True))
+    assert rows[1] == (_DATE_HEADER,)
+    assert rows[2] == ("2026-08-03",)
+    assert rows[3] == ("2026-08-04",)
+
+
 def _project_list_field(key: str, label: str) -> dict[str, object]:
     return {
         "field_key": key,

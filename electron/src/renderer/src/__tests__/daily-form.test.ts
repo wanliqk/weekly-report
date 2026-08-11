@@ -20,6 +20,7 @@ const fields: TemplateFieldData[] = [
     field_type: 'textarea',
     required: true,
     enabled: true,
+    show_in_export: true,
     sort_order: 0,
     options: [],
     core_type: 'today_work'
@@ -31,6 +32,7 @@ const fields: TemplateFieldData[] = [
     field_type: 'multiselect',
     required: false,
     enabled: true,
+    show_in_export: true,
     sort_order: 1,
     options: ['A', 'B'],
     core_type: null
@@ -42,6 +44,7 @@ const fields: TemplateFieldData[] = [
     field_type: 'text',
     required: false,
     enabled: false,
+    show_in_export: true,
     sort_order: 2,
     options: [],
     core_type: null
@@ -53,6 +56,7 @@ const fields: TemplateFieldData[] = [
     field_type: 'PROJECT_LIST',
     required: false,
     enabled: true,
+    show_in_export: true,
     sort_order: 3,
     options: [],
     core_type: null

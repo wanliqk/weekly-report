@@ -183,6 +183,11 @@ async function publish(): Promise<void> {
             <div class="field-editor-switches">
               <el-switch v-model="field.enabled" active-text="启用" inactive-text="停用" />
               <el-switch v-model="field.required" active-text="必填" inactive-text="选填" />
+              <el-switch
+                v-model="field.show_in_export"
+                active-text="导出显示"
+                inactive-text="导出隐藏"
+              />
             </div>
           </article>
         </div>
