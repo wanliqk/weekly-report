@@ -70,9 +70,10 @@ class WeComQuestionItem(BaseModel):
 
 class WeComTemplateEntry(BaseModel):
     """One `body.entrys[]` entry from `get_template_combine_info` — an
-    existing submission summary, connect-time only (see
-    `WeComFormDetailForkItem` for the execute-time equivalent used for
-    duplicate-checking, sourced from a different endpoint/shape).
+    existing submission summary, connect-time only. No execute-time
+    duplicate-checking equivalent currently exists (`ai-docs/issues.md`
+    `ISS-041`/`ISS-056`): the old `WeComFormDetailForkItem` filled that role
+    briefly and has been removed, and no verified endpoint replaces it.
 
     `reportvids`: WeCom's own already-resolved recipient list for this
     submission (real captures confirm it is the template's configured
@@ -114,34 +115,26 @@ class WeComTemplateInfo(BaseModel):
     appro: list[WeComTemplateApprover] = Field(default_factory=list)
 
 
-class WeComFormDetailForkItem(BaseModel):
-    """One `body.stat_info.fork_items[]` entry from `formcol/detail` — one
-    past submission of this recurring personal journal form. No per-user
-    identity field exists on this entry (unlike the old, now-removed
-    `get_journal_list` endpoint's `reply_id`); `formcol/detail` is only ever
-    called with the current user's own Cookie against their own form, so
-    every fork here is treated as this user's own submission history."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    form_id: RemoteId
-    ctime: int
-    status: int
-
-
 class WeComFormDetail(BaseModel):
     """Return value of `WeComInternalClient.get_form_detail()` — the
-    execute-time structure/duplicate-check source (`GET /formcol/detail`),
-    replacing the old `get_template_info()` re-check plus the separate,
-    now-removed `list_journals()` duplicate-check call. `questions` reuses
-    `WeComQuestionItem` (`formcol/detail`'s `question_infos[]` never carries
-    `pos`/`note`/`ext`, all already-optional fields on that model)."""
+    execute-time structure re-check source (`GET /formcol/answer_page?
+    _prefetch=1`, replacing the retired `GET /formcol/detail` —
+    `ai-docs/issues.md` `ISS-056`). `questions` reuses `WeComQuestionItem`
+    directly: unlike the old `formcol/detail` shape (`question_infos[]`,
+    `type` instead of `reply_type`, never `pos`/`note`/`ext`), this
+    endpoint's `body.form.question.items[]` carries the identical field
+    names as `get_template_combine_info`'s `body.form.question.items[]`.
+
+    No fork/duplicate-submission signal is modeled here. The old
+    `fork_items` field (and the `_resolve_current_fork_form_id()` machinery
+    it fed, `ISS-051`) has been removed along with it — this endpoint never
+    returns anything shaped like it, and no other verified endpoint
+    reliably distinguishes an already-submitted day either (`ISS-041`)."""
 
     form_id: RemoteId
     creater_vid: RemoteId
     creater_name: str
     questions: list[WeComQuestionItem]
-    fork_items: list[WeComFormDetailForkItem]
 
 
 class WeComAnswerItem(BaseModel):

@@ -616,10 +616,14 @@ def test_schema_fingerprint_changes_when_reply_type_changes() -> None:
 
 
 def test_schema_fingerprint_ignores_sub_type() -> None:
-    """`ISS-040`: `sub_type` deliberately does not participate — the
-    execute-time structure source (`formcol/detail`) never carries `ext`
-    and so can never populate it, which would otherwise make every
-    execute-time fingerprint permanently mismatch the connect-time one."""
+    """`ISS-040`: `sub_type` deliberately does not participate. Originally
+    because the execute-time structure source (`formcol/detail`) never
+    carried `ext` and so could never populate it, which would otherwise make
+    every execute-time fingerprint permanently mismatch the connect-time
+    one; `formcol/detail` has since been retired for `formcol/answer_page?
+    _prefetch=1` (`ISS-056`), which *does* carry `ext`, but `sub_type` still
+    stays out — nothing depends on it, and re-including it would only add a
+    new way for the two call sites to drift."""
     today_q = _spec("q-today", reply_type="text", submit_order=1)
     tomorrow_q = _spec("q-tomorrow", reply_type="text", submit_order=2)
 

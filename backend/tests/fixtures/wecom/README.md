@@ -19,7 +19,7 @@ formcol/answer_page` 的真实成功抓包，`ISS-040`）。本目录的 fixture
 | `answer_page_request.http` | `POST /formcol/answer_page`（提交日报） | 高：字段名、multipart 顺序、`wwjournal_data`/`form_reply` 嵌套结构直接对应真实抓包，仅替换取值 |
 | `answer_page_response.json` | `POST /formcol/answer_page` 的响应 | 高：`head.ret`/`body.form`/`body.answer_replys` 结构直接对应真实抓包，仅替换取值 |
 | `get_template_combine_info_response.json` | `POST /journal/get_template_combine_info` | 中：`head.ret`/`body.entrys`/`body.template_id` 字段名来自 `wx-ribao.py` 的代码路径分析；`body.form.question.items` 复用了 `answer_page` 响应里已验证的题目结构形状，无该接口本身的真实抓包可比对 |
-| `formcol_detail_response.json` | `GET /formcol/detail` | 高：`head.ret`/`body.stat_info.question_infos`/`body.stat_info.fork_items`/`creater_vid`/`creater_name` 字段名和嵌套结构直接对应 2026-08-09 用户提供的真实抓包（`ribao.txt`，见 `ISS-040`），仅替换取值 |
+| `formcol_answer_page_get_response.json` | `GET /formcol/answer_page?_prefetch=1`（执行同步阶段的结构复核，取代已退役的 `GET /formcol/detail`） | 高：`head.ret`/`body.form.form_id`/`create_vid`/`create_name`/`question.items[]` 字段名和嵌套结构直接对应 2026-08-11 用户提供的真实抓包（`获取日报结构.txt`，见 `ISS-056`），仅替换取值 |
 
 ## 使用约束
 

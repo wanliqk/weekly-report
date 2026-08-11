@@ -1,0 +1,85 @@
+{
+  "head": {
+    "ret": 0,
+    "cgi": "xmformcollogicsvr/answer_page",
+    "time": 1700000000,
+    "msg": ""
+  },
+  "param": {
+    "protocol": "http",
+    "hostname": "doc.weixin.qq.com",
+    "sid": "SYNTHETIC_WEDOC_SID_0000000000"
+  },
+  "body": {
+    "form": {
+      "form_id": "SYNTHETIC-FORM-0000000000000000000fork",
+      "title": "日报",
+      "create_vid": 9000000000000011,
+      "create_name": "王小明",
+      "ctime": 1700000000,
+      "mtime": 1700000100,
+      "fill_cnt": 0,
+      "total_cnt": 0,
+      "question": {
+        "items": [
+          {
+            "question_id": 1000000001,
+            "title": "日期",
+            "pos": 1,
+            "status": 1,
+            "reply_type": 11,
+            "must_reply": false,
+            "note": "",
+            "ext": {
+              "qdata_format": "yyyy\"年\"m\"月\"d\"日\"",
+              "qdata_sub_type": "date"
+            }
+          },
+          {
+            "question_id": 1000000002,
+            "title": "今日工作",
+            "pos": 2,
+            "status": 1,
+            "reply_type": 1,
+            "must_reply": true,
+            "note": "",
+            "ext": {
+              "question_descriptor": {"simpleFirstIndex": 0, "simpleSecondIndex": 1},
+              "validate": [{"type": 1}]
+            }
+          },
+          {
+            "question_id": 1000000003,
+            "title": "明日计划",
+            "pos": 3,
+            "status": 1,
+            "reply_type": 1,
+            "must_reply": true,
+            "ext": {
+              "question_descriptor": {"simpleFirstIndex": 0, "simpleSecondIndex": 1},
+              "validate": [{"type": 1}]
+            }
+          }
+        ]
+      },
+      "share_url": "https://doc.weixin.qq.com/journal/create?docid=c2_SYNTHETIC-FORM-0000000000000000000fork",
+      "note": "说明控件",
+      "status": 1,
+      "can_modify_content": true,
+      "can_fill_out_once": false,
+      "base_form_id": "SYNTHETIC-FORM-0000000000000000000base"
+    },
+    "status": 1,
+    "has_login": true,
+    "login_type": "ww",
+    "login_redirect_url": "https://doc.weixin.qq.com/disklogin/login_page?product=3&from=9&redirect_url=SYNTHETIC",
+    "share_url": "https://doc.weixin.qq.com/journal/create?docid=c2_SYNTHETIC-FORM-0000000000000000000fork",
+    "is_corp_internal": true,
+    "repeat_before_replys": {
+      "answer_replys": []
+    },
+    "detail_auth": 3,
+    "user_vid": "9000000000000012",
+    "repeat_todo_time": 0
+  }
+}

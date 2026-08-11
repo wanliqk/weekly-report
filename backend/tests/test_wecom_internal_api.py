@@ -1,13 +1,10 @@
 from collections.abc import Iterator, Sequence
-from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 from wecom_service_support import (
-    DEFAULT_FORM_ID,
-    build_fork_item,
     build_form_detail,
     build_submission_result,
     build_template_info,
@@ -164,12 +161,6 @@ def _patch_submit_daily(
         return resolved
 
     monkeypatch.setattr(WeComInternalClient, "submit_daily", _fake)
-
-
-def _shanghai_noon_epoch(work_date: date) -> int:
-    return int(
-        datetime(work_date.year, work_date.month, work_date.day, 4, 0, 0, tzinfo=UTC).timestamp()
-    )
 
 
 def _connect(client: TestClient, headers: dict[str, str], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -403,14 +394,16 @@ def test_execute_end_to_end_succeeds_and_updates_the_record(
     assert detail.json()["data"]["status"] == "succeeded"
 
 
-def test_execute_end_to_end_succeeds_even_when_a_fork_exists_on_the_matching_date(
+def test_execute_end_to_end_succeeds_with_no_duplicate_check_available(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`ISS-040` second revision: a `fork_items` entry on the target date
-    used to block execution as `duplicate_detected`. Real usage showed that
-    check false-positives on every attempt (see `test_wecom_sync_service.py`'s
-    matching regression test for the full explanation) and it has been
-    removed — this is the end-to-end guard that it stays removed."""
+    """`ai-docs/issues.md` `ISS-056`: `get_form_detail()` now calls
+    `GET /formcol/answer_page?_prefetch=1` (the previously used
+    `/formcol/detail` started empty-rejecting real production traffic with
+    `business_code=-5012`), and that endpoint returns nothing shaped like
+    the old `fork_items` — there is no remote duplicate-submission signal
+    available from any verified endpoint (`ISS-041`/`ISS-056`), so execution
+    must still succeed with a completely bare `WeComFormDetail`."""
     headers = _bootstrap_and_login(client)
     _connect(client, headers, monkeypatch)
     _archived_day(client, headers, "2026-08-05")
@@ -418,11 +411,7 @@ def test_execute_end_to_end_succeeds_even_when_a_fork_exists_on_the_matching_dat
     assert created.status_code == 200, created.text
     record_id = created.json()["data"]["id"]
 
-    candidate = build_fork_item(
-        form_id=DEFAULT_FORM_ID,
-        ctime=_shanghai_noon_epoch(date(2026, 8, 5)),
-    )
-    _patch_get_form_detail(monkeypatch, build_form_detail(fork_items=[candidate]))
+    _patch_get_form_detail(monkeypatch, build_form_detail())
     _patch_submit_daily(monkeypatch)
     response = client.post(
         f"/api/v1/internal/wecom/sync-records/{record_id}/execute",

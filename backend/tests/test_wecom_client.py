@@ -21,7 +21,6 @@ import pytest
 
 from app.core.wecom_logging import WECOM_RAW_LOGGER_NAME
 from app.integrations.wecom.client import (
-    _MAX_FORK_ITEMS,
     WeComAuthExpired,
     WeComBusinessRejected,
     WeComInternalClient,
@@ -300,16 +299,24 @@ async def test_get_template_info_still_rejects_an_entrys_key_of_the_wrong_type()
 
 
 async def test_get_form_detail_success() -> None:
-    fixture = _load_json_fixture("formcol_detail_response.json")
+    """`ai-docs/issues.md` `ISS-056`: `get_form_detail()` now calls
+    `GET /formcol/answer_page?_prefetch=1` (the retired `/formcol/detail`
+    started empty-rejecting real production traffic with
+    `business_code=-5012`), reusing the same wire path `submit_daily()`
+    POSTs to but with a distinct GET-only query shape and response body."""
+    fixture = _load_json_fixture("formcol_answer_page_get_response.json")
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/formcol/detail"
+        assert request.url.path == "/formcol/answer_page"
+        assert request.url.params.get("_prefetch") == "1"
         assert request.url.params.get("form_id") == "SYNTHETIC-FORM-x"
         assert request.url.params.get("f") == "json"
-        assert request.url.params.get("lang") == "zh"
         assert "_t" in request.url.params
-        # Unlike every other endpoint, this one carries no `sid`/`wedoc_xsrf`.
+        # Unlike the submit/template-info endpoints, this one carries no
+        # `sid`/`wedoc_xsrf` — Cookie-only auth (unchanged from the retired
+        # `/formcol/detail`).
         assert request.url.params.get("sid") is None
+        assert request.url.params.get("wedoc_xsrf") is None
         return _json_response(200, fixture)
 
     client = WeComInternalClient(transport=httpx.MockTransport(handler))
@@ -318,16 +325,22 @@ async def test_get_form_detail_success() -> None:
     finally:
         await client.aclose()
 
-    assert detail.form_id == "SYNTHETIC-FORM-0000000000000000000base"
+    assert detail.form_id == "SYNTHETIC-FORM-0000000000000000000fork"
     assert detail.creater_vid == "9000000000000011"
     assert detail.creater_name == "王小明"
     assert len(detail.questions) == 3
     question_ids = [question.question_id for question in detail.questions]
     assert question_ids == ["1000000001", "1000000002", "1000000003"]
-    assert detail.questions[1].reply_type == 24
-    assert len(detail.fork_items) == 1
-    assert detail.fork_items[0].form_id == "SYNTHETIC-FORM-0000000000000000000fork"
-    assert detail.fork_items[0].status == 1
+    assert detail.questions[0].reply_type == 11
+    assert detail.questions[1].must_reply is True
+    # `body.form.question.items[]` on this endpoint carries the same
+    # `pos`/`ext` fields `get_template_combine_info` does — unlike the old,
+    # now-retired `formcol/detail` shape, which never carried them.
+    assert detail.questions[0].pos == 1
+    assert detail.questions[0].ext == {
+        "qdata_format": 'yyyy"年"m"月"d"日"',
+        "qdata_sub_type": "date",
+    }
 
 
 async def test_submit_daily_success() -> None:
@@ -761,7 +774,7 @@ async def test_get_form_detail_non_numeric_ret_still_yields_key_diagnostics(
     looked like. `get_form_detail` shares the same `head.ret`-based parsing
     as every other endpoint, so this same failure mode is covered here too:
     `schema_paths` always accompanies it."""
-    payload: dict[str, Any] = {"head": {"ret": None}, "body": {"stat_info": {}}}
+    payload: dict[str, Any] = {"head": {"ret": None}, "body": {}}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(200, payload)
@@ -796,7 +809,7 @@ async def test_get_form_detail_empty_string_ret_is_described_not_silent() -> Non
     with no accompanying message, rather than the documented `0`/non-zero
     int. This asserts the same coercion-failure description applies equally
     to `get_form_detail`'s `head.ret`."""
-    payload = {"head": {"ret": ""}, "body": {"stat_info": {}}}
+    payload = {"head": {"ret": ""}, "body": {}}
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(200, payload)
@@ -865,7 +878,9 @@ async def test_get_template_info_missing_body_is_protocol_changed() -> None:
         await client.aclose()
 
 
-async def test_get_form_detail_missing_stat_info_is_protocol_changed() -> None:
+async def test_get_form_detail_missing_form_is_protocol_changed() -> None:
+    """`ai-docs/issues.md` `ISS-056`: the new endpoint's identifying node is
+    `body.form` (was `body.stat_info` on the retired `/formcol/detail`)."""
     payload = {"head": {"ret": 0}, "body": {}}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -879,23 +894,31 @@ async def test_get_form_detail_missing_stat_info_is_protocol_changed() -> None:
         await client.aclose()
 
 
-async def test_get_form_detail_oversized_fork_items_is_protocol_changed() -> None:
-    huge_fork_item = {
-        "form_id": "SYNTHETIC-FORM-0000000000000000000fork",
-        "title": "日报",
-        "ctime": 1,
-        "mtime": 1,
-        "status": 1,
+async def test_get_form_detail_missing_form_identifiers_is_protocol_changed() -> None:
+    payload = {
+        "head": {"ret": 0},
+        "body": {"form": {"question": {"items": []}}},
     }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, payload)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(WeComProtocolChanged):
+            await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+
+async def test_get_form_detail_missing_question_items_is_schema_changed() -> None:
     payload = {
         "head": {"ret": 0},
         "body": {
-            "stat_info": {
+            "form": {
                 "form_id": "SYNTHETIC-FORM-x",
-                "creater_vid": "1",
-                "creater_name": "n",
-                "question_infos": [],
-                "fork_items": [huge_fork_item] * (_MAX_FORK_ITEMS + 1),
+                "create_vid": "1",
+                "create_name": "n",
             }
         },
     }
@@ -905,7 +928,23 @@ async def test_get_form_detail_oversized_fork_items_is_protocol_changed() -> Non
 
     client = WeComInternalClient(transport=httpx.MockTransport(handler))
     try:
-        with pytest.raises(WeComProtocolChanged):
+        with pytest.raises(WeComSchemaChanged):
+            await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+
+async def test_get_form_detail_malformed_question_item_is_schema_changed() -> None:
+    fixture = _load_json_fixture("formcol_answer_page_get_response.json")
+    broken = copy.deepcopy(fixture)
+    del broken["body"]["form"]["question"]["items"][0]["question_id"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, broken)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(WeComSchemaChanged):
             await client.get_form_detail(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
     finally:
         await client.aclose()

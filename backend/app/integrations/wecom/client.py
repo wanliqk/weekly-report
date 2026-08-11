@@ -43,7 +43,6 @@ from app.integrations.wecom.schemas import (
     WeComAnswerItem,
     WeComCookieIn,
     WeComFormDetail,
-    WeComFormDetailForkItem,
     WeComQuestionItem,
     WeComSubmissionResult,
     WeComSubmitDailyPayload,
@@ -59,8 +58,10 @@ _ALLOWED_HOST: Final = "doc.weixin.qq.com"
 _BASE_URL: Final = f"https://{_ALLOWED_HOST}"
 
 _GET_TEMPLATE_INFO_PATH: Final = "/journal/get_template_combine_info"
-_GET_FORM_DETAIL_PATH: Final = "/formcol/detail"
-_SUBMIT_DAILY_PATH: Final = "/formcol/answer_page"
+# Serves both `get_form_detail()` (GET, `?_prefetch=1`) and `submit_daily()`
+# (POST) — the same wire path, two different methods/response shapes
+# (`ai-docs/issues.md` `ISS-056`).
+_ANSWER_PAGE_PATH: Final = "/formcol/answer_page"
 
 _SID_COOKIE_NAME: Final = "wedoc_sid"
 
@@ -72,11 +73,6 @@ _MAX_JSON_DEPTH: Final = 32
 _MAX_SCHEMA_DIAGNOSTIC_DEPTH: Final = 6
 _MAX_SCHEMA_DIAGNOSTIC_PATHS: Final = 64
 _SCHEMA_KEY_PATTERN: Final = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
-
-# A single `fork_items` response claiming an implausible number of past
-# submissions is treated as a protocol anomaly rather than trusted, same
-# reasoning as `docs/方案设计.md` §10.2's now-superseded list-pagination cap.
-_MAX_FORK_ITEMS: Final = 200
 
 _DEFAULT_TIMEOUT: Final = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
 
@@ -444,14 +440,17 @@ def _parse_json_response(response: httpx.Response, *, on_send: bool) -> dict[str
 
 
 class WeComInternalClient:
-    """Async HTTP client for the four verified WeCom internal endpoints.
+    """Async HTTP client for the three verified WeCom internal endpoints.
 
     Exposes `get_template_info` (connect-time only), `get_form_detail`
-    (execute-time structure re-check + duplicate check), and `submit_daily`
-    (`docs/方案设计.md` §8, revised — the previous `list_journals` duplicate
-    check has been retired in favor of `get_form_detail`'s own `fork_items`).
-    Not thread-safe across event loops, same as any `httpx.AsyncClient`;
-    construct one per request scope.
+    (execute-time structure re-check only), and `submit_daily`
+    (`docs/方案设计.md` §8). There is currently no remote signal this Client
+    can use to detect an already-submitted day — the `list_journals`
+    duplicate check was retired first (`ai-docs/issues.md` `ISS-040`), then
+    the `fork_items`-based one that briefly replaced it (`ISS-041`); callers
+    submit and trust `submit_again=true`, matching the real working capture
+    this integration is based on. Not thread-safe across event loops, same
+    as any `httpx.AsyncClient`; construct one per request scope.
     """
 
     def __init__(
@@ -510,19 +509,28 @@ class WeComInternalClient:
     async def get_form_detail(
         self, cookie_jar: Sequence[WeComCookieIn], form_id: str
     ) -> WeComFormDetail:
-        """`GET /formcol/detail` — the execute-time structure/duplicate-check
-        source. Replaces the previous `get_template_info()` re-check plus the
-        separate `list_journals()` duplicate-check call (both retired: see
-        `docs/方案设计.md` §2.4/§10.2's revision history). Unlike every other
-        method here, WeCom's own real traffic for this endpoint carries no
-        `sid`/`wedoc_xsrf` query parameter — only Cookie auth."""
-        cookie_header, _sid = self._select_or_raise(cookie_jar, _GET_FORM_DETAIL_PATH)
+        """`GET /formcol/answer_page?_prefetch=1` — the execute-time
+        structure re-check source, replacing the previously used
+        `GET /formcol/detail` (`ai-docs/issues.md` `ISS-056`). Real
+        production traffic showed `/formcol/detail` reject the user's
+        actual daily-report form/fork with an empty `body:{}` and
+        `business_code=-5012` on four independent attempts spread across
+        ~17 hours, while `journal/get_template_combine_info` kept succeeding
+        against that exact same form/fork in between — an asymmetry this
+        Client has no way to work around. The user then supplied a real
+        successful capture of this exact request (against the same form)
+        returning the full structure, so the execute-time re-check moved
+        here. Same wire path `submit_daily()` POSTs to (`_ANSWER_PAGE_PATH`),
+        different method/query/response shape. Like `/formcol/detail`
+        before it, this call carries no `sid`/`wedoc_xsrf` query parameter —
+        Cookie-only auth — but does need `_prefetch=1`."""
+        cookie_header, _sid = self._select_or_raise(cookie_jar, _ANSWER_PAGE_PATH)
         return await self._send_get(
-            _GET_FORM_DETAIL_PATH,
+            _ANSWER_PAGE_PATH,
             params={
+                "_prefetch": "1",
                 "_t": str(int(self._clock().timestamp() * 1000)),
                 "f": "json",
-                "lang": "zh",
                 "form_id": form_id,
             },
             cookie_header=cookie_header,
@@ -534,7 +542,7 @@ class WeComInternalClient:
         cookie_jar: Sequence[WeComCookieIn],
         payload: WeComSubmitDailyPayload,
     ) -> WeComSubmissionResult:
-        cookie_header, sid = self._select_or_raise(cookie_jar, _SUBMIT_DAILY_PATH)
+        cookie_header, sid = self._select_or_raise(cookie_jar, _ANSWER_PAGE_PATH)
 
         form_reply = json.dumps(
             {"items": [_serialize_answer_item(item) for item in payload.items]},
@@ -570,7 +578,7 @@ class WeComInternalClient:
         ]
 
         return await self._send_multipart(
-            _SUBMIT_DAILY_PATH,
+            _ANSWER_PAGE_PATH,
             params={"sid": sid, "wedoc_xsrf": "1"},
             fields=fields,
             cookie_header=cookie_header,
@@ -843,6 +851,15 @@ class WeComInternalClient:
         )
 
     def _parse_form_detail(self, payload: dict[str, Any]) -> WeComFormDetail:
+        """`GET /formcol/answer_page?_prefetch=1` response
+        (`ai-docs/issues.md` `ISS-056`). `body.form` carries the same
+        `form_id`/`create_vid`/`create_name`/`question.items[]` shape as
+        `get_template_combine_info`'s `body.form`, so the question items are
+        parsed the identical way (`WeComQuestionItem.model_validate(item)`
+        directly, no field renaming needed) — unlike the old, now-retired
+        `formcol/detail` shape (`body.stat_info.question_infos[]`, which
+        used `type` instead of `reply_type` and never carried `pos`/`ext`).
+        """
         head = payload.get("head")
         if not isinstance(head, dict) or "ret" not in head:
             raise WeComProtocolChanged("响应缺少 head.ret 节点")
@@ -861,65 +878,37 @@ class WeComInternalClient:
             )
 
         body = payload.get("body")
-        stat_info = body.get("stat_info") if isinstance(body, dict) else None
-        if not isinstance(stat_info, dict):
-            raise WeComProtocolChanged(
-                "响应缺少 body.stat_info 节点", detail=_schema_paths(payload)
-            )
+        form = body.get("form") if isinstance(body, dict) else None
+        if not isinstance(form, dict):
+            raise WeComProtocolChanged("响应缺少 body.form 节点", detail=_schema_paths(payload))
 
-        form_id = stat_info.get("form_id")
-        creater_vid = stat_info.get("creater_vid")
-        creater_name = stat_info.get("creater_name")
-        question_infos = stat_info.get("question_infos")
-        fork_items_raw = stat_info.get("fork_items")
+        form_id = form.get("form_id")
+        creater_vid = form.get("create_vid")
+        creater_name = form.get("create_name")
         if (
             not isinstance(form_id, str | int)
             or not isinstance(creater_vid, str | int)
             or not isinstance(creater_name, str)
-            or not isinstance(question_infos, list)
-            or not isinstance(fork_items_raw, list)
         ):
             raise WeComProtocolChanged(
-                "响应 body.stat_info 缺少必需节点", detail=_schema_paths(payload)
+                "响应 body.form 缺少 form_id/create_vid/create_name 节点",
+                detail=_schema_paths(payload),
             )
-        if len(fork_items_raw) > _MAX_FORK_ITEMS:
-            raise WeComProtocolChanged("fork_items 数量超出合理范围,判定为协议异常")
 
+        question = form.get("question")
+        items = question.get("items") if isinstance(question, dict) else None
+        if not isinstance(items, list):
+            raise WeComSchemaChanged("表单题目结构(body.form.question.items)缺失")
         try:
-            questions = [
-                WeComQuestionItem.model_validate(
-                    {
-                        "question_id": item.get("question_id") if isinstance(item, dict) else None,
-                        "title": item.get("title") if isinstance(item, dict) else None,
-                        "reply_type": item.get("type") if isinstance(item, dict) else None,
-                        "must_reply": item.get("must_reply") if isinstance(item, dict) else None,
-                    }
-                )
-                for item in question_infos
-            ]
+            questions = [WeComQuestionItem.model_validate(item) for item in items]
         except ValidationError as exc:
             raise WeComSchemaChanged("表单题目结构与预期不符") from exc
-
-        # `fork_items` only feeds a best-effort duplicate check (`WECOM-06`);
-        # a malformed individual entry is skipped rather than failing the
-        # whole call, unlike the stricter all-or-nothing validation above for
-        # the three target questions this integration cannot function
-        # without.
-        fork_items: list[WeComFormDetailForkItem] = []
-        for raw_item in fork_items_raw:
-            if not isinstance(raw_item, dict):
-                continue
-            try:
-                fork_items.append(WeComFormDetailForkItem.model_validate(raw_item))
-            except ValidationError:
-                continue
 
         return WeComFormDetail(
             form_id=str(form_id),
             creater_vid=str(creater_vid),
             creater_name=creater_name,
             questions=questions,
-            fork_items=fork_items,
         )
 
     def _parse_submission_result(self, payload: dict[str, Any]) -> WeComSubmissionResult:

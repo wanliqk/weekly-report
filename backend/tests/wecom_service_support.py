@@ -4,10 +4,10 @@ Not a `test_*.py` module itself (pytest's default discovery pattern never
 collects it), imported by `test_wecom_connection_service.py` and
 `test_wecom_sync_service.py`. Field values mirror
 `tests/fixtures/wecom/get_template_combine_info_response.json` /
-`formcol_detail_response.json` / `answer_page_response.json` so the shapes
-built here stay consistent with what `WECOM-04`'s own contract tests already
-verify the real `WeComInternalClient` produces — this module only replaces
-the network boundary (`WeComClientLike`'s duck-typed Protocol,
+`formcol_answer_page_get_response.json` / `answer_page_response.json` so the
+shapes built here stay consistent with what `WECOM-04`'s own contract tests
+already verify the real `WeComInternalClient` produces — this module only
+replaces the network boundary (`WeComClientLike`'s duck-typed Protocol,
 `app/services/wecom_connection.py` / `app/services/wecom_sync.py`), never the
 domain object shapes themselves.
 """
@@ -20,7 +20,6 @@ from app.integrations.wecom.client import WeComClientError
 from app.integrations.wecom.schemas import (
     WeComCookieIn,
     WeComFormDetail,
-    WeComFormDetailForkItem,
     WeComQuestionItem,
     WeComSubmissionResult,
     WeComSubmitDailyPayload,
@@ -69,11 +68,15 @@ def build_target_questions() -> list[WeComQuestionItem]:
 
 
 def build_form_detail_questions() -> list[WeComQuestionItem]:
-    """Execute-time shape (`formcol/detail`'s `question_infos[]`) — never
-    carries `pos`/`ext` (both already-optional fields on `WeComQuestionItem`),
-    matching what `WeComInternalClient._parse_form_detail` actually produces.
-    Same `question_id`/`reply_type`/`must_reply` as `build_target_questions()`
-    so a stub-driven schema-fingerprint comparison still matches by default."""
+    """Execute-time shape (`formcol/answer_page?_prefetch=1`'s
+    `question.items[]`, `ai-docs/issues.md` `ISS-056`) — field names are
+    identical to the connect-time shape (`build_target_questions()` above),
+    and the real endpoint does carry `pos`/`ext` too; omitted here purely
+    for stub economy since nothing under test reads them off this stub, not
+    because the wire shape lacks them (unlike the old, now-retired
+    `formcol/detail`, which genuinely never carried them). Same
+    `question_id`/`reply_type`/`must_reply` as `build_target_questions()` so
+    a stub-driven schema-fingerprint comparison still matches by default."""
     return [
         WeComQuestionItem(
             question_id=DATE_QUESTION_ID, title="日期", reply_type=11, must_reply=False
@@ -115,24 +118,18 @@ def build_template_info(
     )
 
 
-def build_fork_item(*, form_id: str, ctime: int, status: int = 1) -> WeComFormDetailForkItem:
-    return WeComFormDetailForkItem(form_id=form_id, ctime=ctime, status=status)
-
-
 def build_form_detail(
     *,
     form_id: str = DEFAULT_FORM_ID,
     creater_vid: str = DEFAULT_REPLY_VID,
     creater_name: str = DEFAULT_REPLY_NAME,
     questions: list[WeComQuestionItem] | None = None,
-    fork_items: list[WeComFormDetailForkItem] | None = None,
 ) -> WeComFormDetail:
     return WeComFormDetail(
         form_id=form_id,
         creater_vid=creater_vid,
         creater_name=creater_name,
         questions=questions if questions is not None else build_form_detail_questions(),
-        fork_items=fork_items if fork_items is not None else [],
     )
 
 
@@ -155,8 +152,10 @@ class StubWeComClient:
     structural typing, one stub satisfies both. Each remote call
     independently returns a fixed value or raises a fixed error; call counts
     are tracked so tests can assert a call was (or wasn't) made — e.g.
-    `submit_daily` must never be invoked when a duplicate fork was found
-    (`docs/方案设计.md` §10.2).
+    `submit_daily` must never be invoked when an earlier step (structure
+    fetch, schema-fingerprint comparison, unmapped-field precheck) already
+    stopped the attempt. There is no fork-based duplicate check to assert
+    around any more (`ai-docs/issues.md` `ISS-041`/`ISS-056`).
     """
 
     def __init__(

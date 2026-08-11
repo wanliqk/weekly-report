@@ -33,7 +33,11 @@ _DIAGNOSTICS_ATTRIBUTE: Final = "wecom_diagnostics"
 _ALLOWED_PATH_TEMPLATES: Final = frozenset(
     {
         "/journal/get_template_combine_info",
-        "/formcol/detail",
+        # Serves both `get_form_detail()` (GET, `?_prefetch=1`) and
+        # `submit_daily()` (POST) — see `_ANSWER_PAGE_PATH` in
+        # `app/integrations/wecom/client.py` (`ai-docs/issues.md` `ISS-056`
+        # retired the separate `/formcol/detail` path this set used to also
+        # allow).
         "/formcol/answer_page",
     }
 )

@@ -313,11 +313,16 @@ def compute_schema_fingerprint(
     two digests to detect drift.
 
     Only `question_id`/`reply_type` participate. `sub_type` (from the
-    connect-time-only `ext.qdata_sub_type`) deliberately does not: the
-    execute-time structure source (`formcol/detail`, `WECOM-06` revision)
-    never carries `ext` and so can never populate it, which would otherwise
-    make every execute-time comparison against a connect-time fingerprint
-    mismatch permanently rather than just detect real drift.
+    optional `ext.qdata_sub_type`) deliberately does not: kept out so a
+    comparison stays reliable regardless of whether `ext` happens to be
+    present on a given response — originally because the execute-time
+    structure source (`formcol/detail`) never carried it at all; that
+    endpoint has since been retired for a different reason
+    (`ai-docs/issues.md` `ISS-056`) in favor of `formcol/answer_page?
+    _prefetch=1`, which *does* carry `ext` (same as `get_template_combine_info`
+    does at connect time) — `sub_type` still stays out, since nothing
+    depends on it and re-including it would gain nothing but a new way for
+    the two call sites to drift.
     """
 
     def _spec_payload(spec: WeComQuestionSpec) -> dict[str, str]:

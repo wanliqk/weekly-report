@@ -71,10 +71,12 @@ class WeComClientLike(Protocol):
     """Duck-typed subset of `WeComInternalClient` — see
     `app/services/wecom_connection.py`'s identically-named Protocol for why
     tests inject a stub instead of a real HTTP client. `execute()` uses both
-    protocol methods below: `get_form_detail()` (structure re-check; its
-    `fork_items` are fetched but no longer used for duplicate detection —
-    `docs/方案设计.md` §10.2's second revision) replaces the old
-    `get_template_info()` + `list_journals()` pair."""
+    protocol methods below: `get_form_detail()` (structure re-check only,
+    now backed by `GET /formcol/answer_page?_prefetch=1` —
+    `ai-docs/issues.md` `ISS-056`) replaces the old `get_template_info()` +
+    `list_journals()` pair. No verified endpoint currently offers a
+    duplicate-submission signal (`ISS-041`/`ISS-056`); submission trusts
+    `submit_again=true`."""
 
     async def get_form_detail(
         self, cookie_jar: Sequence[WeComCookieIn], form_id: str
@@ -262,30 +264,6 @@ def _rebuild_current_specs(
             return None
         specs.append(spec)
     return specs[0], specs[1], specs[2]
-
-
-def _resolve_current_fork_form_id(form_detail: WeComFormDetail, *, fallback: str) -> str:
-    """WeCom's recurring "日报" form materializes a new per-day sub-form
-    ("fork", `fork_items`) over time rather than keeping one stable
-    `form_id` forever (`docs/方案设计.md` §10.2: "这个周期性表单存在哪些日期的实例
-    (fork)"). `profile.form_id` is only ever set at connect time and never
-    updated afterwards, so it drifts behind as new forks get created; real
-    usage showed `submit_daily` rejecting a write against a fork that was
-    already superseded by a newer one present in the very same
-    `get_form_detail()` response's `fork_items` (`business_code=-1000888`).
-
-    The freshest fork (largest `ctime`) is resolved fresh on every submit
-    attempt and used **only** for this one wire call — `profile.form_id`/
-    `destination_fingerprint` deliberately stay untouched, since those are
-    the stable connect-time identity `wecom_daily_sync_records`' uniqueness
-    and this integration's whole idempotency model (`PROD-029`) are built
-    on; rotating fork ids were never meant to be part of that identity.
-    Falls back to `fallback` (the profile's own `form_id`, i.e. today's
-    previous behavior) when `fork_items` is empty, matching how a
-    newly-connected profile with no fork history yet still submits."""
-    if not form_detail.fork_items:
-        return fallback
-    return max(form_detail.fork_items, key=lambda item: item.ctime).form_id
 
 
 @dataclass
@@ -704,6 +682,18 @@ class WeComSyncService:
             # any verified endpoint; `submit_again=true` is trusted to be
             # WeCom's own accepted behavior for this integration, matching
             # the real working capture this flow is based on.
+            #
+            # `docs/方案设计.md` §10.2 (2026-08-11 fourth revision, `ISS-056`):
+            # `get_form_detail()` itself switched endpoints (`/formcol/detail`
+            # started empty-rejecting this account with `business_code=-5012`).
+            # The replacement endpoint doesn't return anything shaped like
+            # `fork_items` at all, so the point above holds a fortiori — there
+            # is no fork data left to even consider using for a duplicate
+            # check or for resolving a "freshest fork" submission target
+            # (`_resolve_current_fork_form_id()`, `ISS-051`, has been removed;
+            # submission now always targets `profile.form_id` directly, same
+            # as before `ISS-051` — see this task's report for the accepted
+            # regression this reintroduces).
 
             raw_reply_type_by_question_id = {
                 question.question_id: question.reply_type for question in form_detail.questions
@@ -734,12 +724,9 @@ class WeComSyncService:
             recipient_config = WeComRecipientConfig.model_validate_json(
                 profile.recipient_config_json
             )
-            submission_form_id = _resolve_current_fork_form_id(
-                form_detail, fallback=profile.form_id
-            )
             try:
                 payload = WeComSubmitDailyPayload(
-                    form_id=submission_form_id,
+                    form_id=profile.form_id,
                     template_id=profile.template_id,
                     items=[
                         WeComAnswerItem(
