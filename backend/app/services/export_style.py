@@ -61,8 +61,8 @@ def style_report_sheet(
     last_data_row` already filled across columns `1..column_count`. Only
     ever sets formatting (and the title cell's text) — never touches the
     data cell values. Cells the caller has already merged (e.g. a
-    `PROJECT_LIST` day's `日期`/`责任人`/other single-value columns spanning
-    several project rows) are styled the same as any other cell — setting
+    `PROJECT_LIST` day's `日期`/other single-value columns spanning several
+    project rows) are styled the same as any other cell — setting
     `.font`/`.alignment`/`.border` on a merged-away `MergedCell` is safe in
     openpyxl, only `.value` is read-only there.
     """

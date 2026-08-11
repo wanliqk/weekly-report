@@ -1,13 +1,21 @@
 import type { TemplateFieldData } from './template'
 
 export type DailyStatus = 'draft' | 'submitted' | 'archived'
-export type ProjectTaskStatus = 'TODO' | 'DOING' | 'DONE'
 
-/** One row of a `PROJECT_LIST` field (`ai-docs/decisions.md` PROD-022). */
+/**
+ * One row of a `PROJECT_LIST` field (`ai-docs/decisions.md` PROD-022,
+ * reshaped by PROD-028). `project`/`content` (工作项目/工作步骤) are
+ * required; the other six are optional free-text tracking details.
+ */
 export interface ProjectListEntry {
   project: string
   content: string
-  status: ProjectTaskStatus
+  planned_completion_date: string
+  actual_completion_date: string
+  owner: string
+  assistant: string
+  required_resources: string
+  completion_notes: string
 }
 
 export type DailyFieldValue = string | number | string[] | ProjectListEntry[] | null

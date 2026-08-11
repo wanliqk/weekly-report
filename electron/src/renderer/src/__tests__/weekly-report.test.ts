@@ -78,12 +78,30 @@ describe('formatWeeklyFieldValue', () => {
     expect(formatWeeklyFieldValue('完成开发')).toBe('完成开发')
   })
 
-  it('formats a PROJECT_LIST source value as project/content/status pairs', () => {
+  it('formats a PROJECT_LIST source value as project/content pairs, omitting blank fields', () => {
     expect(
       formatWeeklyFieldValue([
-        { project: '个人日报系统', content: '完成Excel导出功能', status: 'DONE' },
-        { project: '能源管理平台', content: '设计设备接口', status: 'DOING' }
+        {
+          project: '个人日报系统',
+          content: '完成Excel导出功能',
+          planned_completion_date: '',
+          actual_completion_date: '',
+          owner: '张三',
+          assistant: '',
+          required_resources: '',
+          completion_notes: ''
+        },
+        {
+          project: '能源管理平台',
+          content: '设计设备接口',
+          planned_completion_date: '',
+          actual_completion_date: '',
+          owner: '',
+          assistant: '',
+          required_resources: '',
+          completion_notes: ''
+        }
       ])
-    ).toBe('个人日报系统：完成Excel导出功能（已完成）；能源管理平台：设计设备接口（进行中）')
+    ).toBe('个人日报系统：完成Excel导出功能，责任人：张三；能源管理平台：设计设备接口')
   })
 })

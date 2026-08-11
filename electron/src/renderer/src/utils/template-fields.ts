@@ -1,4 +1,4 @@
-import type { DailyFieldValue, ProjectListEntry, ProjectTaskStatus } from '../types/daily-report'
+import type { DailyFieldValue, ProjectListEntry } from '../types/daily-report'
 import type {
   TemplateCoreType,
   TemplateFieldData,
@@ -8,26 +8,36 @@ import type {
 
 let draftSequence = 0
 
-const PROJECT_TASK_STATUS_LABELS: Record<ProjectTaskStatus, string> = {
-  TODO: '未开始',
-  DOING: '进行中',
-  DONE: '已完成'
-}
-
-export function projectTaskStatusLabel(status: ProjectTaskStatus): string {
-  return PROJECT_TASK_STATUS_LABELS[status]
-}
-
 export function isProjectListArray(value: unknown[]): value is ProjectListEntry[] {
   return value.every(
     (item) => typeof item === 'object' && item !== null && 'project' in item && 'content' in item
   )
 }
 
+// Labels for `ProjectListEntry`'s six optional PROD-028 tracking fields, in
+// the order they should read left-to-right; empty fields are omitted rather
+// than shown as a blank segment.
+const PROJECT_LIST_OPTIONAL_FIELD_LABELS: [keyof ProjectListEntry, string][] = [
+  ['planned_completion_date', '预计完成'],
+  ['actual_completion_date', '实际完成'],
+  ['owner', '责任人'],
+  ['assistant', '协助人'],
+  ['required_resources', '所需资源支持'],
+  ['completion_notes', '完成情况及解决措施']
+]
+
 export function formatProjectListEntries(entries: ProjectListEntry[]): string {
-  return entries
-    .map((entry) => `${entry.project}：${entry.content}（${projectTaskStatusLabel(entry.status)}）`)
-    .join('；')
+  return entries.map(formatProjectListEntry).join('；')
+}
+
+function formatProjectListEntry(entry: ProjectListEntry): string {
+  const segments = [
+    `${entry.project}：${entry.content}`,
+    ...PROJECT_LIST_OPTIONAL_FIELD_LABELS.filter(([key]) => entry[key].trim() !== '').map(
+      ([key, label]) => `${label}：${entry[key]}`
+    )
+  ]
+  return segments.join('，')
 }
 
 export interface TemplateFieldDraft {

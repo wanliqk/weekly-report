@@ -63,7 +63,16 @@ describe('daily form helpers', () => {
   it('builds editable content only from enabled snapshot fields', () => {
     const originalTags = ['A']
     const originalProjects = [
-      { project: '个人日报系统', content: '完成导出', status: 'DONE' as const }
+      {
+        project: '个人日报系统',
+        content: '完成导出',
+        planned_completion_date: '',
+        actual_completion_date: '',
+        owner: '',
+        assistant: '',
+        required_resources: '',
+        completion_notes: ''
+      }
     ]
     const content = initializeDailyContent(fields, {
       'text-key': '完成接口',
@@ -117,8 +126,17 @@ describe('daily form helpers', () => {
     expect(formatDailyFieldValue('完成开发')).toBe('完成开发')
     expect(
       formatDailyFieldValue([
-        { project: '个人日报系统', content: '完成Excel导出功能', status: 'DONE' }
+        {
+          project: '个人日报系统',
+          content: '完成Excel导出功能',
+          planned_completion_date: '',
+          actual_completion_date: '',
+          owner: '',
+          assistant: '',
+          required_resources: '',
+          completion_notes: ''
+        }
       ])
-    ).toBe('个人日报系统：完成Excel导出功能（已完成）')
+    ).toBe('个人日报系统：完成Excel导出功能')
   })
 })

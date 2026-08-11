@@ -18,16 +18,20 @@ independent custom field routed to `today_work` via `field_mapping_json`,
 using the generic "label: formatted value" rule — the same rule that
 applies to any other custom field, not a `PROJECT_LIST`-specific one.
 
-The real data model settles this: `ProjectListEntry`
-(`app/schemas/daily_report.py`) only has `project`, `content`, `status` —
-there is no per-entry 责任人 attribute anywhere in the schema, and
-`default_template_fields()` (`app/services/user.py`) never creates one
-either. `PROJECT_LIST` is always a *custom* field (`core_type is None`);
-"责任人" is therefore treated here as what the schema actually supports: an
+`ProjectListEntry` (`app/schemas/daily_report.py`) was originally just
+`project`/`content`/`status`, so this used to be settled by the schema
+alone: there was no per-entry 责任人 attribute to render. PROD-028 added
+six tracking fields to the entry — including an `owner` (责任人) — for
+internal use (Excel export), but the WeCom sync text still only ever
+renders `project`/`content`; `owner` and the other five new fields are
+deliberately excluded from `_format_project_list_block()` by that same
+decision, not because the schema lacks them anymore. `PROJECT_LIST` is
+always a *custom* field (`core_type is None`); an independent
+责任人-labeled custom field (unrelated to `ProjectListEntry.owner`) is
+still handled as what the schema actually supports for that case: an
 ordinary custom field that a user maps to `today_work` like any other,
 formatted as "责任人:<value>" and appended, in `template_snapshot`
-`sort_order`, after any `PROJECT_LIST` blocks in the same entry. No
-`PROJECT_LIST`-specific "responsible person" sub-line is invented.
+`sort_order`, after any `PROJECT_LIST` blocks in the same entry.
 
 ## Half-width `:` instead of the design doc's full-width colon
 
@@ -54,13 +58,6 @@ from app.schemas.daily_report import DailyFieldValue, ProjectListEntry
 from app.schemas.daily_report_day import DayArchiveSnapshotData, DayArchiveSnapshotEntryData
 from app.schemas.template import TemplateFieldData
 from app.schemas.wecom import WeComFieldMappingConfig, WeComQuestionSpec
-
-# `docs/方案设计.md` §7.2 fixed status labels.
-_PROJECT_STATUS_LABELS: dict[str, str] = {
-    "TODO": "待开始",
-    "DOING": "进行中",
-    "DONE": "已完成",
-}
 
 # Matches `app/services/export.py`'s `_MULTISELECT_SEPARATOR` so a
 # `multiselect` value reads the same way across every local -> external
@@ -118,18 +115,17 @@ def _format_scalar_value(value: DailyFieldValue) -> str | None:
 
 
 def _format_project_list_block(entries: list[ProjectListEntry]) -> str | None:
-    """§7.2: one `项目/工作内容/完成状态` block per entry, blank line between entries.
+    """§7.2: one `项目/工作内容` block per entry, blank line between entries.
 
+    PROD-028 added six tracking fields (including `owner`/责任人) to
+    `ProjectListEntry` for internal use only — see the module docstring's
+    "责任人" section — so only `project`/`content` are rendered here.
     Uses a half-width `:` — see the module docstring's "Half-width `:`"
     section for why this departs from §7.2's full-width example glyph.
     """
     if not entries:
         return None
-    blocks = [
-        f"项目:{item.project}\n工作内容:{item.content}\n"
-        f"完成状态:{_PROJECT_STATUS_LABELS[item.status]}"
-        for item in entries
-    ]
+    blocks = [f"项目:{item.project}\n工作内容:{item.content}" for item in entries]
     return "\n\n".join(blocks)
 
 

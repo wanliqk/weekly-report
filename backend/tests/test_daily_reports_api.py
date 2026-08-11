@@ -240,16 +240,35 @@ def test_draft_save_rejects_unknown_and_wrongly_typed_fields(
 def test_project_list_field_round_trips_valid_entries(
     stage5_context: tuple[TestClient, dict[str, str], Settings],
 ) -> None:
-    """`ai-docs/decisions.md` PROD-022: saved/reloaded `PROJECT_LIST` values
+    """`ai-docs/decisions.md` PROD-028: saved/reloaded `PROJECT_LIST` values
 
-    keep their `{project,content,status}` shape byte-for-byte.
+    keep their 8-field shape byte-for-byte, including the six optional
+    tracking fields left blank on one entry and filled on the other.
     """
     client, headers, _settings = stage5_context
     field_key = _publish_project_list_field(client, headers, required=False)
     report = _create(client, headers)
     entries = [
-        {"project": "个人日报系统", "content": "完成Excel导出功能", "status": "DONE"},
-        {"project": "能源管理平台", "content": "设计设备接口", "status": "DOING"},
+        {
+            "project": "个人日报系统",
+            "content": "完成Excel导出功能",
+            "planned_completion_date": "",
+            "actual_completion_date": "",
+            "owner": "",
+            "assistant": "",
+            "required_resources": "",
+            "completion_notes": "",
+        },
+        {
+            "project": "能源管理平台",
+            "content": "设计设备接口",
+            "planned_completion_date": "2026-08-20",
+            "actual_completion_date": "2026-08-18",
+            "owner": "张三",
+            "assistant": "李四",
+            "required_resources": "云主机配额",
+            "completion_notes": "已按期完成 无遗留问题",
+        },
     ]
 
     saved = _save(client, headers, report, {field_key: entries})
@@ -262,11 +281,13 @@ def test_project_list_field_round_trips_valid_entries(
     "entries",
     [
         "not-a-list",
-        [{"project": "", "content": "内容", "status": "DONE"}],
-        [{"project": "项目", "content": "   ", "status": "DONE"}],
-        [{"project": "项目", "content": "内容", "status": "UNKNOWN"}],
-        [{"project": "项目", "content": "内容"}],
-        [{"project": "项目", "content": "内容", "status": "DONE", "extra": "不该存在"}],
+        [{"project": "", "content": "内容"}],
+        [{"project": "项目", "content": "   "}],
+        [{"project": "项目"}],
+        [{"content": "内容"}],
+        [{"project": "项目", "content": "内容", "status": "DONE"}],
+        [{"project": "项目", "content": "内容", "extra": "不该存在"}],
+        [{"project": "项目", "content": "内容", "owner": 123}],
     ],
 )
 def test_project_list_field_rejects_malformed_entries(
@@ -314,8 +335,26 @@ def test_project_list_field_submits_and_archives_with_multiple_entries(
     report = _create(client, headers)
     content = _default_content(report)
     entries = [
-        {"project": "个人日报系统", "content": "完成Excel导出功能", "status": "DONE"},
-        {"project": "能源管理平台", "content": "设计设备接口", "status": "DOING"},
+        {
+            "project": "个人日报系统",
+            "content": "完成Excel导出功能",
+            "planned_completion_date": "2026-08-06",
+            "actual_completion_date": "2026-08-05",
+            "owner": "张三",
+            "assistant": "",
+            "required_resources": "",
+            "completion_notes": "已上线",
+        },
+        {
+            "project": "能源管理平台",
+            "content": "设计设备接口",
+            "planned_completion_date": "",
+            "actual_completion_date": "",
+            "owner": "",
+            "assistant": "",
+            "required_resources": "",
+            "completion_notes": "",
+        },
     ]
     content[field_key] = entries
     saved = _save(client, headers, report, content)

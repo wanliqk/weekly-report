@@ -150,10 +150,13 @@ def test_zero_entries_snapshot_produces_empty_answers_without_crashing() -> None
 
 
 def test_custom_field_with_a_mapping_rule_is_appended_with_its_label() -> None:
-    """Resolves the §7.1 vs §7.2 "责任人" ambiguity: `ProjectListEntry` has no
+    """Resolves the §7.1 vs §7.2 "责任人" ambiguity: an independent
 
-    per-entry 责任人 attribute, so it is mapped like any other custom field
-    and formatted with the generic "标签:格式化值" rule.
+    责任人-labeled custom field (as opposed to `ProjectListEntry.owner`,
+    which PROD-028 excludes from the sync text entirely — see
+    `test_responsible_person_is_a_custom_field_appended_after_project_list_blocks`)
+    is mapped like any other custom field and formatted with the generic
+    "标签:格式化值" rule.
     """
     responsible_key = generate_ulid()
     fields = [_field(responsible_key, "责任人", sort_order=30, field_type="text")]
@@ -284,30 +287,32 @@ def test_disabled_field_is_skipped_even_if_it_somehow_carries_a_value() -> None:
 # --- PROJECT_LIST -------------------------------------------------------------
 
 
-def test_project_list_single_item_formats_three_lines() -> None:
+def test_project_list_single_item_formats_two_lines() -> None:
     key = generate_ulid()
     fields = [_field(key, "项目列表", sort_order=10, field_type="PROJECT_LIST")]
     entry = _entry(
         template_snapshot=fields,
-        content={key: [{"project": "报表系统", "content": "完成导出", "status": "DONE"}]},
+        content={key: [{"project": "报表系统", "content": "完成导出", "owner": "张三"}]},
     )
     snapshot = _snapshot([entry])
 
     preview = build_wecom_preview(snapshot, _field_mapping())
 
-    assert preview.today_work_answer == "项目:报表系统\n工作内容:完成导出\n完成状态:已完成"
+    # PROD-028: `owner`/`assistant`/... are internal-only tracking fields —
+    # only `project`/`content` ever reach the WeCom sync text.
+    assert preview.today_work_answer == "项目:报表系统\n工作内容:完成导出"
 
 
-def test_project_list_multiple_items_blank_line_separated_with_status_labels() -> None:
+def test_project_list_multiple_items_blank_line_separated() -> None:
     key = generate_ulid()
     fields = [_field(key, "项目列表", sort_order=10, field_type="PROJECT_LIST")]
     entry = _entry(
         template_snapshot=fields,
         content={
             key: [
-                {"project": "P1", "content": "C1", "status": "TODO"},
-                {"project": "P2", "content": "C2", "status": "DOING"},
-                {"project": "P3", "content": "C3", "status": "DONE"},
+                {"project": "P1", "content": "C1"},
+                {"project": "P2", "content": "C2"},
+                {"project": "P3", "content": "C3"},
             ]
         },
     )
@@ -316,9 +321,7 @@ def test_project_list_multiple_items_blank_line_separated_with_status_labels() -
     preview = build_wecom_preview(snapshot, _field_mapping())
 
     assert preview.today_work_answer == (
-        "项目:P1\n工作内容:C1\n完成状态:待开始\n\n"
-        "项目:P2\n工作内容:C2\n完成状态:进行中\n\n"
-        "项目:P3\n工作内容:C3\n完成状态:已完成"
+        "项目:P1\n工作内容:C1\n\n项目:P2\n工作内容:C2\n\n项目:P3\n工作内容:C3"
     )
 
 
@@ -335,13 +338,13 @@ def test_project_list_field_type_wins_over_a_coincidental_today_work_core_type()
     ]
     entry = _entry(
         template_snapshot=fields,
-        content={key: [{"project": "P1", "content": "C1", "status": "DONE"}]},
+        content={key: [{"project": "P1", "content": "C1"}]},
     )
     snapshot = _snapshot([entry])
 
     preview = build_wecom_preview(snapshot, _field_mapping())
 
-    assert preview.today_work_answer == "项目:P1\n工作内容:C1\n完成状态:已完成"
+    assert preview.today_work_answer == "项目:P1\n工作内容:C1"
 
 
 def test_project_list_coexists_with_the_core_today_work_text_field() -> None:
@@ -357,14 +360,14 @@ def test_project_list_coexists_with_the_core_today_work_text_field() -> None:
         template_snapshot=fields,
         content={
             text_key: "整体进展顺利",
-            list_key: [{"project": "P1", "content": "C1", "status": "DOING"}],
+            list_key: [{"project": "P1", "content": "C1"}],
         },
     )
     snapshot = _snapshot([entry])
 
     preview = build_wecom_preview(snapshot, _field_mapping())
 
-    assert preview.today_work_answer == "整体进展顺利\n项目:P1\n工作内容:C1\n完成状态:进行中"
+    assert preview.today_work_answer == "整体进展顺利\n项目:P1\n工作内容:C1"
 
 
 def test_empty_project_list_contributes_nothing() -> None:
@@ -379,6 +382,12 @@ def test_empty_project_list_contributes_nothing() -> None:
 
 
 def test_responsible_person_is_a_custom_field_appended_after_project_list_blocks() -> None:
+    """The independent 责任人-labeled custom field here is unrelated to
+
+    `ProjectListEntry.owner` (PROD-028) — see `wecom_mapper.py`'s "责任人"
+    docstring section for why both can coexist without the entry's own
+    `owner` ever reaching the sync text.
+    """
     list_key = generate_ulid()
     owner_key = generate_ulid()
     fields = [
@@ -388,7 +397,7 @@ def test_responsible_person_is_a_custom_field_appended_after_project_list_blocks
     entry = _entry(
         template_snapshot=fields,
         content={
-            list_key: [{"project": "P1", "content": "C1", "status": "DONE"}],
+            list_key: [{"project": "P1", "content": "C1", "owner": "王五"}],
             owner_key: "李四",
         },
     )
@@ -397,7 +406,7 @@ def test_responsible_person_is_a_custom_field_appended_after_project_list_blocks
 
     preview = build_wecom_preview(snapshot, mapping)
 
-    assert preview.today_work_answer == "项目:P1\n工作内容:C1\n完成状态:已完成\n责任人:李四"
+    assert preview.today_work_answer == "项目:P1\n工作内容:C1\n责任人:李四"
 
 
 # --- Multi-source (same-day multiple entries) --------------------------------

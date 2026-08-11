@@ -110,9 +110,7 @@ def test_export_by_ids_returns_succeeded_job_with_downloadable_xlsx(
     assert sheet is not None
     rows = list(sheet.iter_rows(values_only=True))
     assert rows[1][0] == "日期"
-    assert rows[1][-1] == "责任人"
     assert rows[2][0] == "2026-08-01"
-    assert rows[2][-1] == "admin"
 
 
 def test_export_file_exposes_content_disposition_to_cross_origin_renderer(

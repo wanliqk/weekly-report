@@ -6,7 +6,6 @@ import {
   emptyFieldValue,
   formatProjectListEntries,
   isProjectListArray,
-  projectTaskStatusLabel,
   toTemplateFieldDrafts,
   toTemplateFieldPayload,
   usesOptions,
@@ -81,21 +80,47 @@ describe('template field helpers', () => {
     expect(isProjectListArray([])).toBe(true)
     expect(isProjectListArray(['开发', '评审'])).toBe(false)
     expect(
-      isProjectListArray([{ project: '个人日报系统', content: '完成导出', status: 'DONE' }])
+      isProjectListArray([
+        {
+          project: '个人日报系统',
+          content: '完成导出',
+          planned_completion_date: '',
+          actual_completion_date: '',
+          owner: '',
+          assistant: '',
+          required_resources: '',
+          completion_notes: ''
+        }
+      ])
     ).toBe(true)
   })
 
-  it('labels project task statuses and formats entries for read-only display', () => {
-    expect(projectTaskStatusLabel('TODO')).toBe('未开始')
-    expect(projectTaskStatusLabel('DOING')).toBe('进行中')
-    expect(projectTaskStatusLabel('DONE')).toBe('已完成')
-
+  it('formats project-list entries for read-only display, omitting blank optional fields', () => {
     const entries = [
-      { project: '个人日报系统', content: '完成Excel导出功能', status: 'DONE' as const },
-      { project: '能源管理平台', content: '设计设备接口', status: 'DOING' as const }
+      {
+        project: '个人日报系统',
+        content: '完成Excel导出功能',
+        planned_completion_date: '',
+        actual_completion_date: '',
+        owner: '',
+        assistant: '',
+        required_resources: '',
+        completion_notes: ''
+      },
+      {
+        project: '能源管理平台',
+        content: '设计设备接口',
+        planned_completion_date: '2026-08-20',
+        actual_completion_date: '',
+        owner: '张三',
+        assistant: '李四',
+        required_resources: '',
+        completion_notes: ''
+      }
     ]
     expect(formatProjectListEntries(entries)).toBe(
-      '个人日报系统：完成Excel导出功能（已完成）；能源管理平台：设计设备接口（进行中）'
+      '个人日报系统：完成Excel导出功能；' +
+        '能源管理平台：设计设备接口，预计完成：2026-08-20，责任人：张三，协助人：李四'
     )
   })
 })

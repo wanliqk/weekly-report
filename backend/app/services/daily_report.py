@@ -21,8 +21,16 @@ from app.services.template import TemplateService, parse_template_fields
 _CONTENT_ADAPTER: TypeAdapter[DailyContent] = TypeAdapter(DailyContent)
 _MAX_CREATE_ATTEMPTS = 3
 _REVOCATION_ACTION = "daily_submission_revoked"
-_PROJECT_LIST_STATUSES = {"TODO", "DOING", "DONE"}
-_PROJECT_LIST_KEYS = {"project", "content", "status"}
+_PROJECT_LIST_REQUIRED_KEYS = {"project", "content"}
+_PROJECT_LIST_OPTIONAL_KEYS = {
+    "planned_completion_date",
+    "actual_completion_date",
+    "owner",
+    "assistant",
+    "required_resources",
+    "completion_notes",
+}
+_PROJECT_LIST_ALL_KEYS = _PROJECT_LIST_REQUIRED_KEYS | _PROJECT_LIST_OPTIONAL_KEYS
 
 
 class DailyReportNotFoundError(AppError):
@@ -107,23 +115,31 @@ def _project_list_error(value: object) -> str | None:
     `submit()` re-validates content re-read via `parse_daily_content()`,
     which has already coerced matching list items into `ProjectListEntry`
     model instances (see `DailyFieldValue`'s `list[ProjectListEntry]`
-    branch) — so both forms must be accepted here.
+    branch) — so both forms must be accepted here. Only `project`/`content`
+    (工作项目/工作步骤) are required; the six PROD-028 tracking fields may be
+    omitted entirely (dict shape) or left at their `""` default (model
+    shape) — an unknown key is still rejected either way.
     """
     if not isinstance(value, list):
         return "必须是项目列表"
     for item in value:
         if isinstance(item, ProjectListEntry):
-            project, content, status = item.project, item.content, item.status
-        elif isinstance(item, dict) and item.keys() == _PROJECT_LIST_KEYS:
-            project, content, status = item["project"], item["content"], item["status"]
+            values: dict[str, object] = item.model_dump()
+        elif (
+            isinstance(item, dict)
+            and _PROJECT_LIST_REQUIRED_KEYS <= item.keys() <= _PROJECT_LIST_ALL_KEYS
+        ):
+            values = item
         else:
             return "项目条目字段不完整或包含未知字段"
+        project, content = values.get("project"), values.get("content")
         if not isinstance(project, str) or not project.strip():
-            return "项目名称不能为空"
+            return "工作项目不能为空"
         if not isinstance(content, str) or not content.strip():
-            return "工作内容不能为空"
-        if status not in _PROJECT_LIST_STATUSES:
-            return "完成状态无效"
+            return "工作步骤不能为空"
+        for key in _PROJECT_LIST_OPTIONAL_KEYS:
+            if key in values and not isinstance(values[key], str):
+                return "项目条目字段不完整或包含未知字段"
     return None
 
 

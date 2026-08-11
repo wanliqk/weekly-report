@@ -36,7 +36,6 @@ EXPORT_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml
 _SHEET_TITLE = "日报导出"
 _MULTISELECT_SEPARATOR = "、"
 _DATE_HEADER = "日期"
-_OWNER_HEADER = "责任人"
 
 
 class ExportSelectionInvalidError(AppError):
@@ -124,8 +123,26 @@ def _defuse_formula(text: str) -> str:
     return f"'{text}" if text.startswith("=") else text
 
 
-_PROJECT_LIST_SUB_HEADERS = ["项目", "工作内容", "进度"]
-_PROJECT_TASK_STATUS_LABELS = {"TODO": "未开始", "DOING": "进行中", "DONE": "已完成"}
+_PROJECT_LIST_FIELD_ORDER = (
+    "project",
+    "content",
+    "planned_completion_date",
+    "actual_completion_date",
+    "owner",
+    "assistant",
+    "required_resources",
+    "completion_notes",
+)
+_PROJECT_LIST_SUB_HEADERS = [
+    "工作项目",
+    "工作步骤",
+    "预计完成时间节点",
+    "实际完成时间",
+    "责任人",
+    "协助人",
+    "所需资源支持",
+    "实际完成情况及解决措施",
+]
 
 
 def _single_source_cell(value: object) -> str | int | float | None:
@@ -171,57 +188,47 @@ def _project_list_entries(value: object) -> list[ProjectListEntry]:
 @dataclass(frozen=True)
 class _ColumnLayout:
     headers: list[str]
-    owner_column: int
-    """1-based column index of 责任人 — the last column, after every
-
-    template field (`ai-docs/decisions.md` PROD-026): only 日期 stays fixed
-    as the first column."""
     day_level_columns: list[int]
     """1-based column indices that hold one value per day (vertically merged
     across a day's rows when it has more than one `PROJECT_LIST` entry)."""
     regular_column_index: dict[str, int]
     """`field_key` -> 1-based column index, for every non-`PROJECT_LIST` field."""
-    project_list_column_ranges: dict[str, tuple[int, int, int]]
-    """`field_key` -> 1-based (project, content, progress) column indices,
+    project_list_start_column: dict[str, int]
+    """`field_key` -> 1-based column index of the first of its
 
-    for every `PROJECT_LIST` field."""
+    `len(_PROJECT_LIST_SUB_HEADERS)` sub-columns, for every `PROJECT_LIST`
+    field."""
 
 
 def _plan_column_layout(columns: list[ExportColumn]) -> _ColumnLayout:
     headers = [_DATE_HEADER]
     day_level_columns = [1]
     regular_column_index: dict[str, int] = {}
-    project_list_column_ranges: dict[str, tuple[int, int, int]] = {}
+    project_list_start_column: dict[str, int] = {}
     for column in columns:
         if column.field_type == "PROJECT_LIST":
             start = len(headers) + 1
             headers.extend(_PROJECT_LIST_SUB_HEADERS)
-            project_list_column_ranges[column.field_key] = (start, start + 1, start + 2)
+            project_list_start_column[column.field_key] = start
         else:
             index = len(headers) + 1
             headers.append(column.header)
             day_level_columns.append(index)
             regular_column_index[column.field_key] = index
-    owner_column = len(headers) + 1
-    headers.append(_OWNER_HEADER)
-    day_level_columns.append(owner_column)
     return _ColumnLayout(
         headers=headers,
-        owner_column=owner_column,
         day_level_columns=day_level_columns,
         regular_column_index=regular_column_index,
-        project_list_column_ranges=project_list_column_ranges,
+        project_list_start_column=project_list_start_column,
     )
 
 
-def build_export_workbook(
-    days: list[DailyReportDay], columns: list[ExportColumn], *, owner_username: str
-) -> bytes:
+def build_export_workbook(days: list[DailyReportDay], columns: list[ExportColumn]) -> bytes:
     """Pure, blocking xlsx builder — callers must run it off the event loop.
 
     Each day is one or more rows: exactly one `PROJECT_LIST` entry per row,
-    at least one row even with zero entries. Day-level values (日期/责任人
-    and every non-`PROJECT_LIST` field) are written once on the day's first
+    at least one row even with zero entries. Day-level values (日期 and
+    every non-`PROJECT_LIST` field) are written once on the day's first
     row and vertically merged across the rest so they are never repeated.
     """
     workbook = Workbook()
@@ -262,19 +269,15 @@ def build_export_workbook(
             row: list[str | int | float | None] = [None] * len(layout.headers)
             if offset == 0:
                 row[0] = day.work_date.isoformat()
-                row[layout.owner_column - 1] = owner_username
                 for field_key, index in layout.regular_column_index.items():
                     row[index - 1] = regular_values[field_key]
             for field_key, items in project_rows.items():
                 if offset >= len(items):
                     continue
                 item = items[offset]
-                project_col, content_col, progress_col = layout.project_list_column_ranges[
-                    field_key
-                ]
-                row[project_col - 1] = _defuse_formula(item.project)
-                row[content_col - 1] = _defuse_formula(item.content)
-                row[progress_col - 1] = _PROJECT_TASK_STATUS_LABELS[item.status]
+                start = layout.project_list_start_column[field_key]
+                for sub_offset, attr in enumerate(_PROJECT_LIST_FIELD_ORDER):
+                    row[start - 1 + sub_offset] = _defuse_formula(getattr(item, attr))
             sheet.append(row)
         last_row = sheet.max_row
         if row_count > 1:
@@ -366,9 +369,7 @@ class ExportService:
 
         file_path = self._settings.export_temp_dir / f"{job.id}.xlsx"
         try:
-            file_bytes = await asyncio.to_thread(
-                build_export_workbook, days, columns, owner_username=user.username
-            )
+            file_bytes = await asyncio.to_thread(build_export_workbook, days, columns)
             await asyncio.to_thread(file_path.write_bytes, file_bytes)
         except Exception:
             logger.exception("export file generation failed")
