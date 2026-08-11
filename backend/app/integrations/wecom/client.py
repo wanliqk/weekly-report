@@ -785,7 +785,15 @@ class WeComInternalClient:
             raise WeComProtocolChanged("响应缺少 body 节点")
 
         template_id = body.get("template_id")
-        entrys = body.get("entrys")
+        # `entrys` lists this user's *existing* submissions to this form
+        # (`WeComTemplateEntry`'s own docstring). A form this user has never
+        # submitted to before has nothing to list, and real traffic confirms
+        # WeCom then omits the key entirely rather than sending `[]` — that
+        # must not be treated as a protocol violation (a brand-new connect
+        # is exactly the case `template_info.appro` exists to cover; see
+        # `ai-docs/issues.md` `ISS-055`). A present-but-wrong-shaped value is
+        # still a real protocol violation and continues to be rejected below.
+        entrys = body.get("entrys", [])
         form = body.get("form")
         if not isinstance(form, dict):
             # The live 2026-08 WeCom response moved the same form object from

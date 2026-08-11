@@ -262,6 +262,43 @@ async def test_get_template_info_skips_malformed_appro_entries_without_failing()
     assert [(a.vid, a.name) for a in result.appro] == [("9000000000000091", "SYNTHETIC-APPROVER-A")]
 
 
+async def test_get_template_info_tolerates_a_missing_entrys_key() -> None:
+    """`ai-docs/issues.md` `ISS-055`: a form this user has never submitted to
+    has nothing to list, and real traffic confirms WeCom then omits the
+    `entrys` key entirely rather than sending `[]` — connecting must still
+    succeed (with `entries == []`), not be treated as a protocol violation."""
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+    del fixture["body"]["entrys"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+    assert result.entries == []
+    assert result.template_id == "SYNTHETIC-TEMPLATE-0000000000000001"
+    assert result.form_id == "SYNTHETIC-FORM-0000000000000000000fork"
+
+
+async def test_get_template_info_still_rejects_an_entrys_key_of_the_wrong_type() -> None:
+    fixture = _load_json_fixture("get_template_combine_info_response.json")
+    fixture["body"]["entrys"] = "SYNTHETIC-NOT-A-LIST"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(200, fixture)
+
+    client = WeComInternalClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(WeComProtocolChanged):
+            await client.get_template_info(_valid_cookie_jar(), "SYNTHETIC-FORM-x")
+    finally:
+        await client.aclose()
+
+
 async def test_get_form_detail_success() -> None:
     fixture = _load_json_fixture("formcol_detail_response.json")
 
