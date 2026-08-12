@@ -698,3 +698,9 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - `emptyProjectListEntry(defaultOwner)`/`isBlankProjectListEntry(entry, defaultOwner)` 保持纯函数和显式参数注入。空行判断改为比较整套默认值，兼容当前工作树已有的类别“重要”、预计/实际完成时间“当日”、完成情况“已完成”和当前责任人；任一字段被用户修改后条目都会保留并接受必填校验。
 - 已保存条目直接克隆原值，不覆盖 owner；后端 Pydantic 对历史缺失 owner 仍补空字符串，不会把当前查看者误记为历史责任人。现有“当日/已完成”后端结构默认值同步补齐 API、导出测试和文档。
 - 验证：前端 lint、typecheck、Vitest（27 文件 265 项）和生产 build 通过；后端 Ruff check、变更文件 format check、mypy（150 个源文件）、完整 pytest（505 项）通过；`git diff --check` 通过。正式自审结论为 `Approved`，无未解决严重问题、建议修改或可选优化项。
+
+## 34. Excel 单元格使用黑色边框（PROD-034）
+
+- `export_style.py` 的共享单元格边框颜色由灰色 `FFBFBFBF` 改为黑色 `FF000000`；表头和数据区域继续统一应用四边 `thin` 边框，标题行仍不设置边框。
+- 在既有导出用例中新增样式回归断言，分别锁定标题四边无样式、表头和数据单元格四边为 `thin`/`FF000000`。
+- 验证：定向 pytest 通过；变更 Python 文件 Ruff check 通过。

@@ -33,7 +33,7 @@ _BODY_ALIGNMENT = Alignment(horizontal="left", vertical="center", wrap_text=True
 _BODY_ROW_MIN_HEIGHT = 20.0
 _BODY_ROW_LINE_HEIGHT = 15.0
 
-_BORDER_COLOR = "FFBFBFBF"
+_BORDER_COLOR = "FF000000"
 _CELL_BORDER = Border(
     left=Side(style="thin", color=_BORDER_COLOR),
     right=Side(style="thin", color=_BORDER_COLOR),

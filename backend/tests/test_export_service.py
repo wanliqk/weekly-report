@@ -229,6 +229,23 @@ async def test_create_from_ids_merges_columns_across_snapshots_and_marks_succeed
     assert rows[3][0] == "2026-08-04"
     assert rows[3][1:] == ("评审代码", "发布", "无")
 
+    title_border = sheet["A1"].border
+    assert all(
+        side.style is None
+        for side in (
+            title_border.left,
+            title_border.right,
+            title_border.top,
+            title_border.bottom,
+        )
+    )
+    for coordinate in ("A2", "A3"):
+        border = sheet[coordinate].border
+        for side in (border.left, border.right, border.top, border.bottom):
+            assert side.style == "thin"
+            assert side.color is not None
+            assert side.color.rgb == "FF000000"
+
 
 async def test_create_merges_multiple_source_entries_for_one_day_into_numbered_lines(
     export_engine: AsyncEngine, export_settings: Settings
