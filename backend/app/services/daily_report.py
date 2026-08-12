@@ -23,6 +23,8 @@ _MAX_CREATE_ATTEMPTS = 3
 _REVOCATION_ACTION = "daily_submission_revoked"
 _PROJECT_LIST_REQUIRED_KEYS = {"project", "content"}
 _PROJECT_LIST_OPTIONAL_KEYS = {
+    "category",
+    "weight",
     "planned_completion_date",
     "actual_completion_date",
     "owner",
@@ -116,9 +118,10 @@ def _project_list_error(value: object) -> str | None:
     which has already coerced matching list items into `ProjectListEntry`
     model instances (see `DailyFieldValue`'s `list[ProjectListEntry]`
     branch) — so both forms must be accepted here. Only `project`/`content`
-    (工作项目/工作步骤) are required; the six PROD-028 tracking fields may be
+    (工作项目/工作步骤) are required; the eight tracking fields may be
     omitted entirely (dict shape) or left at their `""` default (model
-    shape) — an unknown key is still rejected either way.
+    shape), except `category`, whose model default is `"重要"`. An unknown
+    key is still rejected either way.
     """
     if not isinstance(value, list):
         return "必须是项目列表"

@@ -11,14 +11,15 @@ DailyStatus = Literal["draft", "submitted", "archived"]
 class ProjectListEntry(BaseModel):
     """One row of a `PROJECT_LIST` field (`ai-docs/decisions.md` PROD-022,
 
-    reshaped by PROD-028). `project`/`content` (工作项目/工作步骤) are the
-    only required fields, matching the pre-PROD-028 shape; the other six
-    are free-text tracking details a user may still be filling in and
-    therefore default to `""` rather than being required.
+    reshaped by PROD-028 and PROD-030). `project`/`content`
+    (工作项目/工作步骤) are the only required fields. `category` defaults
+    to `"重要"`; the other seven tracking fields default to `""`.
     """
 
+    category: str = "重要"
     project: str
     content: str
+    weight: str = ""
     planned_completion_date: str = ""
     actual_completion_date: str = ""
     owner: str = ""

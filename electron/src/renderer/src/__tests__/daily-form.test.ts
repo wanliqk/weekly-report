@@ -14,8 +14,10 @@ import {
 } from '@renderer/utils/daily-form'
 
 const blankProjectRow = {
+  category: '重要',
   project: '',
   content: '',
+  weight: '',
   planned_completion_date: '',
   actual_completion_date: '',
   owner: '',
@@ -80,8 +82,10 @@ describe('daily form helpers', () => {
     const originalTags = ['A']
     const originalProjects = [
       {
+        category: '重要',
         project: '个人日报系统',
         content: '完成导出',
+        weight: '',
         planned_completion_date: '',
         actual_completion_date: '',
         owner: '',
@@ -126,13 +130,23 @@ describe('daily form helpers', () => {
     const sanitized = sanitizeDailyContent(fields, {
       'text-key': '完成接口',
       'multi-key': ['A'],
-      'project-key': [blankProjectRow, filledRow, { ...blankProjectRow, project: '  ' }]
+      'project-key': [
+        blankProjectRow,
+        filledRow,
+        { ...blankProjectRow, project: '  ' },
+        { ...blankProjectRow, category: '一般' },
+        { ...blankProjectRow, weight: '30%' }
+      ]
     })
 
     expect(sanitized).toEqual({
       'text-key': '完成接口',
       'multi-key': ['A'],
-      'project-key': [filledRow]
+      'project-key': [
+        filledRow,
+        { ...blankProjectRow, category: '一般' },
+        { ...blankProjectRow, weight: '30%' }
+      ]
     })
   })
 
@@ -167,8 +181,10 @@ describe('daily form helpers', () => {
     expect(
       formatDailyFieldValue([
         {
+          category: '重要',
           project: '个人日报系统',
           content: '完成Excel导出功能',
+          weight: '',
           planned_completion_date: '',
           actual_completion_date: '',
           owner: '',
@@ -177,6 +193,6 @@ describe('daily form helpers', () => {
           completion_notes: ''
         }
       ])
-    ).toBe('个人日报系统：完成Excel导出功能')
+    ).toBe('类别：重要，个人日报系统：完成Excel导出功能')
   })
 })

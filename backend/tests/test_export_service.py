@@ -373,11 +373,10 @@ def _project_list_and_plan_fields(
 ) -> list[dict[str, object]]:
     """A `PROJECT_LIST` field followed by a plain field, matching the
 
-    `日期/工作项目/工作步骤/预计完成时间节点/实际完成时间/责任人/协助人/
-    所需资源支持/实际完成情况及解决措施/明日工作计划` column order from
-    `ai-docs/decisions.md` PROD-024's worked example, reshaped to 8
-    `PROJECT_LIST` sub-columns by PROD-028 (`责任人` removed as a base
-    column by PROD-027).
+    `日期/类别/工作项目/工作步骤/权重/预计完成时间节点/实际完成时间/责任人/
+    协助人/所需资源支持/实际完成情况及解决措施/明日工作计划` column order.
+    PROD-030 expands `PROJECT_LIST` to 10 sub-columns (`责任人` remains a
+    project-level value; the old base owner column was removed by PROD-027).
     """
     return [
         _project_list_field(project_key, "今日工作"),
@@ -404,7 +403,7 @@ async def test_create_merges_day_level_columns_across_several_project_rows(
 ) -> None:
     """`ai-docs/decisions.md` PROD-024: a `PROJECT_LIST` field stays inline in
 
-    the main table (not a separate block) as its 8 sub-columns (PROD-028)
+    the main table (not a separate block) as its 10 sub-columns (PROD-030)
     at its own sort position; every other field (`日期`/plain fields such as
     `明日工作计划`) is written once and vertically merged across the day's
     project rows so it is never repeated.
@@ -436,8 +435,10 @@ async def test_create_merges_day_level_columns_across_several_project_rows(
     assert sheet is not None
     assert _row_values(sheet, 2) == [
         "日期",
+        "类别",
         "工作项目",
         "工作步骤",
+        "权重",
         "预计完成时间节点",
         "实际完成时间",
         "责任人",
@@ -448,8 +449,10 @@ async def test_create_merges_day_level_columns_across_several_project_rows(
     ]
     assert _row_values(sheet, 3) == [
         "2026-08-03",
+        "重要",
         "测试项目1",
         "测试测试",
+        None,
         None,
         None,
         None,
@@ -460,8 +463,10 @@ async def test_create_merges_day_level_columns_across_several_project_rows(
     ]
     assert _row_values(sheet, 4) == [
         None,
+        "重要",
         "测试项目2",
         "测试测试",
+        None,
         None,
         None,
         None,
@@ -474,10 +479,10 @@ async def test_create_merges_day_level_columns_across_several_project_rows(
 
     merges = _merge_ranges(sheet)
     assert "A3:A4" in merges  # 日期
-    assert "J3:J4" in merges  # 明日工作计划
-    # PROJECT_LIST 的 8 个子列各自随条目变化 必须都不合并。
+    assert "L3:L4" in merges  # 明日工作计划
+    # PROJECT_LIST 的 10 个子列各自随条目变化 必须都不合并。
     assert not any(
-        cell_range.startswith(("B3", "C3", "D3", "E3", "F3", "G3", "H3", "I3"))
+        cell_range.startswith(("B3", "C3", "D3", "E3", "F3", "G3", "H3", "I3", "J3", "K3"))
         for cell_range in merges
     )
 
@@ -507,8 +512,10 @@ async def test_create_handles_a_single_project_without_merging(
     assert sheet is not None
     assert _row_values(sheet, 3) == [
         "2026-08-03",
+        "重要",
         "测试项目1",
         "测试测试",
+        None,
         None,
         None,
         None,
@@ -518,7 +525,7 @@ async def test_create_handles_a_single_project_without_merging(
     ]
     assert sheet.max_row == 3
     # Only the title-row merge exists; no day-level merge was needed for one row.
-    assert _merge_ranges(sheet) == {"A1:I1"}
+    assert _merge_ranges(sheet) == {"A1:K1"}
 
 
 async def test_create_handles_an_empty_project_list(
@@ -547,9 +554,21 @@ async def test_create_handles_an_empty_project_list(
     workbook = openpyxl.load_workbook(_workbook_path(job))
     sheet = workbook.active
     assert sheet is not None
-    assert _row_values(sheet, 3) == ["2026-08-03", None, None, None, None, None, None, None, None]
+    assert _row_values(sheet, 3) == [
+        "2026-08-03",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
     assert sheet.max_row == 3
-    assert _merge_ranges(sheet) == {"A1:I1"}
+    assert _merge_ranges(sheet) == {"A1:K1"}
 
 
 async def test_create_flattens_project_list_entries_from_every_source_without_reordering(
@@ -589,8 +608,10 @@ async def test_create_flattens_project_list_entries_from_every_source_without_re
     assert sheet is not None
     assert _row_values(sheet, 3) == [
         "2026-08-05",
+        "重要",
         "项目A",
         "上午任务",
+        None,
         None,
         None,
         None,
@@ -600,8 +621,10 @@ async def test_create_flattens_project_list_entries_from_every_source_without_re
     ]
     assert _row_values(sheet, 4) == [
         None,
+        "重要",
         "项目B",
         "下午任务",
+        None,
         None,
         None,
         None,
@@ -619,9 +642,8 @@ async def test_create_defuses_formula_like_project_and_content_cells(
 
     no fixed-enum column left, unlike pre-PROD-028's `进度`), so each is
     independently at risk of Excel formula promotion and must go through
-    `_defuse_formula` on its own; spot-checked here on `project`/`content`
-    (columns 2-3) and `owner` (column 6), the first and last groups in
-    `_PROJECT_LIST_FIELD_ORDER`.
+    `_defuse_formula` on its own; spot-checked here on the two new fields,
+    `project`/`content`, and `owner` across `_PROJECT_LIST_FIELD_ORDER`.
     """
     session_factory = create_session_factory(export_engine)
     async with session_factory() as session:
@@ -634,8 +656,10 @@ async def test_create_defuses_formula_like_project_and_content_cells(
             content={
                 "k1": [
                     {
+                        "category": "=CATEGORY()",
                         "project": '=HYPERLINK("http://evil.example","x")',
                         "content": "=cmd|' /C calc'!A0",
+                        "weight": "=30/100",
                         "owner": "=SUM(A1:A2)",
                     }
                 ]
@@ -652,8 +676,10 @@ async def test_create_defuses_formula_like_project_and_content_cells(
     assert sheet is not None
     assert _row_values(sheet, 3) == [
         "2026-08-05",
+        "'=CATEGORY()",
         '\'=HYPERLINK("http://evil.example","x")',
         "'=cmd|' /C calc'!A0",
+        "'=30/100",
         None,
         None,
         "'=SUM(A1:A2)",
@@ -663,7 +689,9 @@ async def test_create_defuses_formula_like_project_and_content_cells(
     ]
     assert sheet.cell(row=3, column=2).data_type != "f"
     assert sheet.cell(row=3, column=3).data_type != "f"
-    assert sheet.cell(row=3, column=6).data_type != "f"
+    assert sheet.cell(row=3, column=4).data_type != "f"
+    assert sheet.cell(row=3, column=5).data_type != "f"
+    assert sheet.cell(row=3, column=8).data_type != "f"
 
 
 async def test_create_merges_independently_per_day(
@@ -706,8 +734,10 @@ async def test_create_merges_independently_per_day(
     assert sheet is not None
     assert _row_values(sheet, 3) == [
         "2026-08-04",
+        "重要",
         "项目A",
         "内容A",
+        None,
         None,
         None,
         None,
@@ -717,8 +747,10 @@ async def test_create_merges_independently_per_day(
     ]
     assert _row_values(sheet, 4) == [
         "2026-08-05",
+        "重要",
         "项目B1",
         "内容B1",
+        None,
         None,
         None,
         None,
@@ -728,8 +760,10 @@ async def test_create_merges_independently_per_day(
     ]
     assert _row_values(sheet, 5) == [
         None,
+        "重要",
         "项目B2",
         "内容B2",
+        None,
         None,
         None,
         None,

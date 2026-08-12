@@ -292,14 +292,24 @@ def test_project_list_single_item_formats_two_lines() -> None:
     fields = [_field(key, "项目列表", sort_order=10, field_type="PROJECT_LIST")]
     entry = _entry(
         template_snapshot=fields,
-        content={key: [{"project": "报表系统", "content": "完成导出", "owner": "张三"}]},
+        content={
+            key: [
+                {
+                    "category": "重要",
+                    "project": "报表系统",
+                    "content": "完成导出",
+                    "weight": "50%",
+                    "owner": "张三",
+                }
+            ]
+        },
     )
     snapshot = _snapshot([entry])
 
     preview = build_wecom_preview(snapshot, _field_mapping())
 
-    # PROD-028: `owner`/`assistant`/... are internal-only tracking fields —
-    # only `project`/`content` ever reach the WeCom sync text.
+    # PROD-028/PROD-030: `category`/`weight`/`owner`/... are local-only
+    # tracking fields — only `project`/`content` reach the WeCom sync text.
     assert preview.today_work_answer == "项目:报表系统\n工作内容:完成导出"
 
 

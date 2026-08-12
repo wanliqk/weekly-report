@@ -4,12 +4,15 @@ export type DailyStatus = 'draft' | 'submitted' | 'archived'
 
 /**
  * One row of a `PROJECT_LIST` field (`ai-docs/decisions.md` PROD-022,
- * reshaped by PROD-028). `project`/`content` (工作项目/工作步骤) are
- * required; the other six are optional free-text tracking details.
+ * reshaped by PROD-028 and PROD-030). `project`/`content`
+ * (工作项目/工作步骤) are required; the other eight are optional
+ * free-text tracking details. `category` defaults to `重要`.
  */
 export interface ProjectListEntry {
+  category: string
   project: string
   content: string
+  weight: string
   planned_completion_date: string
   actual_completion_date: string
   owner: string

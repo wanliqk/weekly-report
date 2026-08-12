@@ -347,3 +347,7 @@ downgrade 只有在每日期最多一条且周报快照可无损还原时允许�
 - 不新增 Cookie 表。加密 Cookie 文件不属于 SQLite 备份；数据库只持有 `credential_slot`。
 - 无同步历史用户可在删除用户事务中显式清理 profile/binding；有同步记录继续触发 `40910` 业务数据保护。
 - 外部 HTTP 调用不持有数据库事务；状态预留和按 `attempt_token` 完成使用两个短事务。
+
+## 10. PROJECT_LIST JSON 扩展（CR-20260812-01）
+
+本次只扩展 `daily_reports.content_json`、日期归档快照和周报来源内容中的 `PROJECT_LIST` 条目对象，不改变 SQLite 表结构，因此不新增 Alembic 迁移。条目新增 `category`（缺省“重要”）和 `weight`（缺省空字符串）；所有读取路径通过共享 Pydantic 类型补默认值，使旧库、旧归档快照和旧周报 JSON 保持可读。

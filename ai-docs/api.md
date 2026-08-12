@@ -406,3 +406,9 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 ### 14.4 崩溃恢复
 
 `app/__main__.py::main()` 启动时调用 `WeComSyncService.recover_stale_syncing_records()`：任何 `syncing` 超过 5 分钟（`STALE_SYNCING_LEASE_SECONDS`）仍未完成的记录转为 `uncertain`（绝不直接转 `failed`），与 `docs/方案设计.md` §10.3 一致；不区分用户，是启动期维护性清理（同 `cleanup_stale_manual_backups`/`ExportService.cleanup_expired` 的既有模式）。
+
+## 15. PROJECT_LIST 条目契约（CR-20260812-01）
+
+日报 `content` 中 `PROJECT_LIST` 字段的值是条目数组。每个条目按以下顺序包含 10 个字符串字段：`category`、`project`、`content`、`weight`、`planned_completion_date`、`actual_completion_date`、`owner`、`assistant`、`required_resources`、`completion_notes`。
+
+`project`/`content` 是条目必填字段；`category` 缺省时为 `"重要"`，`weight` 及其余跟踪字段缺省时为 `""`。请求中的未知字段或非字符串跟踪字段返回 `42201`；历史持久化 JSON 缺少新增字段时，日报、归档快照和周报响应均在 Pydantic 解析阶段补齐默认值。

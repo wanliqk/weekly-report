@@ -121,24 +121,18 @@ function updateProjectListField(
     <div v-else-if="field.field_type === 'PROJECT_LIST'" class="project-list-field">
       <el-empty v-if="projectListValue.length === 0" description="暂无项目" :image-size="48" />
       <article v-for="(item, index) in projectListValue" :key="index" class="project-list-item">
-        <div class="project-list-item-row">
+        <div class="project-list-item-row project-list-item-row--two">
+          <el-input
+            :model-value="item.category"
+            placeholder="类别"
+            :disabled="disabled"
+            @update:model-value="(value) => updateProjectListField(index, 'category', value)"
+          />
           <el-input
             :model-value="item.project"
             placeholder="工作项目"
             :disabled="disabled"
             @update:model-value="(value) => updateProjectListField(index, 'project', value)"
-          />
-          <el-input
-            :model-value="item.owner"
-            placeholder="责任人"
-            :disabled="disabled"
-            @update:model-value="(value) => updateProjectListField(index, 'owner', value)"
-          />
-          <el-input
-            :model-value="item.assistant"
-            placeholder="协助人"
-            :disabled="disabled"
-            @update:model-value="(value) => updateProjectListField(index, 'assistant', value)"
           />
         </div>
         <el-input
@@ -150,6 +144,12 @@ function updateProjectListField(
           @update:model-value="(value) => updateProjectListField(index, 'content', value)"
         />
         <div class="project-list-item-row">
+          <el-input
+            :model-value="item.weight"
+            placeholder="权重"
+            :disabled="disabled"
+            @update:model-value="(value) => updateProjectListField(index, 'weight', value)"
+          />
           <el-input
             :model-value="item.planned_completion_date"
             placeholder="预计完成时间节点"
@@ -165,6 +165,20 @@ function updateProjectListField(
             @update:model-value="
               (value) => updateProjectListField(index, 'actual_completion_date', value)
             "
+          />
+        </div>
+        <div class="project-list-item-row">
+          <el-input
+            :model-value="item.owner"
+            placeholder="责任人"
+            :disabled="disabled"
+            @update:model-value="(value) => updateProjectListField(index, 'owner', value)"
+          />
+          <el-input
+            :model-value="item.assistant"
+            placeholder="协助人"
+            :disabled="disabled"
+            @update:model-value="(value) => updateProjectListField(index, 'assistant', value)"
           />
           <el-input
             :model-value="item.required_resources"
@@ -220,6 +234,10 @@ function updateProjectListField(
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+}
+
+.project-list-item-row--two {
+  grid-template-columns: repeat(2, 1fr);
 }
 
 .project-list-item-remove {

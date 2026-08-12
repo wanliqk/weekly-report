@@ -242,7 +242,7 @@ def test_project_list_field_round_trips_valid_entries(
 ) -> None:
     """`ai-docs/decisions.md` PROD-028: saved/reloaded `PROJECT_LIST` values
 
-    keep their 8-field shape byte-for-byte, including the six optional
+    keep their 10-field shape byte-for-byte, including the eight optional
     tracking fields left blank on one entry and filled on the other.
     """
     client, headers, _settings = stage5_context
@@ -250,8 +250,10 @@ def test_project_list_field_round_trips_valid_entries(
     report = _create(client, headers)
     entries = [
         {
+            "category": "重要",
             "project": "个人日报系统",
             "content": "完成Excel导出功能",
+            "weight": "",
             "planned_completion_date": "",
             "actual_completion_date": "",
             "owner": "",
@@ -260,8 +262,10 @@ def test_project_list_field_round_trips_valid_entries(
             "completion_notes": "",
         },
         {
+            "category": "一般",
             "project": "能源管理平台",
             "content": "设计设备接口",
+            "weight": "30%",
             "planned_completion_date": "2026-08-20",
             "actual_completion_date": "2026-08-18",
             "owner": "张三",
@@ -277,6 +281,46 @@ def test_project_list_field_round_trips_valid_entries(
     assert _get(client, headers, report["id"])["content"][field_key] == entries
 
 
+def test_project_list_legacy_entries_gain_new_defaults_and_still_submit(
+    stage5_context: tuple[TestClient, dict[str, str], Settings],
+) -> None:
+    """Stored/request payloads from before PROD-030 remain valid.
+
+    Missing `category`/`weight` and the older optional fields are filled by
+    `ProjectListEntry` defaults when content is parsed for responses and
+    submission.
+    """
+    client, headers, _settings = stage5_context
+    field_key = _publish_project_list_field(client, headers, required=True)
+    report = _create(client, headers)
+    content = _default_content(report)
+    content[field_key] = [{"project": "历史项目", "content": "历史步骤"}]
+
+    saved = _save(client, headers, report, content)
+    expected_entry = {
+        "category": "重要",
+        "project": "历史项目",
+        "content": "历史步骤",
+        "weight": "",
+        "planned_completion_date": "",
+        "actual_completion_date": "",
+        "owner": "",
+        "assistant": "",
+        "required_resources": "",
+        "completion_notes": "",
+    }
+    assert saved["content"][field_key] == [expected_entry]
+
+    submitted = client.post(
+        f"/api/v1/daily-reports/{report['id']}/submit",
+        headers=headers,
+        json={"version": saved["version"]},
+    )
+
+    assert submitted.status_code == 200
+    assert submitted.json()["data"]["content"][field_key] == [expected_entry]
+
+
 @pytest.mark.parametrize(
     "entries",
     [
@@ -287,6 +331,8 @@ def test_project_list_field_round_trips_valid_entries(
         [{"content": "内容"}],
         [{"project": "项目", "content": "内容", "status": "DONE"}],
         [{"project": "项目", "content": "内容", "extra": "不该存在"}],
+        [{"project": "项目", "content": "内容", "category": 123}],
+        [{"project": "项目", "content": "内容", "weight": 30}],
         [{"project": "项目", "content": "内容", "owner": 123}],
     ],
 )
@@ -336,8 +382,10 @@ def test_project_list_field_submits_and_archives_with_multiple_entries(
     content = _default_content(report)
     entries = [
         {
+            "category": "重要",
             "project": "个人日报系统",
             "content": "完成Excel导出功能",
+            "weight": "50%",
             "planned_completion_date": "2026-08-06",
             "actual_completion_date": "2026-08-05",
             "owner": "张三",
@@ -346,8 +394,10 @@ def test_project_list_field_submits_and_archives_with_multiple_entries(
             "completion_notes": "已上线",
         },
         {
+            "category": "一般",
             "project": "能源管理平台",
             "content": "设计设备接口",
+            "weight": "",
             "planned_completion_date": "",
             "actual_completion_date": "",
             "owner": "",

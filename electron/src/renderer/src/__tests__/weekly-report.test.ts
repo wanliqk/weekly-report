@@ -82,8 +82,10 @@ describe('formatWeeklyFieldValue', () => {
     expect(
       formatWeeklyFieldValue([
         {
+          category: '重要',
           project: '个人日报系统',
           content: '完成Excel导出功能',
+          weight: '50%',
           planned_completion_date: '',
           actual_completion_date: '',
           owner: '张三',
@@ -92,8 +94,10 @@ describe('formatWeeklyFieldValue', () => {
           completion_notes: ''
         },
         {
+          category: '一般',
           project: '能源管理平台',
           content: '设计设备接口',
+          weight: '',
           planned_completion_date: '',
           actual_completion_date: '',
           owner: '',
@@ -102,6 +106,9 @@ describe('formatWeeklyFieldValue', () => {
           completion_notes: ''
         }
       ])
-    ).toBe('个人日报系统：完成Excel导出功能，责任人：张三；能源管理平台：设计设备接口')
+    ).toBe(
+      '类别：重要，个人日报系统：完成Excel导出功能，权重：50%，责任人：张三；' +
+        '类别：一般，能源管理平台：设计设备接口'
+    )
   })
 })

@@ -92,9 +92,11 @@ describe('template field helpers', () => {
     expect(emptyFieldValue('text')).toBe('')
   })
 
-  it('flags a project-list entry as blank only when every one of its fields is blank', () => {
+  it('treats an untouched default-category project row as blank', () => {
     expect(isBlankProjectListEntry(emptyProjectListEntry())).toBe(true)
     expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), project: '  ' })).toBe(true)
+    expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), category: '一般' })).toBe(false)
+    expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), weight: '30%' })).toBe(false)
     expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), project: '个人日报系统' })).toBe(
       false
     )
@@ -106,8 +108,10 @@ describe('template field helpers', () => {
     expect(
       isProjectListArray([
         {
+          category: '重要',
           project: '个人日报系统',
           content: '完成导出',
+          weight: '',
           planned_completion_date: '',
           actual_completion_date: '',
           owner: '',
@@ -122,8 +126,10 @@ describe('template field helpers', () => {
   it('formats project-list entries for read-only display, omitting blank optional fields', () => {
     const entries = [
       {
+        category: '重要',
         project: '个人日报系统',
         content: '完成Excel导出功能',
+        weight: '',
         planned_completion_date: '',
         actual_completion_date: '',
         owner: '',
@@ -132,8 +138,10 @@ describe('template field helpers', () => {
         completion_notes: ''
       },
       {
+        category: '一般',
         project: '能源管理平台',
         content: '设计设备接口',
+        weight: '30%',
         planned_completion_date: '2026-08-20',
         actual_completion_date: '',
         owner: '张三',
@@ -143,8 +151,8 @@ describe('template field helpers', () => {
       }
     ]
     expect(formatProjectListEntries(entries)).toBe(
-      '个人日报系统：完成Excel导出功能；' +
-        '能源管理平台：设计设备接口，预计完成：2026-08-20，责任人：张三，协助人：李四'
+      '类别：重要，个人日报系统：完成Excel导出功能；' +
+        '类别：一般，能源管理平台：设计设备接口，权重：30%，预计完成：2026-08-20，责任人：张三，协助人：李四'
     )
   })
 })

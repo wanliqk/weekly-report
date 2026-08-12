@@ -14,10 +14,11 @@ export function isProjectListArray(value: unknown[]): value is ProjectListEntry[
   )
 }
 
-// Labels for `ProjectListEntry`'s six optional PROD-028 tracking fields, in
-// the order they should read left-to-right; empty fields are omitted rather
-// than shown as a blank segment.
-const PROJECT_LIST_OPTIONAL_FIELD_LABELS: [keyof ProjectListEntry, string][] = [
+// Optional tracking fields that follow the `project`/`content` pair in the
+// read-only summary. `category` is prepended separately because its column
+// appears before `project`; empty values are omitted.
+const PROJECT_LIST_TRAILING_FIELD_LABELS: [keyof ProjectListEntry, string][] = [
+  ['weight', '权重'],
   ['planned_completion_date', '预计完成'],
   ['actual_completion_date', '实际完成'],
   ['owner', '责任人'],
@@ -32,8 +33,9 @@ export function formatProjectListEntries(entries: ProjectListEntry[]): string {
 
 function formatProjectListEntry(entry: ProjectListEntry): string {
   const segments = [
+    ...(entry.category.trim() === '' ? [] : [`类别：${entry.category}`]),
     `${entry.project}：${entry.content}`,
-    ...PROJECT_LIST_OPTIONAL_FIELD_LABELS.filter(([key]) => entry[key].trim() !== '').map(
+    ...PROJECT_LIST_TRAILING_FIELD_LABELS.filter(([key]) => entry[key].trim() !== '').map(
       ([key, label]) => `${label}：${entry[key]}`
     )
   ]
@@ -139,8 +141,10 @@ export function usesOptions(fieldType: TemplateFieldType): boolean {
 
 export function emptyProjectListEntry(): ProjectListEntry {
   return {
+    category: '重要',
     project: '',
     content: '',
+    weight: '',
     planned_completion_date: '',
     actual_completion_date: '',
     owner: '',
@@ -151,7 +155,10 @@ export function emptyProjectListEntry(): ProjectListEntry {
 }
 
 export function isBlankProjectListEntry(entry: ProjectListEntry): boolean {
-  return Object.values(entry).every((value) => value.trim() === '')
+  return (
+    entry.category.trim() === '重要' &&
+    Object.entries(entry).every(([key, value]) => key === 'category' || value.trim() === '')
+  )
 }
 
 export function emptyFieldValue(fieldType: TemplateFieldType): DailyFieldValue {

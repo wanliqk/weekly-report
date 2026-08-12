@@ -131,8 +131,10 @@ def _defuse_formula(text: str) -> str:
 
 
 _PROJECT_LIST_FIELD_ORDER = (
+    "category",
     "project",
     "content",
+    "weight",
     "planned_completion_date",
     "actual_completion_date",
     "owner",
@@ -141,8 +143,10 @@ _PROJECT_LIST_FIELD_ORDER = (
     "completion_notes",
 )
 _PROJECT_LIST_SUB_HEADERS = [
+    "类别",
     "工作项目",
     "工作步骤",
+    "权重",
     "预计完成时间节点",
     "实际完成时间",
     "责任人",
@@ -324,7 +328,10 @@ def _safe_filename_component(raw: str) -> str:
 
 def _export_file_name(display_name: str, target_date: date) -> str:
     safe_display_name = _safe_filename_component(display_name)
-    return f"日报_{safe_display_name}_{target_date.year}年{target_date.month}月{target_date.day}日.xlsx"
+    return (
+        f"日报_{safe_display_name}_{target_date.year}年"
+        f"{target_date.month}月{target_date.day}日.xlsx"
+    )
 
 
 class ExportService:
