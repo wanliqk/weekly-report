@@ -453,12 +453,12 @@ async def test_create_merges_day_level_columns_across_several_project_rows(
         "测试项目1",
         "测试测试",
         None,
+        "当日",
+        "当日",
         None,
         None,
         None,
-        None,
-        None,
-        None,
+        "已完成",
         "明天计划",
     ]
     assert _row_values(sheet, 4) == [
@@ -467,12 +467,12 @@ async def test_create_merges_day_level_columns_across_several_project_rows(
         "测试项目2",
         "测试测试",
         None,
+        "当日",
+        "当日",
         None,
         None,
         None,
-        None,
-        None,
-        None,
+        "已完成",
         None,
     ]
     assert sheet.max_row == 4
@@ -516,12 +516,12 @@ async def test_create_handles_a_single_project_without_merging(
         "测试项目1",
         "测试测试",
         None,
+        "当日",
+        "当日",
         None,
         None,
         None,
-        None,
-        None,
-        None,
+        "已完成",
     ]
     assert sheet.max_row == 3
     # Only the title-row merge exists; no day-level merge was needed for one row.
@@ -612,12 +612,12 @@ async def test_create_flattens_project_list_entries_from_every_source_without_re
         "项目A",
         "上午任务",
         None,
+        "当日",
+        "当日",
         None,
         None,
         None,
-        None,
-        None,
-        None,
+        "已完成",
     ]
     assert _row_values(sheet, 4) == [
         None,
@@ -625,12 +625,12 @@ async def test_create_flattens_project_list_entries_from_every_source_without_re
         "项目B",
         "下午任务",
         None,
+        "当日",
+        "当日",
         None,
         None,
         None,
-        None,
-        None,
-        None,
+        "已完成",
     ]
     assert "A3:A4" in _merge_ranges(sheet)
 
@@ -680,12 +680,12 @@ async def test_create_defuses_formula_like_project_and_content_cells(
         '\'=HYPERLINK("http://evil.example","x")',
         "'=cmd|' /C calc'!A0",
         "'=30/100",
-        None,
-        None,
+        "当日",
+        "当日",
         "'=SUM(A1:A2)",
         None,
         None,
-        None,
+        "已完成",
     ]
     assert sheet.cell(row=3, column=2).data_type != "f"
     assert sheet.cell(row=3, column=3).data_type != "f"
@@ -738,12 +738,12 @@ async def test_create_merges_independently_per_day(
         "项目A",
         "内容A",
         None,
+        "当日",
+        "当日",
         None,
         None,
         None,
-        None,
-        None,
-        None,
+        "已完成",
     ]
     assert _row_values(sheet, 4) == [
         "2026-08-05",
@@ -751,12 +751,12 @@ async def test_create_merges_independently_per_day(
         "项目B1",
         "内容B1",
         None,
+        "当日",
+        "当日",
         None,
         None,
         None,
-        None,
-        None,
-        None,
+        "已完成",
     ]
     assert _row_values(sheet, 5) == [
         None,
@@ -764,12 +764,12 @@ async def test_create_merges_independently_per_day(
         "项目B2",
         "内容B2",
         None,
+        "当日",
+        "当日",
         None,
         None,
         None,
-        None,
-        None,
-        None,
+        "已完成",
     ]
     assert sheet.max_row == 5
     merges = _merge_ranges(sheet)

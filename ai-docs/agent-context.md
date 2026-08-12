@@ -137,5 +137,5 @@ uv run --directory backend pytest
 ## 9. 最新增量事实（2026-08-12）
 
 - CR-20260812-01 已完成：`PROJECT_LIST` 由 8 个扩为 10 个子列，顺序为类别、工作项目、工作步骤、权重、预计完成时间节点、实际完成时间、责任人、协助人、所需资源支持、实际完成情况及解决措施。
-- `category` 非必填且默认“重要”，`weight` 非必填且默认空；`project`/`content` 仍是唯一必填字段。旧 JSON 依靠 Pydantic 默认值兼容，无数据库迁移。
+- `category` 非必填且默认“重要”，`weight` 非必填且默认空；`project`/`content` 仍是唯一必填字段。Pydantic 结构默认把预计/实际完成时间补为“当日”、完成情况补为“已完成”；renderer 新建行额外把责任人设为当前登录用户 `display_name`，但历史缺失 owner 时仍为空。旧 JSON 依靠 Pydantic 默认值兼容，无数据库迁移。
 - Excel 导出已同步 10 列并保持公式注入防护；企业微信映射仍只输出工作项目和工作步骤，不输出本地跟踪字段。

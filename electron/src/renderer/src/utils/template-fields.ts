@@ -139,25 +139,25 @@ export function usesOptions(fieldType: TemplateFieldType): boolean {
   return fieldType === 'select' || fieldType === 'multiselect'
 }
 
-export function emptyProjectListEntry(): ProjectListEntry {
+export function emptyProjectListEntry(defaultOwner = ''): ProjectListEntry {
   return {
     category: '重要',
     project: '',
     content: '',
     weight: '',
-    planned_completion_date: '',
-    actual_completion_date: '',
-    owner: '',
+    planned_completion_date: '当日',
+    actual_completion_date: '当日',
+    owner: defaultOwner,
     assistant: '',
     required_resources: '',
-    completion_notes: ''
+    completion_notes: '已完成'
   }
 }
 
-export function isBlankProjectListEntry(entry: ProjectListEntry): boolean {
-  return (
-    entry.category.trim() === '重要' &&
-    Object.entries(entry).every(([key, value]) => key === 'category' || value.trim() === '')
+export function isBlankProjectListEntry(entry: ProjectListEntry, defaultOwner = ''): boolean {
+  const defaults = emptyProjectListEntry(defaultOwner)
+  return (Object.keys(defaults) as Array<keyof ProjectListEntry>).every(
+    (key) => entry[key].trim() === defaults[key].trim()
   )
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { ApiError } from '@renderer/api/client'
 import type { TemplateFieldData } from '@renderer/types/template'
+import { emptyProjectListEntry } from '@renderer/utils/template-fields'
 import {
   dailyFieldErrors,
   dailyStatusLabel,
@@ -13,18 +14,8 @@ import {
   todayInShanghai
 } from '@renderer/utils/daily-form'
 
-const blankProjectRow = {
-  category: '重要',
-  project: '',
-  content: '',
-  weight: '',
-  planned_completion_date: '',
-  actual_completion_date: '',
-  owner: '',
-  assistant: '',
-  required_resources: '',
-  completion_notes: ''
-}
+const defaultOwner = '张三'
+const blankProjectRow = emptyProjectListEntry(defaultOwner)
 
 const fields: TemplateFieldData[] = [
   {
@@ -94,12 +85,16 @@ describe('daily form helpers', () => {
         completion_notes: ''
       }
     ]
-    const content = initializeDailyContent(fields, {
-      'text-key': '完成接口',
-      'multi-key': originalTags,
-      'disabled-key': '不可见',
-      'project-key': originalProjects
-    })
+    const content = initializeDailyContent(
+      fields,
+      {
+        'text-key': '完成接口',
+        'multi-key': originalTags,
+        'disabled-key': '不可见',
+        'project-key': originalProjects
+      },
+      defaultOwner
+    )
 
     expect(content).toEqual({
       'text-key': '完成接口',
@@ -112,12 +107,16 @@ describe('daily form helpers', () => {
   })
 
   it('defaults a missing PROJECT_LIST field to a single blank, independently-mutable row', () => {
-    const content = initializeDailyContent(fields, { 'text-key': '完成接口' })
+    const content = initializeDailyContent(fields, { 'text-key': '完成接口' }, defaultOwner)
     expect(content['project-key']).toEqual([blankProjectRow])
   })
 
   it('also defaults a previously-saved empty PROJECT_LIST list to a single blank row', () => {
-    const content = initializeDailyContent(fields, { 'text-key': '完成接口', 'project-key': [] })
+    const content = initializeDailyContent(
+      fields,
+      { 'text-key': '完成接口', 'project-key': [] },
+      defaultOwner
+    )
     expect(content['project-key']).toEqual([blankProjectRow])
   })
 
@@ -127,17 +126,22 @@ describe('daily form helpers', () => {
       project: '个人日报系统',
       content: '完成导出'
     }
-    const sanitized = sanitizeDailyContent(fields, {
-      'text-key': '完成接口',
-      'multi-key': ['A'],
-      'project-key': [
-        blankProjectRow,
-        filledRow,
-        { ...blankProjectRow, project: '  ' },
-        { ...blankProjectRow, category: '一般' },
-        { ...blankProjectRow, weight: '30%' }
-      ]
-    })
+    const sanitized = sanitizeDailyContent(
+      fields,
+      {
+        'text-key': '完成接口',
+        'multi-key': ['A'],
+        'project-key': [
+          blankProjectRow,
+          filledRow,
+          { ...blankProjectRow, project: '  ' },
+          { ...blankProjectRow, category: '一般' },
+          { ...blankProjectRow, weight: '30%' },
+          { ...blankProjectRow, owner: '李四' }
+        ]
+      },
+      defaultOwner
+    )
 
     expect(sanitized).toEqual({
       'text-key': '完成接口',
@@ -145,7 +149,8 @@ describe('daily form helpers', () => {
       'project-key': [
         filledRow,
         { ...blankProjectRow, category: '一般' },
-        { ...blankProjectRow, weight: '30%' }
+        { ...blankProjectRow, weight: '30%' },
+        { ...blankProjectRow, owner: '李四' }
       ]
     })
   })

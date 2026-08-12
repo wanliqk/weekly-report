@@ -411,4 +411,4 @@ BE-10A 后设置只读：`timezone` 固定返回 `Asia/Shanghai`，`PATCH /setti
 
 日报 `content` 中 `PROJECT_LIST` 字段的值是条目数组。每个条目按以下顺序包含 10 个字符串字段：`category`、`project`、`content`、`weight`、`planned_completion_date`、`actual_completion_date`、`owner`、`assistant`、`required_resources`、`completion_notes`。
 
-`project`/`content` 是条目必填字段；`category` 缺省时为 `"重要"`，`weight` 及其余跟踪字段缺省时为 `""`。请求中的未知字段或非字符串跟踪字段返回 `42201`；历史持久化 JSON 缺少新增字段时，日报、归档快照和周报响应均在 Pydantic 解析阶段补齐默认值。
+`project`/`content` 是条目必填字段。Pydantic 结构缺省值为：`category="重要"`、`planned_completion_date="当日"`、`actual_completion_date="当日"`、`completion_notes="已完成"`，其余跟踪字段为 `""`。renderer 新建条目时额外用当前登录用户 `display_name` 填充 `owner`；该值随保存请求持久化，服务端不会根据当前请求用户改写历史 owner。请求中的未知字段或非字符串跟踪字段返回 `42201`；历史持久化 JSON 缺少字段时，日报、归档快照和周报响应均在 Pydantic 解析阶段补齐结构默认值。

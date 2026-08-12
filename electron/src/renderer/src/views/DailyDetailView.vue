@@ -16,6 +16,7 @@ import {
 import { createDailyReportExport, downloadDailyReportExportFile } from '@renderer/api/exports'
 import DynamicFieldInput from '@renderer/components/DynamicFieldInput.vue'
 import WeComSyncDialog from '@renderer/components/wecom/WeComSyncDialog.vue'
+import { useAuthStore } from '@renderer/stores/auth'
 import type { DailyContent, DailyFieldValue, DailyReportData } from '@renderer/types/daily-report'
 import {
   dailyFieldErrors,
@@ -30,6 +31,7 @@ import { invalidExportDayIds } from '@renderer/utils/export'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const loading = ref(true)
 const saving = ref(false)
 const actionRunning = ref(false)
@@ -46,6 +48,7 @@ const workDateFromQuery = computed(() =>
   typeof route.query.work_date === 'string' ? route.query.work_date : todayInShanghai()
 )
 const editable = computed(() => report.value?.status === 'draft')
+const currentUserDisplayName = computed(() => authStore.currentUser?.display_name ?? '')
 const visibleFields = computed(() =>
   [...(report.value?.template_snapshot ?? [])]
     .filter((field) => field.enabled)
@@ -90,7 +93,11 @@ async function load(): Promise<void> {
 
 function assignReport(nextReport: DailyReportData): void {
   report.value = nextReport
-  content.value = initializeDailyContent(nextReport.template_snapshot, nextReport.content)
+  content.value = initializeDailyContent(
+    nextReport.template_snapshot,
+    nextReport.content,
+    currentUserDisplayName.value
+  )
   fieldErrors.value = {}
 }
 
@@ -113,7 +120,7 @@ async function save(showSuccess = true): Promise<boolean> {
     const saved = await saveDailyReport(
       report.value.id,
       report.value.version,
-      sanitizeDailyContent(visibleFields.value, content.value)
+      sanitizeDailyContent(visibleFields.value, content.value, currentUserDisplayName.value)
     )
     assignReport(saved)
     if (showSuccess) {
@@ -324,6 +331,7 @@ function handleOperationError(error: unknown): void {
             :key="field.field_key"
             :field="field"
             :model-value="content[field.field_key] ?? null"
+            :default-owner="currentUserDisplayName"
             :disabled="!editable"
             :error="fieldErrors[field.field_key]"
             @update:model-value="updateField(field.field_key, $event)"

@@ -5,12 +5,18 @@ import type { DailyFieldValue, ProjectListEntry } from '@renderer/types/daily-re
 import type { TemplateFieldData } from '@renderer/types/template'
 import { emptyProjectListEntry, isProjectListArray } from '@renderer/utils/template-fields'
 
-const props = defineProps<{
-  field: TemplateFieldData
-  modelValue: DailyFieldValue
-  disabled?: boolean
-  error?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    field: TemplateFieldData
+    modelValue: DailyFieldValue
+    defaultOwner?: string
+    disabled?: boolean
+    error?: string
+  }>(),
+  {
+    defaultOwner: ''
+  }
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: DailyFieldValue]
@@ -43,7 +49,7 @@ function updateMultiple(value: unknown): void {
 }
 
 function addProjectListItem(): void {
-  emit('update:modelValue', [...projectListValue.value, emptyProjectListEntry()])
+  emit('update:modelValue', [...projectListValue.value, emptyProjectListEntry(props.defaultOwner)])
 }
 
 function removeProjectListItem(index: number): void {

@@ -302,12 +302,12 @@ def test_project_list_legacy_entries_gain_new_defaults_and_still_submit(
         "project": "历史项目",
         "content": "历史步骤",
         "weight": "",
-        "planned_completion_date": "",
-        "actual_completion_date": "",
+        "planned_completion_date": "当日",
+        "actual_completion_date": "当日",
         "owner": "",
         "assistant": "",
         "required_resources": "",
-        "completion_notes": "",
+        "completion_notes": "已完成",
     }
     assert saved["content"][field_key] == [expected_entry]
 

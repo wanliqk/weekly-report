@@ -350,4 +350,4 @@ downgrade 只有在每日期最多一条且周报快照可无损还原时允许�
 
 ## 10. PROJECT_LIST JSON 扩展（CR-20260812-01）
 
-本次只扩展 `daily_reports.content_json`、日期归档快照和周报来源内容中的 `PROJECT_LIST` 条目对象，不改变 SQLite 表结构，因此不新增 Alembic 迁移。条目新增 `category`（缺省“重要”）和 `weight`（缺省空字符串）；所有读取路径通过共享 Pydantic 类型补默认值，使旧库、旧归档快照和旧周报 JSON 保持可读。
+本次只扩展 `daily_reports.content_json`、日期归档快照和周报来源内容中的 `PROJECT_LIST` 条目对象，不改变 SQLite 表结构，因此不新增 Alembic 迁移。共享 Pydantic 类型的结构默认值为：`category` 缺省“重要”，预计/实际完成时间缺省“当日”，`completion_notes` 缺省“已完成”，其余跟踪字段缺省空字符串；renderer 新建行会在保存前把当前用户 `display_name` 写入 `owner`。旧库、旧归档快照和旧周报 JSON 保持可读，历史缺失 owner 时保持空字符串。

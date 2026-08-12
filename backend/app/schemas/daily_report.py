@@ -13,19 +13,21 @@ class ProjectListEntry(BaseModel):
 
     reshaped by PROD-028 and PROD-030). `project`/`content`
     (工作项目/工作步骤) are the only required fields. `category` defaults
-    to `"重要"`; the other seven tracking fields default to `""`.
+    to `"重要"`; both completion dates default to `"当日"`, and
+    `completion_notes` defaults to `"已完成"`. The remaining tracking
+    fields default to `""`.
     """
 
     category: str = "重要"
     project: str
     content: str
     weight: str = ""
-    planned_completion_date: str = ""
-    actual_completion_date: str = ""
+    planned_completion_date: str = "当日"
+    actual_completion_date: str = "当日"
     owner: str = ""
     assistant: str = ""
     required_resources: str = ""
-    completion_notes: str = ""
+    completion_notes: str = "已完成"
 
 
 type DailyFieldValue = str | int | float | list[str] | list[ProjectListEntry] | None

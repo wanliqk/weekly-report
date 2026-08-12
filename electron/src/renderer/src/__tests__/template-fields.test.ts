@@ -92,11 +92,16 @@ describe('template field helpers', () => {
     expect(emptyFieldValue('text')).toBe('')
   })
 
-  it('treats an untouched default-category project row as blank', () => {
+  it('uses the supplied owner and treats the complete untouched default row as blank', () => {
     expect(isBlankProjectListEntry(emptyProjectListEntry())).toBe(true)
+    expect(emptyProjectListEntry('张三').owner).toBe('张三')
+    expect(isBlankProjectListEntry(emptyProjectListEntry('张三'), '张三')).toBe(true)
     expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), project: '  ' })).toBe(true)
     expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), category: '一般' })).toBe(false)
     expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), weight: '30%' })).toBe(false)
+    expect(
+      isBlankProjectListEntry({ ...emptyProjectListEntry('张三'), owner: '李四' }, '张三')
+    ).toBe(false)
     expect(isBlankProjectListEntry({ ...emptyProjectListEntry(), project: '个人日报系统' })).toBe(
       false
     )

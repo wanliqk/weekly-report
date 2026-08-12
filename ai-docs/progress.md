@@ -691,3 +691,10 @@ CR-20260807-01 第二版增量已全部交付完毕（`REQ-10`→`DESIGN-10`→`
 - Excel 导出扩为 10 个项目子列并对新增字段继续执行公式注入防护；企业微信 Mapper 的正式输出保持只含工作项目和工作步骤。
 - 验证：后端 `ruff check`、变更 Python 文件 `ruff format --check`、`mypy`（150 个源文件）、隔离本机 `.env` 后完整 `pytest`（505 项）通过；前端 `lint`、`typecheck`、Vitest（27 文件 265 项）和生产 `build` 通过；`git diff --check` 通过。全仓 `ruff format --check .` 唯一失败仍是未修改的 `backend/app/services/export_style.py`（既有 `ISS-029`）；从 `backend/` 直接运行 pytest 的唯一失败仍是本机 `.env` 空 runtime secret（既有同源环境问题），从仓库根以项目配置运行的 505 项全部通过。
 - dev-workflow 正式自审结论为 `Approved`：未发现新增 P0/P1、建议修改或可选优化项。
+
+## 33. PROJECT_LIST 责任人默认当前登录用户（CR-20260812-02）
+
+- `DailyDetailView` 从 `useAuthStore().currentUser?.display_name` 取得当前用户昵称，并同时传给日报初始化、`DynamicFieldInput` 新增行和保存前 sanitize；因此首次默认项目行和每次点击“添加项目”生成的行，`owner` 都默认当前用户昵称。
+- `emptyProjectListEntry(defaultOwner)`/`isBlankProjectListEntry(entry, defaultOwner)` 保持纯函数和显式参数注入。空行判断改为比较整套默认值，兼容当前工作树已有的类别“重要”、预计/实际完成时间“当日”、完成情况“已完成”和当前责任人；任一字段被用户修改后条目都会保留并接受必填校验。
+- 已保存条目直接克隆原值，不覆盖 owner；后端 Pydantic 对历史缺失 owner 仍补空字符串，不会把当前查看者误记为历史责任人。现有“当日/已完成”后端结构默认值同步补齐 API、导出测试和文档。
+- 验证：前端 lint、typecheck、Vitest（27 文件 265 项）和生产 build 通过；后端 Ruff check、变更文件 format check、mypy（150 个源文件）、完整 pytest（505 项）通过；`git diff --check` 通过。正式自审结论为 `Approved`，无未解决严重问题、建议修改或可选优化项。
